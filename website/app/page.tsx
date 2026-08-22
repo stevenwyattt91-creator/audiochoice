@@ -66,7 +66,7 @@ export default function Home() {
           <a href="#how">How it works</a>
           <a href="#parental-controls">Parental controls</a>
           <a href="#privacy">Privacy</a>
-          <a href="/companion">Companion App</a>
+          <a href="/companion">Transfer to phone</a>
           <a href="/auditor-application">Auditor Application</a>
           <a href="mailto:support@audiochoiceapp.com">Contact</a>
         </div>
