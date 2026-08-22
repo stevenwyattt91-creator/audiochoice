@@ -314,7 +314,10 @@ class ImportViewModel(
                 val audio = inspected.copy(coverBytes = inspected.coverBytes ?: pendingAaxCoverBytes)
                 mutableState.value = mutableState.value.copy(fileName = audio.fileName)
                 update(ImportPhase.FINGERPRINTING, 1)
-                val restrictedBeta = BetaConfig.enabled && !ownerTestingAccess
+                // During this beta pass, allow testers to import any audiobook so we can
+                // validate fingerprinting and catalog discovery beyond the initial allowlist.
+                // The file still follows the normal authenticated private-scan flow.
+                val restrictedBeta = false
                 // The beta catalog request can take a moment. Move the UI to the
                 // lookup phase before making it so a slow network cannot look like
                 // a fingerprinting hang.
