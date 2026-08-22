@@ -1,0 +1,35 @@
+Subject: Welcome to the AudioChoice Android Beta
+
+Welcome, {{FIRST_NAME}}.
+
+Thank you for helping us make audiobook filtering more accurate, dependable, and personal.
+
+INSTALL THE BETA
+1. After this welcome message, watch for a separate email from Firebase App Distribution. That second email contains your private installation invitation.
+2. Open it using {{TESTER_EMAIL}}, the same Google email used for your beta invitation.
+3. Accept the invitation, download AudioChoice, and allow Android to install the beta when prompted.
+4. Future beta updates will arrive through Firebase using the same email.
+
+The Firebase invitation may arrive a few minutes later. Check Spam or Promotions if you do not see it.
+
+WHAT TO TEST
+Please test importing, library behavior, playback, chapters, bookmarks, sleep timer, saved playback position, and general stability. For filters, tell us if a filter starts or ends at the wrong time, misses content, or skips clean content.
+
+AUDIBLE
+On a computer, sign in to Audible, open Library, and choose Download beside a supported title you legitimately own. Transfer the file to Android using USB, Google Drive, or another private method. In AudioChoice, open Import and select the file. AAX conversion happens locally on your device.
+
+LIBRO.FM
+Sign in at https://libro.fm/user/library, select Files beside your book, and choose M4B when available. Transfer it to your phone if needed, then select it from AudioChoice's Import screen.
+
+FEEDBACK
+Use Profile > Submit Feedback in the app, or join Discord: https://discord.gg/Nr5p6Vhes
+Please include the book, chapter, approximate timestamp, and what should have happened.
+
+FOUNDING BETA TESTER BENEFIT
+Active participants receive free access throughout the beta. After launch, qualifying Founding Beta Testers will keep a lifetime subscription rate of $2.99/month instead of the planned regular $5.99/month.
+
+AudioChoice does not provide or distribute audiobook files. Import only legitimate copies you own.
+
+AudioChoice — Listen Your Way
+https://audiochoiceapp.com
+support@audiochoiceapp.com

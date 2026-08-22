@@ -1,0 +1,91 @@
+package com.audiochoice.mobile.auth
+
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.ViewModelProvider
+import androidx.lifecycle.viewModelScope
+import com.audiochoice.mobile.data.AudioChoiceApi
+import com.audiochoice.mobile.data.AuthResponse
+import com.audiochoice.mobile.data.LoginRequest
+import com.audiochoice.mobile.data.RegisterRequest
+import com.audiochoice.mobile.data.SessionStore
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
+
+data class AuthUiState(
+    val loadingSession: Boolean = true,
+    val busy: Boolean = false,
+    val session: AuthResponse? = null,
+    val error: String? = null,
+)
+
+class AuthViewModel(
+    private val api: AudioChoiceApi,
+    private val sessions: SessionStore,
+    private val google: GoogleSignInClient,
+) : ViewModel() {
+    private val mutableState = MutableStateFlow(AuthUiState())
+    val state: StateFlow<AuthUiState> = mutableState.asStateFlow()
+
+    init {
+        viewModelScope.launch {
+            mutableState.value = mutableState.value.copy(
+                loadingSession = false,
+                session = sessions.session.first(),
+            )
+        }
+    }
+
+    fun login(email: String, password: String) = authenticate { api.login(LoginRequest(email.trim(), password)) }
+
+    fun register(name: String, email: String, password: String) = authenticate {
+        require(password.length >= 12) { "Use at least 12 characters for your password." }
+        api.register(RegisterRequest(email.trim(), password, name.trim().ifBlank { null }))
+    }
+
+    fun googleSignIn() = authenticate { api.googleSignIn(google.requestIdToken()) }
+
+    fun dismissError() {
+        mutableState.value = mutableState.value.copy(error = null)
+    }
+
+    fun logout() {
+        val current = mutableState.value.session ?: return
+        viewModelScope.launch {
+            mutableState.value = mutableState.value.copy(busy = true, error = null)
+            runCatching { api.logout(current.accessToken) }
+            sessions.clear()
+            mutableState.value = AuthUiState(loadingSession = false)
+        }
+    }
+
+    private fun authenticate(block: suspend () -> AuthResponse) {
+        if (mutableState.value.busy) return
+        viewModelScope.launch {
+            mutableState.value = mutableState.value.copy(busy = true, error = null)
+            runCatching { block() }
+                .onSuccess {
+                    sessions.save(it)
+                    mutableState.value = AuthUiState(loadingSession = false, session = it)
+                }
+                .onFailure {
+                    mutableState.value = mutableState.value.copy(
+                        busy = false,
+                        error = it.message ?: "AudioChoice could not sign you in.",
+                    )
+                }
+        }
+    }
+
+    class Factory(
+        private val api: AudioChoiceApi,
+        private val sessions: SessionStore,
+        private val google: GoogleSignInClient,
+    ) : ViewModelProvider.Factory {
+        @Suppress("UNCHECKED_CAST")
+        override fun <T : ViewModel> create(modelClass: Class<T>): T =
+            AuthViewModel(api, sessions, google) as T
+    }
+}
