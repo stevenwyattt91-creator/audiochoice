@@ -50,6 +50,9 @@ builder.Services.AddCors(options =>
 {
     options.AddPolicy("AdminPortal", policy => policy
         .WithOrigins(
+            "https://audiochoiceapp.com",
+            "https://www.audiochoiceapp.com",
+            "https://audiochoice-coming-soon.stevenwyattt91.chatgpt.site",
             "https://admin.audiochoiceapp.com",
             "https://auditor.audiochoiceapp.com",
             "https://audiochoice-admin-portal.stevenwyattt91.chatgpt.site",
