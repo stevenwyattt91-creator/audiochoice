@@ -7,6 +7,8 @@ dist/
 .next/
 .wrangler/
 build/
+!website/build/
+!website/build/sites-vite-plugin.ts
 DerivedData/
 *.xcuserstate
 *.p12
@@ -15,4 +17,3 @@ GoogleService-Info.plist
 AuthKey_*.p8
 *.cer
 *.pem
-
