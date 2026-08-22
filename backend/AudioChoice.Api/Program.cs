@@ -53,6 +53,7 @@ builder.Services.AddCors(options =>
             "https://audiochoiceapp.com",
             "https://www.audiochoiceapp.com",
             "https://audiochoice-coming-soon.stevenwyattt91.chatgpt.site",
+            "https://audiochoice.stevenwyattt91.workers.dev",
             "https://admin.audiochoiceapp.com",
             "https://auditor.audiochoiceapp.com",
             "https://audiochoice-admin-portal.stevenwyattt91.chatgpt.site",
