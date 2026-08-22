@@ -315,6 +315,10 @@ class ImportViewModel(
                 mutableState.value = mutableState.value.copy(fileName = audio.fileName)
                 update(ImportPhase.FINGERPRINTING, 1)
                 val restrictedBeta = BetaConfig.enabled && !ownerTestingAccess
+                // The beta catalog request can take a moment. Move the UI to the
+                // lookup phase before making it so a slow network cannot look like
+                // a fingerprinting hang.
+                update(ImportPhase.SEARCHING, 2)
                 val catalogEdition = if (BetaConfig.enabled) {
                     val catalog = api.explore(accessToken)
                     approvedAaxEdition ?: BetaConfig.approvedEdition(audio.fingerprint, catalog)
@@ -330,7 +334,6 @@ class ImportViewModel(
                 val existing = catalogEdition?.let { edition ->
                     api.exploreFilterResult(accessToken, edition.catalogBook.catalogID)
                 } ?: api.findScan(accessToken, audio.fingerprint)
-                update(ImportPhase.SEARCHING, 2)
                 val result = if (catalogEdition != null) {
                     require(
                         existing.status in setOf(CloudScanStatus.AVAILABLE, CloudScanStatus.COMPLETED) &&

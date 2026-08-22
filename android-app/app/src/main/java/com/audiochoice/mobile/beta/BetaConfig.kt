@@ -144,15 +144,32 @@ object BetaConfig {
         val localTitle = normalize(fingerprint.workTitle.orEmpty())
         val titleMatches = localTitle.contains(candidateTitle.substringBefore(" dramatized adaptation")) ||
             candidateTitle.contains(localTitle.substringBefore(" dramatized adaptation"))
-        val authorMatches = normalize(fingerprint.author.orEmpty()).contains("rebecca yarros") &&
-            normalize(candidate.author.orEmpty()).contains("rebecca yarros")
+        val localAuthor = normalize(fingerprint.author.orEmpty())
+        val candidateAuthor = normalize(candidate.author.orEmpty())
+        val isAcotar = candidateTitle.contains("a court of thorns and roses") ||
+            localTitle.contains("a court of thorns and roses")
+        val expectedAuthor = if (isAcotar) "maas" else "yarros"
+        val authorMatches = (localAuthor.isBlank() || localAuthor.contains(expectedAuthor)) &&
+            (candidateAuthor.isBlank() || candidateAuthor.contains(expectedAuthor))
         val candidateIsApproved = candidateTitle.contains("a court of thorns and roses") ||
             candidateTitle.contains("fourth wing") ||
             candidateTitle.contains("iron flame")
-        val editionMatches = normalize(fingerprint.seriesTitle.orEmpty()).contains("empyrean") ||
-            candidateTitle.contains("court of thorns and roses")
+        val candidateEdition = normalize(candidate.editionType.orEmpty())
+        val editionMatches = candidateEdition.contains("dramatized") ||
+            candidateEdition.contains("graphic audio") ||
+            candidateTitle.contains("dramatized adaptation") ||
+            candidateTitle.contains("graphicaudio")
+        val localPart = partNumber(localTitle)
+        val candidatePart = partNumber(candidateTitle)
+        val partMatches = localPart == null || candidatePart == null || localPart == candidatePart
         val runtimeMatches = fingerprint.duration != null && candidate.duration != null &&
             kotlin.math.abs(fingerprint.duration - candidate.duration) <= 900.0
-        return candidateIsApproved && titleMatches && authorMatches && editionMatches && runtimeMatches
+        return candidateIsApproved && titleMatches && authorMatches && editionMatches && partMatches && runtimeMatches
+    }
+
+    private fun partNumber(value: String): Int? = when {
+        Regex("(?:part )?1 of 2").containsMatchIn(value) || value.endsWith("part 1") -> 1
+        Regex("(?:part )?2 of 2").containsMatchIn(value) || value.endsWith("part 2") -> 2
+        else -> null
     }
 }
