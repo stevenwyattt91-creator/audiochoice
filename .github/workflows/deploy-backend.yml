@@ -1,0 +1,108 @@
+name: Deploy AudioChoice backend
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'backend/**'
+      - 'deploy/azure/**'
+      - '.github/workflows/deploy-backend.yml'
+
+permissions:
+  contents: read
+
+env:
+  LOCATION: eastus
+  ENVIRONMENT_NAME: staging
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Azure login
+        uses: azure/login@v2
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Provision staging foundation
+        shell: bash
+        run: |
+          az deployment group create \
+            --name bootstrap \
+            --resource-group "${{ secrets.AZURE_RESOURCE_GROUP }}" \
+            --template-file deploy/azure/bootstrap.bicep \
+            --parameters deploy/azure/bootstrap.parameters.json \
+            --parameters location="$LOCATION" environmentName="$ENVIRONMENT_NAME"
+
+      - name: Read foundation outputs
+        id: foundation
+        shell: bash
+        run: |
+          outputs=$(az deployment group show \
+            --resource-group "${{ secrets.AZURE_RESOURCE_GROUP }}" \
+            --name bootstrap \
+            --query properties.outputs -o json 2>/dev/null || echo '{}')
+          registry=$(az resource list --resource-group "${{ secrets.AZURE_RESOURCE_GROUP }}" --resource-type Microsoft.ContainerRegistry/registries --query '[0].name' -o tsv)
+          vault=$(az resource list --resource-group "${{ secrets.AZURE_RESOURCE_GROUP }}" --resource-type Microsoft.KeyVault/vaults --query '[0].name' -o tsv)
+          echo "registry=$registry" >> "$GITHUB_OUTPUT"
+          echo "vault=$vault" >> "$GITHUB_OUTPUT"
+
+      - name: Create staging database
+        id: database
+        shell: bash
+        env:
+          DB_PASSWORD: ${{ secrets.AZURE_STAGING_DATABASE_PASSWORD }}
+        run: |
+          if [ -z "$DB_PASSWORD" ]; then
+            echo "AZURE_STAGING_DATABASE_PASSWORD must be added before deployment." >&2
+            exit 1
+          fi
+          az deployment group create \
+            --name database \
+            --resource-group "${{ secrets.AZURE_RESOURCE_GROUP }}" \
+            --template-file deploy/azure/database.bicep \
+            --parameters location=westus3 administratorPassword="$DB_PASSWORD"
+          host=$(az deployment group show \
+            --resource-group "${{ secrets.AZURE_RESOURCE_GROUP }}" \
+            --name database \
+            --query properties.outputs.serverHostname.value -o tsv)
+          echo "host=$host" >> "$GITHUB_OUTPUT"
+
+      - name: Build backend image in Azure Container Registry
+        shell: bash
+        run: |
+          az acr build \
+            --registry "${{ steps.foundation.outputs.registry }}" \
+            --image "audiochoice-api:${GITHUB_SHA}" \
+            --file backend/Dockerfile .
+
+      - name: Create runtime secrets in Key Vault
+        shell: bash
+        env:
+          DB_PASSWORD: ${{ secrets.AZURE_STAGING_DATABASE_PASSWORD }}
+        run: |
+          token=$(openssl rand -hex 32)
+          connection="Host=${{ steps.database.outputs.host }};Port=5432;Database=audiochoice;Username=audiochoice_admin;Password=$DB_PASSWORD;SSL Mode=Require"
+          az keyvault secret set --vault-name "${{ steps.foundation.outputs.vault }}" --name staging-api-token --value "$token" >/dev/null
+          az keyvault secret set --vault-name "${{ steps.foundation.outputs.vault }}" --name postgres-connection-string --value "$connection" >/dev/null
+          echo "API_TOKEN=$token" >> "$GITHUB_ENV"
+
+      - name: Deploy API container
+        shell: bash
+        run: |
+          az deployment group create \
+            --resource-group "${{ secrets.AZURE_RESOURCE_GROUP }}" \
+            --template-file deploy/azure/api.bicep \
+            --parameters location="$LOCATION" imageTag="$GITHUB_SHA" googleClientID=''
+
+      - name: Show API endpoint
+        shell: bash
+        run: |
+          az containerapp show \
+            --name audiochoice-stg-api \
+            --resource-group "${{ secrets.AZURE_RESOURCE_GROUP }}" \
+            --query properties.configuration.ingress.fqdn -o tsv

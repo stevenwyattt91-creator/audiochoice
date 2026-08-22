@@ -142,11 +142,6 @@ resource api 'Microsoft.App/containerApps@2024-03-01' = {
           keyVaultUrl: '${vault.properties.vaultUri}secrets/postgres-connection-string'
           identity: pullIdentity.id
         }
-        {
-          name: 'resend-api-key'
-          keyVaultUrl: '${vault.properties.vaultUri}secrets/resend-api-key'
-          identity: pullIdentity.id
-        }
       ]
     }
     template: {
@@ -213,11 +208,7 @@ resource api 'Microsoft.App/containerApps@2024-03-01' = {
             }
             {
               name: 'AudioChoice__TransactionalEmail__Enabled'
-              value: 'true'
-            }
-            {
-              name: 'AudioChoice__TransactionalEmail__ApiKey'
-              secretRef: 'resend-api-key'
+              value: 'false'
             }
             {
               name: 'AudioChoice__TransactionalEmail__FromAddress'

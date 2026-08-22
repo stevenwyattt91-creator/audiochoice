@@ -6,6 +6,7 @@ using System.Threading.RateLimiting;
 using AudioChoice.Api.Contracts;
 using AudioChoice.Api.Processing;
 using AudioChoice.Api.Services;
+using QRCoder;
 #if POSTGRES
 using Npgsql;
 #endif
@@ -588,6 +589,23 @@ app.MapPost("/v1/companion/transfers/{transferID:guid}/complete", async (
     if (!await storage.VerifyUpload(transfer, cancellationToken))
         return Results.BadRequest(new { error = "The uploaded audiobook is missing or has an incorrect byte count." });
     return transfers.MarkUploaded(transferID) ? Results.NoContent() : Results.BadRequest(new { error = "The transfer could not be finalized." });
+});
+
+app.MapGet("/v1/companion/transfers/{transferID:guid}/qr", (
+    Guid transferID,
+    string code,
+    ICompanionTransferStore transfers) =>
+{
+    var transfer = transfers.Find(transferID);
+    var suppliedHash = FileCompanionTransferStore.Hash(code ?? string.Empty);
+    if (transfer is null || transfer.Status != "uploaded" || transfer.ExpiresAt <= DateTimeOffset.UtcNow ||
+        !CryptographicOperations.FixedTimeEquals(System.Text.Encoding.UTF8.GetBytes(transfer.ReceiverCodeHash), System.Text.Encoding.UTF8.GetBytes(suppliedHash)))
+        return Results.NotFound();
+    var receiverURL = $"audiochoice://transfer/{transferID}?code={Uri.EscapeDataString(code ?? string.Empty)}";
+    using var generator = new QRCodeGenerator();
+    using var data = generator.CreateQrCode(receiverURL, QRCodeGenerator.ECCLevel.M);
+    var png = new PngByteQRCode(data).GetGraphic(8);
+    return Results.File(png, "image/png", $"audiochoice-transfer-{transferID:N}.png");
 });
 
 app.MapGet("/v1/companion/transfers/{transferID:guid}/claim", async (
