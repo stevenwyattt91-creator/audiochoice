@@ -1,0 +1,51 @@
+services:
+  whisper:
+    image: audiochoice-whisper:local
+    build:
+      context: ../..
+      dockerfile: deploy/lambda/Dockerfile.whisper
+    restart: unless-stopped
+    network_mode: host
+    volumes:
+      # Persist the model between nightly replacement instances.
+      - /lambda/nfs/audiochoice-worker-state/huggingface-cache:/root/.cache/huggingface
+    environment:
+      WHISPER_MODEL: ${WHISPER_MODEL:-large-v3-turbo}
+      WHISPER_FALLBACK_MODEL: ${WHISPER_FALLBACK_MODEL:-large-v3}
+      WHISPER_DEVICE: cuda
+      WHISPER_COMPUTE_TYPE: float16
+      WHISPER_WORKERS: ${WHISPER_WORKERS:-4}
+      WHISPER_CONCURRENCY_PER_WORKER: ${WHISPER_CONCURRENCY_PER_WORKER:-3}
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+
+  scanner:
+    image: audiochoice-scanner:local
+    build:
+      context: ../..
+      dockerfile: deploy/lambda/Dockerfile
+    restart: unless-stopped
+    network_mode: host
+    env_file:
+      - lambda-worker.env
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+      AudioChoice__OpenAI__WorkerEnabled: "true"
+      AudioChoice__OpenAI__ProcessingLane: ios-beta-lambda
+      AudioChoice__OpenAI__TranscriptionProvider: faster-whisper
+      AudioChoice__OpenAI__FasterWhisperEndpoint: http://127.0.0.1:8001/
+      # Review every transcript window so euphemistic sexual cues are not
+      # excluded before Terra/Sol receive them.
+      # Keep Whisper local, then send only high-recall candidate windows to OpenAI.
+      # Sexual candidates from that pass continue through Terra and Sol.
+      AudioChoice__OpenAI__LocalCandidateFunnelEnabled: "true"
+      AudioChoice__OpenAI__MaximumSceneVerificationRequestsPerJob: "300"
+      AudioChoice__OpenAI__MaximumSceneEscalationRequestsPerJob: "300"
+      # Apply new schema migrations (including chunk progress/title backfill)
+      # before the scanner begins claiming jobs.
+      AudioChoice__Database__ApplyMigrations: "true"

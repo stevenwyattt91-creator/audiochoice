@@ -1,0 +1,123 @@
+using System.Net.Http.Json;
+using System.Text.Json;
+using System.Text.Json.Serialization;
+#if GOOGLEAUTH
+using Google.Apis.Auth;
+#endif
+
+namespace AudioChoice.Api.Services;
+
+public sealed class ExternalAuthOptions
+{
+    public string AppleClientID { get; init; } = string.Empty;
+    public string AppleClientSecret { get; init; } = string.Empty;
+    public string GoogleClientID { get; init; } = string.Empty;
+}
+
+public sealed record VerifiedIdentity(
+    string Provider,
+    string Subject,
+    string Email,
+    bool EmailVerified);
+
+public sealed class ExternalIdentityVerifier(HttpClient client, ExternalAuthOptions options)
+{
+    public async Task<VerifiedIdentity?> Verify(
+        string provider,
+        string authorizationCode,
+        string? identityToken,
+        CancellationToken cancellationToken)
+    {
+        return provider.ToLowerInvariant() switch
+        {
+            "apple" => await VerifyApple(authorizationCode, cancellationToken),
+            "google" => await VerifyGoogle(identityToken, cancellationToken),
+            _ => null
+        };
+    }
+
+    private async Task<VerifiedIdentity?> VerifyApple(string code, CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(options.AppleClientID) ||
+            string.IsNullOrWhiteSpace(options.AppleClientSecret) ||
+            string.IsNullOrWhiteSpace(code)) return null;
+        using var content = new FormUrlEncodedContent(new Dictionary<string, string>
+        {
+            ["client_id"] = options.AppleClientID,
+            ["client_secret"] = options.AppleClientSecret,
+            ["code"] = code,
+            ["grant_type"] = "authorization_code"
+        });
+        using var response = await client.PostAsync("https://appleid.apple.com/auth/token", content, cancellationToken);
+        if (!response.IsSuccessStatusCode) return null;
+        var token = await response.Content.ReadFromJsonAsync<AppleTokenResponse>(cancellationToken: cancellationToken);
+        return ParseAppleIdentity(token?.IdentityToken);
+    }
+
+    private VerifiedIdentity? ParseAppleIdentity(string? token)
+    {
+        try
+        {
+            var payload = token?.Split('.')[1].Replace('-', '+').Replace('_', '/');
+            if (payload is null) return null;
+            payload = payload.PadRight(payload.Length + (4 - payload.Length % 4) % 4, '=');
+            var claims = JsonSerializer.Deserialize<AppleClaims>(Convert.FromBase64String(payload));
+            if (claims is null || claims.Audience != options.AppleClientID || claims.Issuer != "https://appleid.apple.com" || claims.ExpiresAt <= DateTimeOffset.UtcNow.ToUnixTimeSeconds()) return null;
+            return new VerifiedIdentity("apple", claims.Subject, claims.Email ?? string.Empty, false);
+        }
+        catch { return null; }
+    }
+
+    private async Task<VerifiedIdentity?> VerifyGoogle(string? token, CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(options.GoogleClientID) || string.IsNullOrWhiteSpace(token)) return null;
+#if GOOGLEAUTH
+        try
+        {
+            var payload = await GoogleJsonWebSignature.ValidateAsync(
+                token,
+                new GoogleJsonWebSignature.ValidationSettings
+                {
+                    Audience = [options.GoogleClientID]
+                });
+            if (string.IsNullOrWhiteSpace(payload.Subject) ||
+                string.IsNullOrWhiteSpace(payload.Email) ||
+                !payload.EmailVerified)
+            {
+                return null;
+            }
+            return new VerifiedIdentity(
+                "google", payload.Subject, payload.Email, true);
+        }
+        catch (InvalidJwtException)
+        {
+            return null;
+        }
+#else
+        var url = "https://oauth2.googleapis.com/tokeninfo?id_token=" + Uri.EscapeDataString(token);
+        try
+        {
+            var claims = await client.GetFromJsonAsync<GoogleClaims>(url, cancellationToken);
+            if (claims?.Audience != options.GoogleClientID ||
+                string.IsNullOrWhiteSpace(claims.Subject) ||
+                string.IsNullOrWhiteSpace(claims.Email) ||
+                !string.Equals(claims.EmailVerified, "true", StringComparison.OrdinalIgnoreCase)) return null;
+            return new VerifiedIdentity("google", claims.Subject, claims.Email, true);
+        }
+        catch (HttpRequestException) { return null; }
+#endif
+    }
+
+    private sealed record AppleTokenResponse([property: JsonPropertyName("id_token")] string IdentityToken);
+    private sealed record AppleClaims(
+        [property: JsonPropertyName("iss")] string Issuer,
+        [property: JsonPropertyName("aud")] string Audience,
+        [property: JsonPropertyName("sub")] string Subject,
+        [property: JsonPropertyName("email")] string? Email,
+        [property: JsonPropertyName("exp")] long ExpiresAt);
+    private sealed record GoogleClaims(
+        [property: JsonPropertyName("aud")] string Audience,
+        [property: JsonPropertyName("sub")] string Subject,
+        [property: JsonPropertyName("email")] string? Email,
+        [property: JsonPropertyName("email_verified")] string? EmailVerified);
+}

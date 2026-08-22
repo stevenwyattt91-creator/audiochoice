@@ -1,0 +1,327 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+  "contentVersion": "1.0.0.0",
+  "metadata": {
+    "_generator": {
+      "name": "bicep",
+      "version": "0.46.1.21595",
+      "templateHash": "3311453708839665296"
+    }
+  },
+  "parameters": {
+    "location": {
+      "type": "string",
+      "defaultValue": "[resourceGroup().location]",
+      "metadata": {
+        "description": "Azure region used by the existing staging foundation."
+      }
+    },
+    "imageTag": {
+      "type": "string",
+      "defaultValue": "staging-020",
+      "metadata": {
+        "description": "Private image tag already built in the AudioChoice registry."
+      }
+    },
+    "googleClientID": {
+      "type": "string",
+      "defaultValue": "",
+      "metadata": {
+        "description": "Google OAuth web client ID used as the audience for Android ID tokens. Leave empty until configured."
+      }
+    }
+  },
+  "variables": {
+    "suffix": "[take(uniqueString(subscription().subscriptionId, resourceGroup().id), 8)]",
+    "registryName": "[format('audiochoicestg{0}', variables('suffix'))]",
+    "storageName": "[format('audiochoicestg{0}', variables('suffix'))]",
+    "environmentName": "audiochoice-stg-environment",
+    "vaultName": "[format('audiochoice-stg-{0}', variables('suffix'))]",
+    "acrPullRoleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '7f951dda-4ed3-4680-a7ca-43fe172d538d')]",
+    "keyVaultSecretsUserRoleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '4633458b-17de-408a-b874-0445c86b69e6')]",
+    "storageBlobDataContributorRoleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', 'ba92f5b4-2d11-453d-a403-e96b0029c9fe')]"
+  },
+  "resources": [
+    {
+      "type": "Microsoft.Storage/storageAccounts/blobServices/containers",
+      "apiVersion": "2023-05-01",
+      "name": "[format('{0}/{1}/{2}', variables('storageName'), 'default', 'companion-transfers')]",
+      "properties": {
+        "publicAccess": "None"
+      }
+    },
+    {
+      "type": "Microsoft.ManagedIdentity/userAssignedIdentities",
+      "apiVersion": "2023-01-31",
+      "name": "audiochoice-stg-api-identity",
+      "location": "[parameters('location')]"
+    },
+    {
+      "type": "Microsoft.Authorization/roleAssignments",
+      "apiVersion": "2022-04-01",
+      "scope": "[resourceId('Microsoft.ContainerRegistry/registries', variables('registryName'))]",
+      "name": "[guid(resourceId('Microsoft.ContainerRegistry/registries', variables('registryName')), resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', 'audiochoice-stg-api-identity'), variables('acrPullRoleDefinitionId'))]",
+      "properties": {
+        "principalId": "[reference(resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', 'audiochoice-stg-api-identity'), '2023-01-31').principalId]",
+        "principalType": "ServicePrincipal",
+        "roleDefinitionId": "[variables('acrPullRoleDefinitionId')]"
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', 'audiochoice-stg-api-identity')]"
+      ]
+    },
+    {
+      "type": "Microsoft.Authorization/roleAssignments",
+      "apiVersion": "2022-04-01",
+      "scope": "[resourceId('Microsoft.KeyVault/vaults', variables('vaultName'))]",
+      "name": "[guid(resourceId('Microsoft.KeyVault/vaults', variables('vaultName')), resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', 'audiochoice-stg-api-identity'), variables('keyVaultSecretsUserRoleDefinitionId'))]",
+      "properties": {
+        "principalId": "[reference(resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', 'audiochoice-stg-api-identity'), '2023-01-31').principalId]",
+        "principalType": "ServicePrincipal",
+        "roleDefinitionId": "[variables('keyVaultSecretsUserRoleDefinitionId')]"
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', 'audiochoice-stg-api-identity')]"
+      ]
+    },
+    {
+      "type": "Microsoft.Authorization/roleAssignments",
+      "apiVersion": "2022-04-01",
+      "scope": "[resourceId('Microsoft.Storage/storageAccounts', variables('storageName'))]",
+      "name": "[guid(resourceId('Microsoft.Storage/storageAccounts', variables('storageName')), resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', 'audiochoice-stg-api-identity'), variables('storageBlobDataContributorRoleDefinitionId'))]",
+      "properties": {
+        "principalId": "[reference(resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', 'audiochoice-stg-api-identity'), '2023-01-31').principalId]",
+        "principalType": "ServicePrincipal",
+        "roleDefinitionId": "[variables('storageBlobDataContributorRoleDefinitionId')]"
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', 'audiochoice-stg-api-identity')]"
+      ]
+    },
+    {
+      "type": "Microsoft.App/managedEnvironments/storages",
+      "apiVersion": "2024-03-01",
+      "name": "[format('{0}/{1}', variables('environmentName'), 'staging-data')]",
+      "properties": {
+        "azureFile": {
+          "accountKey": "[listKeys(resourceId('Microsoft.Storage/storageAccounts', variables('storageName')), '2023-05-01').keys[0].value]",
+          "accountName": "[variables('storageName')]",
+          "accessMode": "ReadWrite",
+          "shareName": "audiochoice-staging-data"
+        }
+      }
+    },
+    {
+      "type": "Microsoft.App/containerApps",
+      "apiVersion": "2024-03-01",
+      "name": "audiochoice-stg-api",
+      "location": "[parameters('location')]",
+      "identity": {
+        "type": "UserAssigned",
+        "userAssignedIdentities": {
+          "[format('{0}', resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', 'audiochoice-stg-api-identity'))]": {}
+        }
+      },
+      "properties": {
+        "environmentId": "[resourceId('Microsoft.App/managedEnvironments', variables('environmentName'))]",
+        "configuration": {
+          "activeRevisionsMode": "Single",
+          "ingress": {
+            "allowInsecure": false,
+            "external": true,
+            "targetPort": 8080,
+            "transport": "auto"
+          },
+          "registries": [
+            {
+              "identity": "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', 'audiochoice-stg-api-identity')]",
+              "server": "[reference(resourceId('Microsoft.ContainerRegistry/registries', variables('registryName')), '2023-07-01').loginServer]"
+            }
+          ],
+          "secrets": [
+            {
+              "name": "api-token",
+              "keyVaultUrl": "[format('{0}secrets/staging-api-token', reference(resourceId('Microsoft.KeyVault/vaults', variables('vaultName')), '2023-07-01').vaultUri)]",
+              "identity": "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', 'audiochoice-stg-api-identity')]"
+            },
+            {
+              "name": "postgres-connection-string",
+              "keyVaultUrl": "[format('{0}secrets/postgres-connection-string', reference(resourceId('Microsoft.KeyVault/vaults', variables('vaultName')), '2023-07-01').vaultUri)]",
+              "identity": "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', 'audiochoice-stg-api-identity')]"
+            },
+            {
+              "name": "resend-api-key",
+              "keyVaultUrl": "[format('{0}secrets/resend-api-key', reference(resourceId('Microsoft.KeyVault/vaults', variables('vaultName')), '2023-07-01').vaultUri)]",
+              "identity": "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', 'audiochoice-stg-api-identity')]"
+            }
+          ]
+        },
+        "template": {
+          "containers": [
+            {
+              "name": "api",
+              "image": "[format('{0}/audiochoice-api:{1}', reference(resourceId('Microsoft.ContainerRegistry/registries', variables('registryName')), '2023-07-01').loginServer, parameters('imageTag'))]",
+              "env": [
+                {
+                  "name": "ASPNETCORE_FORWARDEDHEADERS_ENABLED",
+                  "value": "true"
+                },
+                {
+                  "name": "AZURE_CLIENT_ID",
+                  "value": "[reference(resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', 'audiochoice-stg-api-identity'), '2023-01-31').clientId]"
+                },
+                {
+                  "name": "AudioChoice__ApiToken",
+                  "secretRef": "api-token"
+                },
+                {
+                  "name": "AudioChoice__DataPath",
+                  "value": "/data"
+                },
+                {
+                  "name": "AudioChoice__Database__Enabled",
+                  "value": "true"
+                },
+                {
+                  "name": "AudioChoice__Database__ApplyMigrations",
+                  "value": "true"
+                },
+                {
+                  "name": "AudioChoice__Database__ConnectionString",
+                  "secretRef": "postgres-connection-string"
+                },
+                {
+                  "name": "AudioChoice__MaximumUploadBytes",
+                  "value": "21474836480"
+                },
+                {
+                  "name": "AudioChoice__TemporaryAudioStorage__BlobEnabled",
+                  "value": "true"
+                },
+                {
+                  "name": "AudioChoice__TemporaryAudioStorage__StorageAccountName",
+                  "value": "[variables('storageName')]"
+                },
+                {
+                  "name": "AudioChoice__TemporaryAudioStorage__ContainerName",
+                  "value": "temporary-audio"
+                },
+                {
+                  "name": "AudioChoice__TemporaryAudioStorage__CompanionTransferContainerName",
+                  "value": "companion-transfers"
+                },
+                {
+                  "name": "AudioChoice__OpenAI__WorkerEnabled",
+                  "value": "false"
+                },
+                {
+                  "name": "AudioChoice__Authentication__GoogleClientID",
+                  "value": "[parameters('googleClientID')]"
+                },
+                {
+                  "name": "AudioChoice__TransactionalEmail__Enabled",
+                  "value": "true"
+                },
+                {
+                  "name": "AudioChoice__TransactionalEmail__ApiKey",
+                  "secretRef": "resend-api-key"
+                },
+                {
+                  "name": "AudioChoice__TransactionalEmail__FromAddress",
+                  "value": "AudioChoice <no-reply@audiochoiceapp.com>"
+                },
+                {
+                  "name": "AudioChoice__TransactionalEmail__ReplyToAddress",
+                  "value": "support@audiochoiceapp.com"
+                },
+                {
+                  "name": "AudioChoice__TransactionalEmail__ActionBaseURL",
+                  "value": "https://audiochoiceapp.com"
+                }
+              ],
+              "probes": [
+                {
+                  "type": "Liveness",
+                  "httpGet": {
+                    "path": "/health",
+                    "port": 8080,
+                    "scheme": "HTTP"
+                  },
+                  "initialDelaySeconds": 10,
+                  "periodSeconds": 30
+                },
+                {
+                  "type": "Readiness",
+                  "httpGet": {
+                    "path": "/health",
+                    "port": 8080,
+                    "scheme": "HTTP"
+                  },
+                  "initialDelaySeconds": 5,
+                  "periodSeconds": 10
+                }
+              ],
+              "resources": {
+                "cpu": "[json('0.5')]",
+                "memory": "1Gi"
+              },
+              "volumeMounts": [
+                {
+                  "mountPath": "/data",
+                  "volumeName": "data"
+                }
+              ]
+            }
+          ],
+          "scale": {
+            "minReplicas": 1,
+            "maxReplicas": 1,
+            "rules": [
+              {
+                "name": "https-requests",
+                "http": {
+                  "metadata": {
+                    "concurrentRequests": "10"
+                  }
+                }
+              }
+            ]
+          },
+          "volumes": [
+            {
+              "name": "data",
+              "storageName": "staging-data",
+              "storageType": "AzureFile"
+            }
+          ]
+        }
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.Storage/storageAccounts/blobServices/containers', variables('storageName'), 'default', 'companion-transfers')]",
+        "[resourceId('Microsoft.App/managedEnvironments/storages', variables('environmentName'), 'staging-data')]",
+        "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', 'audiochoice-stg-api-identity')]",
+        "[extensionResourceId(resourceId('Microsoft.ContainerRegistry/registries', variables('registryName')), 'Microsoft.Authorization/roleAssignments', guid(resourceId('Microsoft.ContainerRegistry/registries', variables('registryName')), resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', 'audiochoice-stg-api-identity'), variables('acrPullRoleDefinitionId')))]",
+        "[extensionResourceId(resourceId('Microsoft.Storage/storageAccounts', variables('storageName')), 'Microsoft.Authorization/roleAssignments', guid(resourceId('Microsoft.Storage/storageAccounts', variables('storageName')), resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', 'audiochoice-stg-api-identity'), variables('storageBlobDataContributorRoleDefinitionId')))]",
+        "[extensionResourceId(resourceId('Microsoft.KeyVault/vaults', variables('vaultName')), 'Microsoft.Authorization/roleAssignments', guid(resourceId('Microsoft.KeyVault/vaults', variables('vaultName')), resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', 'audiochoice-stg-api-identity'), variables('keyVaultSecretsUserRoleDefinitionId')))]"
+      ]
+    }
+  ],
+  "outputs": {
+    "apiHostname": {
+      "type": "string",
+      "value": "[reference(resourceId('Microsoft.App/containerApps', 'audiochoice-stg-api'), '2024-03-01').configuration.ingress.fqdn]"
+    },
+    "apiName": {
+      "type": "string",
+      "value": "audiochoice-stg-api"
+    },
+    "paidWorkerEnabled": {
+      "type": "bool",
+      "value": false
+    },
+    "postgresEnabled": {
+      "type": "bool",
+      "value": true
+    }
+  }
+}

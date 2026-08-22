@@ -1,10 +1,18 @@
 # AudioChoice
 
-Private source repository for AudioChoice website and iOS application.
+Audiobooks. Your way.
 
-## Layout
+## Vision
 
-- `website/` — public AudioChoice website and transfer UI
-- `ios-app/` — iOS/Xcode application
+AudioChoice is a customizable audiobook player that allows users to experience audiobooks the way they want.
 
-Credentials, signing assets, generated builds, and local environment files are intentionally excluded.
+## Current Phase
+
+Phase 1 - Foundation
+
+## Goals
+
+- Build audiobook player
+- Import user-owned audiobook files
+- Create filtering engine
+- Build scan library

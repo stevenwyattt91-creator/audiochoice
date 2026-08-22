@@ -1,0 +1,20 @@
+{
+  "status": "completed",
+  "scanID": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+  "result": {
+    "events": [
+      {
+        "id": "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
+        "startTime": 120.5,
+        "endTime": 126.25,
+        "categoryID": "20000000-0000-0000-0000-000000000001",
+        "groupID": "21000000-0000-0000-0000-000000000001",
+        "eventID": "21100000-0000-0000-0000-000000000001",
+        "confidence": 0.97
+      }
+    ],
+    "scanDate": "2026-08-04T18:00:00Z",
+    "scannerVersion": "1.0"
+  },
+  "taxonomyVersion": "1.0"
+}
