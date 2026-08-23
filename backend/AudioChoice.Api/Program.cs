@@ -346,6 +346,8 @@ app.Use(async (context, next) =>
 
     if (context.Request.Path == "/health" ||
         anonymousAuthenticationPath ||
+        (context.Request.Path.StartsWithSegments("/v1/companion/transfers") &&
+         context.Request.Path.Value?.EndsWith("/qr", StringComparison.OrdinalIgnoreCase) == true) ||
         (context.Request.Method == HttpMethods.Put &&
          context.Request.Path.StartsWithSegments("/v1/uploads")))
     {
