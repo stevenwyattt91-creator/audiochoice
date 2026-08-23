@@ -3,6 +3,14 @@ using AudioChoice.Api.Processing;
 using AudioChoice.Api.Services;
 using Microsoft.Extensions.Logging.Abstractions;
 
+var googleAuth = new ExternalAuthOptions
+{
+    GoogleClientID = "android-web-client, ios-client,android-web-client"
+};
+Assert(
+    googleAuth.GoogleClientIDs.SequenceEqual(["android-web-client", "ios-client"]),
+    "Multiple Google token audiences were not parsed and deduplicated.");
+
 var catalog = new InMemoryScanCatalog();
 var fingerprint = new BookFingerprint(
     1,

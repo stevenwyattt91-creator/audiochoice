@@ -6,7 +6,7 @@ param location string = resourceGroup().location
 @description('Private image tag already built in the AudioChoice registry.')
 param imageTag string = 'staging-020'
 
-@description('Google OAuth web client ID used as the audience for Android ID tokens. Leave empty until configured.')
+@description('Comma-separated Google OAuth client IDs accepted as token audiences (for example Android/web and iOS). Leave empty until configured.')
 param googleClientID string = ''
 
 var suffix = take(uniqueString(subscription().subscriptionId, resourceGroup().id), 8)

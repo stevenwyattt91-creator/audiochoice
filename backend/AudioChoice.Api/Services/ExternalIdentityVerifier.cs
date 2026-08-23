@@ -12,6 +12,11 @@ public sealed class ExternalAuthOptions
     public string AppleClientID { get; init; } = string.Empty;
     public string AppleClientSecret { get; init; } = string.Empty;
     public string GoogleClientID { get; init; } = string.Empty;
+
+    public IReadOnlyList<string> GoogleClientIDs => GoogleClientID
+        .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+        .Distinct(StringComparer.Ordinal)
+        .ToArray();
 }
 
 public sealed record VerifiedIdentity(
@@ -70,7 +75,8 @@ public sealed class ExternalIdentityVerifier(HttpClient client, ExternalAuthOpti
 
     private async Task<VerifiedIdentity?> VerifyGoogle(string? token, CancellationToken cancellationToken)
     {
-        if (string.IsNullOrWhiteSpace(options.GoogleClientID) || string.IsNullOrWhiteSpace(token)) return null;
+        var acceptedAudiences = options.GoogleClientIDs;
+        if (acceptedAudiences.Count == 0 || string.IsNullOrWhiteSpace(token)) return null;
 #if GOOGLEAUTH
         try
         {
@@ -78,7 +84,7 @@ public sealed class ExternalIdentityVerifier(HttpClient client, ExternalAuthOpti
                 token,
                 new GoogleJsonWebSignature.ValidationSettings
                 {
-                    Audience = [options.GoogleClientID]
+                    Audience = acceptedAudiences
                 });
             if (string.IsNullOrWhiteSpace(payload.Subject) ||
                 string.IsNullOrWhiteSpace(payload.Email) ||
@@ -98,7 +104,8 @@ public sealed class ExternalIdentityVerifier(HttpClient client, ExternalAuthOpti
         try
         {
             var claims = await client.GetFromJsonAsync<GoogleClaims>(url, cancellationToken);
-            if (claims?.Audience != options.GoogleClientID ||
+            if (claims is null ||
+                !acceptedAudiences.Contains(claims.Audience, StringComparer.Ordinal) ||
                 string.IsNullOrWhiteSpace(claims.Subject) ||
                 string.IsNullOrWhiteSpace(claims.Email) ||
                 !string.Equals(claims.EmailVerified, "true", StringComparison.OrdinalIgnoreCase)) return null;
