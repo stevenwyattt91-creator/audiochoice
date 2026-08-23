@@ -24,7 +24,7 @@ android {
         applicationId = "com.audiochoice.mobile"
         minSdk = 26
         targetSdk = 37
-        versionCode = 4
+        versionCode = 5
         versionName = "1.0"
 
         ndk {
@@ -54,7 +54,7 @@ android {
             versionNameSuffix = "-beta"
             resValue("string", "app_name", "AudioChoice Beta")
             buildConfigField("boolean", "BETA_BUILD", "true")
-            buildConfigField("String", "BETA_VERSION", "\"1.4\"")
+            buildConfigField("String", "BETA_VERSION", "\"1.5\"")
             buildConfigField("String", "BETA_DISCORD_URL", "\"https://discord.gg/Nr5p6Vhes\"")
             buildConfigField("String", "BETA_FEEDBACK_FORM_URL", "\"REPLACE_WITH_FEEDBACK_FORM_URL\"")
             manifestPlaceholders["companionTransferScheme"] = "audiochoice-beta"
