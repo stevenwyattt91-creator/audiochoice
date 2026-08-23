@@ -1,0 +1,4 @@
+# ninja log v6
+58	6722	8091900989485059	CMakeFiles/audiochoice_aax.dir/aax_remuxer.cpp.o	d0a3423ed53cd3fb
+45	7703	8091900989355059	CMakeFiles/audiochoice_aax.dir/aax_recovery.cpp.o	c373888fbdec5583
+7704	7970	8091901065964448	C:/Users/cheye_aj94fwz/Documents/GitHub/audiochoice/android-app/app/build/intermediates/cxx/RelWithDebInfo/1m55b6y4/obj/x86_64/libaudiochoice_aax.so	30283dce3a3f3472
