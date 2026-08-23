@@ -609,7 +609,10 @@ app.MapGet("/v1/companion/transfers/{transferID:guid}/qr", (
     using var generator = new QRCodeGenerator();
     using var data = generator.CreateQrCode(receiverURL, QRCodeGenerator.ECCLevel.M);
     var png = new PngByteQRCode(data).GetGraphic(8);
-    return Results.File(png, "image/png", $"audiochoice-transfer-{transferID:N}.png");
+    // This endpoint is consumed directly by the website's <img> element.
+    // Do not send a download filename, otherwise some browsers treat the QR
+    // response as an attachment instead of rendering it as an image.
+    return Results.File(png, "image/png");
 });
 
 app.MapGet("/v1/companion/transfers/{transferID:guid}/claim", async (
