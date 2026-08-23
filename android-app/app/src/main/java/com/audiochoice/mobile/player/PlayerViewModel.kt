@@ -7,6 +7,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import androidx.media3.common.MediaItem
+import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
 import com.audiochoice.mobile.BuildConfig
@@ -100,6 +101,21 @@ class PlayerViewModel(
                     // background must retain the exact last listening point.
                     saveProgress()
                 }
+            }
+
+            override fun onPlaybackStateChanged(playbackState: Int) {
+                mutableState.value = mutableState.value.copy(
+                    isReady = playbackState == Player.STATE_READY,
+                    durationMs = player.duration.coerceAtLeast(0),
+                )
+            }
+
+            override fun onPlayerError(error: PlaybackException) {
+                mutableState.value = mutableState.value.copy(
+                    isPlaying = false,
+                    isReady = false,
+                    error = "This audiobook could not be played (${error.errorCodeName}). Re-import it so AudioChoice can save a stable local copy.",
+                )
             }
 
             override fun onPositionDiscontinuity(
@@ -293,7 +309,6 @@ class PlayerViewModel(
             enforceEnabledFilters(resumeMs, allowLookAhead = false)
             mutableState.value = mutableState.value.copy(
                 positionMs = player.currentPosition.coerceAtLeast(0),
-                isReady = true,
             )
         }
     }
@@ -370,7 +385,8 @@ class PlayerViewModel(
     fun openAndStart(book: LibraryBook, accessToken: String, fromBeginning: Boolean) {
         open(book, accessToken)
         viewModelScope.launch {
-            while (isActive && (mutableState.value.book?.id != book.id || !mutableState.value.isReady)) delay(25)
+            while (isActive && mutableState.value.error == null &&
+                (mutableState.value.book?.id != book.id || !mutableState.value.isReady)) delay(25)
             if (mutableState.value.book?.id == book.id && mutableState.value.localUri != null && mutableState.value.isReady) {
                 start(fromBeginning)
             }

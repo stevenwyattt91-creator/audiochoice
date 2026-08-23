@@ -373,9 +373,10 @@ class ImportViewModel(
                 // matched it to a canonical scanned edition, under that edition's
                 // fingerprint too. This supports M4B/M4A/AAX conversions without
                 // losing the local playback link or triggering a needless reimport.
-                localAudio.save(audio.fingerprint.sha256, uri, audio.chapters, audio.coverBytes)
+                val stableUri = preserveForPlayback(uri, resolver, audio.fileName, audio.fingerprint.sha256)
+                localAudio.save(audio.fingerprint.sha256, stableUri, audio.chapters, audio.coverBytes)
                 if (!book.fingerprint.sha256.equals(audio.fingerprint.sha256, ignoreCase = true)) {
-                    localAudio.save(book.fingerprint.sha256, uri, audio.chapters, audio.coverBytes)
+                    localAudio.save(book.fingerprint.sha256, stableUri, audio.chapters, audio.coverBytes)
                 }
                 activeScanStore.complete(audio.fileName)
                 pendingAaxCoverBytes = null
@@ -634,6 +635,10 @@ class ImportViewModel(
         knownCatalogBook: ExploreCatalogBook? = null,
         betaPart: Int? = null,
     ): LibraryBook {
+        val accountBooks = runCatching { api.library(accessToken) }.getOrNull().orEmpty()
+        val exactAccountBook = accountBooks.firstOrNull {
+            it.fingerprint.sha256.equals(audio.fingerprint.sha256, ignoreCase = true)
+        }
         val catalogBooks = runCatching { api.explore(accessToken) }.getOrNull().orEmpty()
         val catalogBook = knownCatalogBook
             ?: catalogBooks.firstOrNull { it.matches(audio.fingerprint.sha256) }
@@ -651,9 +656,8 @@ class ImportViewModel(
         // it is the same edition. When that edition is already in the listener's
         // Library, keep its canonical record and attach this local file to it
         // rather than making a second row.
-        val existingEdition = catalogBook?.let { catalog ->
-            runCatching { api.library(accessToken) }.getOrNull()
-                ?.singleOrNull { book -> book.matchesCatalogEdition(catalog) }
+        val existingEdition = exactAccountBook ?: catalogBook?.let { catalog ->
+            accountBooks.singleOrNull { book -> book.matchesCatalogEdition(catalog) }
         }
         val fingerprint = existingEdition?.fingerprint ?: catalogBook?.let { catalog ->
             audio.fingerprint.copy(
@@ -679,8 +683,8 @@ class ImportViewModel(
             accessToken,
             LibraryBookUpsertRequest(
                 fingerprint = fingerprint,
-                title = catalogBook?.title ?: audio.title,
-                author = catalogBook?.author ?: fingerprint.author,
+                title = exactAccountBook?.title ?: catalogBook?.title ?: audio.title,
+                author = exactAccountBook?.author ?: catalogBook?.author ?: fingerprint.author,
                 coverImageURL = coverImageURL,
                 coverImageBase64 = audio.coverBytes?.let { android.util.Base64.encodeToString(it, android.util.Base64.NO_WRAP) },
                 coverImageContentType = audio.coverBytes?.let(::coverContentType),
@@ -694,6 +698,33 @@ class ImportViewModel(
             }
         }
         return savedBook
+    }
+
+    /** Keeps playback independent of temporary permissions granted by file pickers
+     * and cloud-drive providers. Companion files already live in private storage. */
+    private suspend fun preserveForPlayback(
+        source: Uri,
+        resolver: ContentResolver,
+        fileName: String,
+        sha256: String,
+    ): Uri = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+        if (source.scheme == "file" && source.path?.startsWith(appFilesDirectory.path) == true) {
+            return@withContext source
+        }
+        val extension = fileName.substringAfterLast('.', "audio")
+            .replace(Regex("[^A-Za-z0-9]"), "")
+            .ifBlank { "audio" }
+        val directory = File(appFilesDirectory, "playback_audio").apply { mkdirs() }
+        val destination = File(directory, "${sha256.lowercase()}.$extension")
+        val temporary = File(directory, "${sha256.lowercase()}.partial")
+        resolver.openInputStream(source).use { input ->
+            requireNotNull(input) { "The imported audiobook could not be reopened for playback." }
+            FileOutputStream(temporary, false).use { output -> input.copyTo(output, 1024 * 1024) }
+        }
+        require(temporary.length() > 0) { "The playback copy of this audiobook was empty." }
+        if (destination.exists()) destination.delete()
+        require(temporary.renameTo(destination)) { "AudioChoice could not finish saving the playback copy." }
+        Uri.fromFile(destination)
     }
 
     private fun ExploreCatalogBook.matches(sha256: String): Boolean =
