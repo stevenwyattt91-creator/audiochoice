@@ -1,0 +1,1572 @@
+
+---
+events:
+  -
+    kind: "message-v1"
+    backtrace:
+      - "C:/Users/cheye_aj94fwz/AppData/Local/Android/Sdk/cmake/4.1.2/share/cmake-4.1/Modules/CMakeDetermineSystem.cmake:207 (message)"
+      - "CMakeLists.txt:2 (project)"
+    message: |
+      The target system is: Android - 1 - x86_64
+      The host system is: Windows - 10.0.26200 - AMD64
+  -
+    kind: "find-v1"
+    backtrace:
+      - "C:/Users/cheye_aj94fwz/AppData/Local/Android/Sdk/cmake/4.1.2/share/cmake-4.1/Modules/CMakeDetermineCompilerId.cmake:462 (find_file)"
+      - "C:/Users/cheye_aj94fwz/AppData/Local/Android/Sdk/cmake/4.1.2/share/cmake-4.1/Modules/CMakeDetermineCompilerId.cmake:500 (CMAKE_DETERMINE_COMPILER_ID_WRITE)"
+      - "C:/Users/cheye_aj94fwz/AppData/Local/Android/Sdk/cmake/4.1.2/share/cmake-4.1/Modules/CMakeDetermineCompilerId.cmake:8 (CMAKE_DETERMINE_COMPILER_ID_BUILD)"
+      - "C:/Users/cheye_aj94fwz/AppData/Local/Android/Sdk/cmake/4.1.2/share/cmake-4.1/Modules/CMakeDetermineCompilerId.cmake:64 (__determine_compiler_id_test)"
+      - "C:/Users/cheye_aj94fwz/AppData/Local/Android/Sdk/cmake/4.1.2/share/cmake-4.1/Modules/CMakeDetermineCXXCompiler.cmake:125 (CMAKE_DETERMINE_COMPILER_ID)"
+      - "CMakeLists.txt:2 (project)"
+    mode: "file"
+    variable: "src_in"
+    description: "Path to a file."
+    settings:
+      SearchFramework: "NEVER"
+      SearchAppBundle: "NEVER"
+      CMAKE_FIND_USE_CMAKE_PATH: true
+      CMAKE_FIND_USE_CMAKE_ENVIRONMENT_PATH: true
+      CMAKE_FIND_USE_SYSTEM_ENVIRONMENT_PATH: true
+      CMAKE_FIND_USE_CMAKE_SYSTEM_PATH: true
+      CMAKE_FIND_USE_INSTALL_PREFIX: true
+    names:
+      - "CMakeCXXCompilerId.cpp.in"
+    candidate_directories:
+      - "C:/Users/cheye_aj94fwz/AppData/Local/Android/Sdk/cmake/4.1.2/share/cmake-4.1/Modules/"
+    found: "C:/Users/cheye_aj94fwz/AppData/Local/Android/Sdk/cmake/4.1.2/share/cmake-4.1/Modules/CMakeCXXCompilerId.cpp.in"
+    search_context:
+      CMAKE_PREFIX_PATH:
+        - "C:/Users/cheye_aj94fwz/AppData/Local/Android/Sdk/ndk/30.0.15729638/toolchains/llvm/prebuilt/windows-x86_64"
+      ENV{PATH}:
+        - "C:\\Program Files\\Microsoft SDKs\\Azure\\CLI2\\wbin"
+        - "C:\\Windows\\system32"
+        - "C:\\Windows"
+        - "C:\\Windows\\System32\\Wbem"
+        - "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\"
+        - "C:\\Windows\\System32\\OpenSSH\\"
+        - "C:\\Users\\cheye_aj94fwz\\AppData\\Local\\Muse Hub\\lib"
+        - "C:\\Program Files (x86)\\Plantronics\\Spokes3G\\"
+        - "C:\\Program Files\\Git\\cmd"
+        - "C:\\Program Files\\nodejs\\"
+        - "C:\\Program Files\\dotnet\\"
+        - "C:\\Users\\cheye_aj94fwz\\AppData\\Local\\Microsoft\\WindowsApps"
+        - "C:\\Users\\cheye_aj94fwz\\AppData\\Local\\Muse Hub\\lib"
+        - "C:\\Users\\cheye_aj94fwz\\AppData\\Local\\Python\\bin"
+        - "C:\\Users\\cheye_aj94fwz\\.dotnet\\tools"
+        - "C:\\Users\\cheye_aj94fwz\\AppData\\Roaming\\npm"
+      CMAKE_SYSTEM_PREFIX_PATH:
+        - "/usr/lib/x86_64-linux-android/26"
+      CMAKE_SYSROOT: "C:/Users/cheye_aj94fwz/AppData/Local/Android/Sdk/ndk/30.0.15729638/toolchains/llvm/prebuilt/windows-x86_64/sysroot"
+      CMAKE_FIND_ROOT_PATH: "C:/Users/cheye_aj94fwz/AppData/Local/Android/Sdk/ndk/30.0.15729638"
+  -
+    kind: "message-v1"
+    backtrace:
+      - "C:/Users/cheye_aj94fwz/AppData/Local/Android/Sdk/cmake/4.1.2/share/cmake-4.1/Modules/CMakeDetermineCompilerId.cmake:17 (message)"
+      - "C:/Users/cheye_aj94fwz/AppData/Local/Android/Sdk/cmake/4.1.2/share/cmake-4.1/Modules/CMakeDetermineCompilerId.cmake:64 (__determine_compiler_id_test)"
+      - "C:/Users/cheye_aj94fwz/AppData/Local/Android/Sdk/cmake/4.1.2/share/cmake-4.1/Modules/CMakeDetermineCXXCompiler.cmake:125 (CMAKE_DETERMINE_COMPILER_ID)"
+      - "CMakeLists.txt:2 (project)"
+    message: |
+      Compiling the CXX compiler identification source file "CMakeCXXCompilerId.cpp" succeeded.
+      Compiler: C:/Users/cheye_aj94fwz/AppData/Local/Android/Sdk/ndk/30.0.15729638/toolchains/llvm/prebuilt/windows-x86_64/bin/clang++.exe 
+      Build flags: -g;-DANDROID;-fdata-sections;-ffunction-sections;-funwind-tables;-fstack-protector-strong;-no-canonical-prefixes;-D_FORTIFY_SOURCE=2;-Wformat;-Werror=format-security;-O3
+      Id flags: -c;--target=x86_64-none-linux-android26 
+      
+      The output was:
+      0
+      
+      
+      Compilation of the CXX compiler identification source "CMakeCXXCompilerId.cpp" produced "CMakeCXXCompilerId.o"
+      
+      The CXX compiler identification is Clang, found in:
+        C:/Users/cheye_aj94fwz/Documents/GitHub/audiochoice/android-app/app/.cxx/Debug/532q214i/x86_64/CMakeFiles/4.1.2/CompilerIdCXX/CMakeCXXCompilerId.o
+      
+  -
+    kind: "find-v1"
+    backtrace:
+      - "C:/Users/cheye_aj94fwz/AppData/Local/Android/Sdk/cmake/4.1.2/share/cmake-4.1/Modules/CMakeFindBinUtils.cmake:238 (find_program)"
+      - "C:/Users/cheye_aj94fwz/AppData/Local/Android/Sdk/cmake/4.1.2/share/cmake-4.1/Modules/CMakeDetermineCXXCompiler.cmake:206 (include)"
+      - "CMakeLists.txt:2 (project)"
+    mode: "program"
+    variable: "CMAKE_LINKER"
+    description: "Path to a program."
+    settings:
+      SearchFramework: "NEVER"
+      SearchAppBundle: "NEVER"
+      CMAKE_FIND_USE_CMAKE_PATH: false
+      CMAKE_FIND_USE_CMAKE_ENVIRONMENT_PATH: false
+      CMAKE_FIND_USE_SYSTEM_ENVIRONMENT_PATH: true
+      CMAKE_FIND_USE_CMAKE_SYSTEM_PATH: true
+      CMAKE_FIND_USE_INSTALL_PREFIX: true
+    names:
+      - "ld.lld"
+      - "ld"
+    candidate_directories:
+      - "C:/Users/cheye_aj94fwz/AppData/Local/Android/Sdk/ndk/30.0.15729638/toolchains/llvm/prebuilt/windows-x86_64/bin/"
+      - "C:/Program Files/Microsoft SDKs/Azure/CLI2/wbin/"
+      - "C:/Windows/System32/"
+      - "C:/Windows/"
+      - "C:/Windows/System32/wbem/"
+      - "C:/Windows/System32/WindowsPowerShell/v1.0/"
+      - "C:/Windows/System32/OpenSSH/"
+      - "C:/Users/cheye_aj94fwz/AppData/Local/Muse Hub/lib/"
+      - "C:/Program Files (x86)/Plantronics/Spokes3G/"
+      - "C:/Program Files/Git/cmd/"
+      - "C:/Program Files/nodejs/"
+      - "C:/Program Files/dotnet/"
+      - "C:/Users/cheye_aj94fwz/AppData/Local/Microsoft/WindowsApps/"
+      - "C:/Users/cheye_aj94fwz/AppData/Local/Python/bin/"
+      - "C:/Users/cheye_aj94fwz/.dotnet/tools/"
+      - "C:/Users/cheye_aj94fwz/AppData/Roaming/npm/"
+      - "/usr/lib/x86_64-linux-android/26/bin/"
+      - "/usr/lib/x86_64-linux-android/26/sbin/"
+      - "/usr/lib/x86_64-linux-android/26/"
+    searched_directories:
+      - "C:/Users/cheye_aj94fwz/AppData/Local/Android/Sdk/ndk/30.0.15729638/toolchains/llvm/prebuilt/windows-x86_64/bin/ld.lld.com"
+    found: "C:/Users/cheye_aj94fwz/AppData/Local/Android/Sdk/ndk/30.0.15729638/toolchains/llvm/prebuilt/windows-x86_64/bin/ld.lld.exe"
+    search_context:
+      CMAKE_PREFIX_PATH:
+        - "C:/Users/cheye_aj94fwz/AppData/Local/Android/Sdk/ndk/30.0.15729638/toolchains/llvm/prebuilt/windows-x86_64"
+      ENV{PATH}:
+        - "C:\\Program Files\\Microsoft SDKs\\Azure\\CLI2\\wbin"
+        - "C:\\Windows\\system32"
+        - "C:\\Windows"
+        - "C:\\Windows\\System32\\Wbem"
+        - "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\"
+        - "C:\\Windows\\System32\\OpenSSH\\"
+        - "C:\\Users\\cheye_aj94fwz\\AppData\\Local\\Muse Hub\\lib"
+        - "C:\\Program Files (x86)\\Plantronics\\Spokes3G\\"
+        - "C:\\Program Files\\Git\\cmd"
+        - "C:\\Program Files\\nodejs\\"
+        - "C:\\Program Files\\dotnet\\"
+        - "C:\\Users\\cheye_aj94fwz\\AppData\\Local\\Microsoft\\WindowsApps"
+        - "C:\\Users\\cheye_aj94fwz\\AppData\\Local\\Muse Hub\\lib"
+        - "C:\\Users\\cheye_aj94fwz\\AppData\\Local\\Python\\bin"
+        - "C:\\Users\\cheye_aj94fwz\\.dotnet\\tools"
+        - "C:\\Users\\cheye_aj94fwz\\AppData\\Roaming\\npm"
+      CMAKE_SYSTEM_PREFIX_PATH:
+        - "/usr/lib/x86_64-linux-android/26"
+      CMAKE_SYSROOT: "C:/Users/cheye_aj94fwz/AppData/Local/Android/Sdk/ndk/30.0.15729638/toolchains/llvm/prebuilt/windows-x86_64/sysroot"
+      CMAKE_FIND_ROOT_PATH: "C:/Users/cheye_aj94fwz/AppData/Local/Android/Sdk/ndk/30.0.15729638"
+  -
+    kind: "find-v1"
+    backtrace:
+      - "C:/Users/cheye_aj94fwz/AppData/Local/Android/Sdk/cmake/4.1.2/share/cmake-4.1/Modules/CMakeFindBinUtils.cmake:238 (find_program)"
+      - "C:/Users/cheye_aj94fwz/AppData/Local/Android/Sdk/cmake/4.1.2/share/cmake-4.1/Modules/CMakeDetermineCXXCompiler.cmake:206 (include)"
+      - "CMakeLists.txt:2 (project)"
+    mode: "program"
+    variable: "CMAKE_NM"
+    description: "Path to a program."
+    settings:
+      SearchFramework: "NEVER"
+      SearchAppBundle: "NEVER"
+      CMAKE_FIND_USE_CMAKE_PATH: false
+      CMAKE_FIND_USE_CMAKE_ENVIRONMENT_PATH: false
+      CMAKE_FIND_USE_SYSTEM_ENVIRONMENT_PATH: true
+      CMAKE_FIND_USE_CMAKE_SYSTEM_PATH: true
+      CMAKE_FIND_USE_INSTALL_PREFIX: true
+    names:
+      - "llvm-nm"
+      - "nm"
+    candidate_directories:
+      - "C:/Users/cheye_aj94fwz/AppData/Local/Android/Sdk/ndk/30.0.15729638/toolchains/llvm/prebuilt/windows-x86_64/bin/"
+      - "C:/Program Files/Microsoft SDKs/Azure/CLI2/wbin/"
+      - "C:/Windows/System32/"
+      - "C:/Windows/"
+      - "C:/Windows/System32/wbem/"
+      - "C:/Windows/System32/WindowsPowerShell/v1.0/"
+      - "C:/Windows/System32/OpenSSH/"
+      - "C:/Users/cheye_aj94fwz/AppData/Local/Muse Hub/lib/"
+      - "C:/Program Files (x86)/Plantronics/Spokes3G/"
+      - "C:/Program Files/Git/cmd/"
+      - "C:/Program Files/nodejs/"
+      - "C:/Program Files/dotnet/"
+      - "C:/Users/cheye_aj94fwz/AppData/Local/Microsoft/WindowsApps/"
+      - "C:/Users/cheye_aj94fwz/AppData/Local/Python/bin/"
+      - "C:/Users/cheye_aj94fwz/.dotnet/tools/"
+      - "C:/Users/cheye_aj94fwz/AppData/Roaming/npm/"
+      - "/usr/lib/x86_64-linux-android/26/bin/"
+      - "/usr/lib/x86_64-linux-android/26/sbin/"
+      - "/usr/lib/x86_64-linux-android/26/"
+    searched_directories:
+      - "C:/Users/cheye_aj94fwz/AppData/Local/Android/Sdk/ndk/30.0.15729638/toolchains/llvm/prebuilt/windows-x86_64/bin/llvm-nm.com"
+    found: "C:/Users/cheye_aj94fwz/AppData/Local/Android/Sdk/ndk/30.0.15729638/toolchains/llvm/prebuilt/windows-x86_64/bin/llvm-nm.exe"
+    search_context:
+      CMAKE_PREFIX_PATH:
+        - "C:/Users/cheye_aj94fwz/AppData/Local/Android/Sdk/ndk/30.0.15729638/toolchains/llvm/prebuilt/windows-x86_64"
+      ENV{PATH}:
+        - "C:\\Program Files\\Microsoft SDKs\\Azure\\CLI2\\wbin"
+        - "C:\\Windows\\system32"
+        - "C:\\Windows"
+        - "C:\\Windows\\System32\\Wbem"
+        - "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\"
+        - "C:\\Windows\\System32\\OpenSSH\\"
+        - "C:\\Users\\cheye_aj94fwz\\AppData\\Local\\Muse Hub\\lib"
+        - "C:\\Program Files (x86)\\Plantronics\\Spokes3G\\"
+        - "C:\\Program Files\\Git\\cmd"
+        - "C:\\Program Files\\nodejs\\"
+        - "C:\\Program Files\\dotnet\\"
+        - "C:\\Users\\cheye_aj94fwz\\AppData\\Local\\Microsoft\\WindowsApps"
+        - "C:\\Users\\cheye_aj94fwz\\AppData\\Local\\Muse Hub\\lib"
+        - "C:\\Users\\cheye_aj94fwz\\AppData\\Local\\Python\\bin"
+        - "C:\\Users\\cheye_aj94fwz\\.dotnet\\tools"
+        - "C:\\Users\\cheye_aj94fwz\\AppData\\Roaming\\npm"
+      CMAKE_SYSTEM_PREFIX_PATH:
+        - "/usr/lib/x86_64-linux-android/26"
+      CMAKE_SYSROOT: "C:/Users/cheye_aj94fwz/AppData/Local/Android/Sdk/ndk/30.0.15729638/toolchains/llvm/prebuilt/windows-x86_64/sysroot"
+      CMAKE_FIND_ROOT_PATH: "C:/Users/cheye_aj94fwz/AppData/Local/Android/Sdk/ndk/30.0.15729638"
+  -
+    kind: "find-v1"
+    backtrace:
+      - "C:/Users/cheye_aj94fwz/AppData/Local/Android/Sdk/cmake/4.1.2/share/cmake-4.1/Modules/CMakeFindBinUtils.cmake:238 (find_program)"
+      - "C:/Users/cheye_aj94fwz/AppData/Local/Android/Sdk/cmake/4.1.2/share/cmake-4.1/Modules/CMakeDetermineCXXCompiler.cmake:206 (include)"
+      - "CMakeLists.txt:2 (project)"
+    mode: "program"
+    variable: "CMAKE_OBJDUMP"
+    description: "Path to a program."
+    settings:
+      SearchFramework: "NEVER"
+      SearchAppBundle: "NEVER"
+      CMAKE_FIND_USE_CMAKE_PATH: false
+      CMAKE_FIND_USE_CMAKE_ENVIRONMENT_PATH: false
+      CMAKE_FIND_USE_SYSTEM_ENVIRONMENT_PATH: true
+      CMAKE_FIND_USE_CMAKE_SYSTEM_PATH: true
+      CMAKE_FIND_USE_INSTALL_PREFIX: true
+    names:
+      - "llvm-objdump"
+      - "objdump"
+    candidate_directories:
+      - "C:/Users/cheye_aj94fwz/AppData/Local/Android/Sdk/ndk/30.0.15729638/toolchains/llvm/prebuilt/windows-x86_64/bin/"
+      - "C:/Program Files/Microsoft SDKs/Azure/CLI2/wbin/"
+      - "C:/Windows/System32/"
+      - "C:/Windows/"
+      - "C:/Windows/System32/wbem/"
+      - "C:/Windows/System32/WindowsPowerShell/v1.0/"
+      - "C:/Windows/System32/OpenSSH/"
+      - "C:/Users/cheye_aj94fwz/AppData/Local/Muse Hub/lib/"
+      - "C:/Program Files (x86)/Plantronics/Spokes3G/"
+      - "C:/Program Files/Git/cmd/"
+      - "C:/Program Files/nodejs/"
+      - "C:/Program Files/dotnet/"
+      - "C:/Users/cheye_aj94fwz/AppData/Local/Microsoft/WindowsApps/"
+      - "C:/Users/cheye_aj94fwz/AppData/Local/Python/bin/"
+      - "C:/Users/cheye_aj94fwz/.dotnet/tools/"
+      - "C:/Users/cheye_aj94fwz/AppData/Roaming/npm/"
+      - "/usr/lib/x86_64-linux-android/26/bin/"
+      - "/usr/lib/x86_64-linux-android/26/sbin/"
+      - "/usr/lib/x86_64-linux-android/26/"
+    searched_directories:
+      - "C:/Users/cheye_aj94fwz/AppData/Local/Android/Sdk/ndk/30.0.15729638/toolchains/llvm/prebuilt/windows-x86_64/bin/llvm-objdump.com"
+    found: "C:/Users/cheye_aj94fwz/AppData/Local/Android/Sdk/ndk/30.0.15729638/toolchains/llvm/prebuilt/windows-x86_64/bin/llvm-objdump.exe"
+    search_context:
+      CMAKE_PREFIX_PATH:
+        - "C:/Users/cheye_aj94fwz/AppData/Local/Android/Sdk/ndk/30.0.15729638/toolchains/llvm/prebuilt/windows-x86_64"
+      ENV{PATH}:
+        - "C:\\Program Files\\Microsoft SDKs\\Azure\\CLI2\\wbin"
+        - "C:\\Windows\\system32"
+        - "C:\\Windows"
+        - "C:\\Windows\\System32\\Wbem"
+        - "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\"
+        - "C:\\Windows\\System32\\OpenSSH\\"
+        - "C:\\Users\\cheye_aj94fwz\\AppData\\Local\\Muse Hub\\lib"
+        - "C:\\Program Files (x86)\\Plantronics\\Spokes3G\\"
+        - "C:\\Program Files\\Git\\cmd"
+        - "C:\\Program Files\\nodejs\\"
+        - "C:\\Program Files\\dotnet\\"
+        - "C:\\Users\\cheye_aj94fwz\\AppData\\Local\\Microsoft\\WindowsApps"
+        - "C:\\Users\\cheye_aj94fwz\\AppData\\Local\\Muse Hub\\lib"
+        - "C:\\Users\\cheye_aj94fwz\\AppData\\Local\\Python\\bin"
+        - "C:\\Users\\cheye_aj94fwz\\.dotnet\\tools"
+        - "C:\\Users\\cheye_aj94fwz\\AppData\\Roaming\\npm"
+      CMAKE_SYSTEM_PREFIX_PATH:
+        - "/usr/lib/x86_64-linux-android/26"
+      CMAKE_SYSROOT: "C:/Users/cheye_aj94fwz/AppData/Local/Android/Sdk/ndk/30.0.15729638/toolchains/llvm/prebuilt/windows-x86_64/sysroot"
+      CMAKE_FIND_ROOT_PATH: "C:/Users/cheye_aj94fwz/AppData/Local/Android/Sdk/ndk/30.0.15729638"
+  -
+    kind: "find-v1"
+    backtrace:
+      - "C:/Users/cheye_aj94fwz/AppData/Local/Android/Sdk/cmake/4.1.2/share/cmake-4.1/Modules/CMakeFindBinUtils.cmake:238 (find_program)"
+      - "C:/Users/cheye_aj94fwz/AppData/Local/Android/Sdk/cmake/4.1.2/share/cmake-4.1/Modules/CMakeDetermineCXXCompiler.cmake:206 (include)"
+      - "CMakeLists.txt:2 (project)"
+    mode: "program"
+    variable: "CMAKE_OBJCOPY"
+    description: "Path to a program."
+    settings:
+      SearchFramework: "NEVER"
+      SearchAppBundle: "NEVER"
+      CMAKE_FIND_USE_CMAKE_PATH: false
+      CMAKE_FIND_USE_CMAKE_ENVIRONMENT_PATH: false
+      CMAKE_FIND_USE_SYSTEM_ENVIRONMENT_PATH: true
+      CMAKE_FIND_USE_CMAKE_SYSTEM_PATH: true
+      CMAKE_FIND_USE_INSTALL_PREFIX: true
+    names:
+      - "llvm-objcopy"
+      - "objcopy"
+    candidate_directories:
+      - "C:/Users/cheye_aj94fwz/AppData/Local/Android/Sdk/ndk/30.0.15729638/toolchains/llvm/prebuilt/windows-x86_64/bin/"
+      - "C:/Program Files/Microsoft SDKs/Azure/CLI2/wbin/"
+      - "C:/Windows/System32/"
+      - "C:/Windows/"
+      - "C:/Windows/System32/wbem/"
+      - "C:/Windows/System32/WindowsPowerShell/v1.0/"
+      - "C:/Windows/System32/OpenSSH/"
+      - "C:/Users/cheye_aj94fwz/AppData/Local/Muse Hub/lib/"
+      - "C:/Program Files (x86)/Plantronics/Spokes3G/"
+      - "C:/Program Files/Git/cmd/"
+      - "C:/Program Files/nodejs/"
+      - "C:/Program Files/dotnet/"
+      - "C:/Users/cheye_aj94fwz/AppData/Local/Microsoft/WindowsApps/"
+      - "C:/Users/cheye_aj94fwz/AppData/Local/Python/bin/"
+      - "C:/Users/cheye_aj94fwz/.dotnet/tools/"
+      - "C:/Users/cheye_aj94fwz/AppData/Roaming/npm/"
+      - "/usr/lib/x86_64-linux-android/26/bin/"
+      - "/usr/lib/x86_64-linux-android/26/sbin/"
+      - "/usr/lib/x86_64-linux-android/26/"
+    searched_directories:
+      - "C:/Users/cheye_aj94fwz/AppData/Local/Android/Sdk/ndk/30.0.15729638/toolchains/llvm/prebuilt/windows-x86_64/bin/llvm-objcopy.com"
+    found: "C:/Users/cheye_aj94fwz/AppData/Local/Android/Sdk/ndk/30.0.15729638/toolchains/llvm/prebuilt/windows-x86_64/bin/llvm-objcopy.exe"
+    search_context:
+      CMAKE_PREFIX_PATH:
+        - "C:/Users/cheye_aj94fwz/AppData/Local/Android/Sdk/ndk/30.0.15729638/toolchains/llvm/prebuilt/windows-x86_64"
+      ENV{PATH}:
+        - "C:\\Program Files\\Microsoft SDKs\\Azure\\CLI2\\wbin"
+        - "C:\\Windows\\system32"
+        - "C:\\Windows"
+        - "C:\\Windows\\System32\\Wbem"
+        - "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\"
+        - "C:\\Windows\\System32\\OpenSSH\\"
+        - "C:\\Users\\cheye_aj94fwz\\AppData\\Local\\Muse Hub\\lib"
+        - "C:\\Program Files (x86)\\Plantronics\\Spokes3G\\"
+        - "C:\\Program Files\\Git\\cmd"
+        - "C:\\Program Files\\nodejs\\"
+        - "C:\\Program Files\\dotnet\\"
+        - "C:\\Users\\cheye_aj94fwz\\AppData\\Local\\Microsoft\\WindowsApps"
+        - "C:\\Users\\cheye_aj94fwz\\AppData\\Local\\Muse Hub\\lib"
+        - "C:\\Users\\cheye_aj94fwz\\AppData\\Local\\Python\\bin"
+        - "C:\\Users\\cheye_aj94fwz\\.dotnet\\tools"
+        - "C:\\Users\\cheye_aj94fwz\\AppData\\Roaming\\npm"
+      CMAKE_SYSTEM_PREFIX_PATH:
+        - "/usr/lib/x86_64-linux-android/26"
+      CMAKE_SYSROOT: "C:/Users/cheye_aj94fwz/AppData/Local/Android/Sdk/ndk/30.0.15729638/toolchains/llvm/prebuilt/windows-x86_64/sysroot"
+      CMAKE_FIND_ROOT_PATH: "C:/Users/cheye_aj94fwz/AppData/Local/Android/Sdk/ndk/30.0.15729638"
+  -
+    kind: "find-v1"
+    backtrace:
+      - "C:/Users/cheye_aj94fwz/AppData/Local/Android/Sdk/cmake/4.1.2/share/cmake-4.1/Modules/CMakeFindBinUtils.cmake:238 (find_program)"
+      - "C:/Users/cheye_aj94fwz/AppData/Local/Android/Sdk/cmake/4.1.2/share/cmake-4.1/Modules/CMakeDetermineCXXCompiler.cmake:206 (include)"
+      - "CMakeLists.txt:2 (project)"
+    mode: "program"
+    variable: "CMAKE_READELF"
+    description: "Path to a program."
+    settings:
+      SearchFramework: "NEVER"
+      SearchAppBundle: "NEVER"
+      CMAKE_FIND_USE_CMAKE_PATH: false
+      CMAKE_FIND_USE_CMAKE_ENVIRONMENT_PATH: false
+      CMAKE_FIND_USE_SYSTEM_ENVIRONMENT_PATH: true
+      CMAKE_FIND_USE_CMAKE_SYSTEM_PATH: true
+      CMAKE_FIND_USE_INSTALL_PREFIX: true
+    names:
+      - "llvm-readelf"
+      - "readelf"
+    candidate_directories:
+      - "C:/Users/cheye_aj94fwz/AppData/Local/Android/Sdk/ndk/30.0.15729638/toolchains/llvm/prebuilt/windows-x86_64/bin/"
+      - "C:/Program Files/Microsoft SDKs/Azure/CLI2/wbin/"
+      - "C:/Windows/System32/"
+      - "C:/Windows/"
+      - "C:/Windows/System32/wbem/"
+      - "C:/Windows/System32/WindowsPowerShell/v1.0/"
+      - "C:/Windows/System32/OpenSSH/"
+      - "C:/Users/cheye_aj94fwz/AppData/Local/Muse Hub/lib/"
+      - "C:/Program Files (x86)/Plantronics/Spokes3G/"
+      - "C:/Program Files/Git/cmd/"
+      - "C:/Program Files/nodejs/"
+      - "C:/Program Files/dotnet/"
+      - "C:/Users/cheye_aj94fwz/AppData/Local/Microsoft/WindowsApps/"
+      - "C:/Users/cheye_aj94fwz/AppData/Local/Python/bin/"
+      - "C:/Users/cheye_aj94fwz/.dotnet/tools/"
+      - "C:/Users/cheye_aj94fwz/AppData/Roaming/npm/"
+      - "/usr/lib/x86_64-linux-android/26/bin/"
+      - "/usr/lib/x86_64-linux-android/26/sbin/"
+      - "/usr/lib/x86_64-linux-android/26/"
+    searched_directories:
+      - "C:/Users/cheye_aj94fwz/AppData/Local/Android/Sdk/ndk/30.0.15729638/toolchains/llvm/prebuilt/windows-x86_64/bin/llvm-readelf.com"
+    found: "C:/Users/cheye_aj94fwz/AppData/Local/Android/Sdk/ndk/30.0.15729638/toolchains/llvm/prebuilt/windows-x86_64/bin/llvm-readelf.exe"
+    search_context:
+      CMAKE_PREFIX_PATH:
+        - "C:/Users/cheye_aj94fwz/AppData/Local/Android/Sdk/ndk/30.0.15729638/toolchains/llvm/prebuilt/windows-x86_64"
+      ENV{PATH}:
+        - "C:\\Program Files\\Microsoft SDKs\\Azure\\CLI2\\wbin"
+        - "C:\\Windows\\system32"
+        - "C:\\Windows"
+        - "C:\\Windows\\System32\\Wbem"
+        - "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\"
+        - "C:\\Windows\\System32\\OpenSSH\\"
+        - "C:\\Users\\cheye_aj94fwz\\AppData\\Local\\Muse Hub\\lib"
+        - "C:\\Program Files (x86)\\Plantronics\\Spokes3G\\"
+        - "C:\\Program Files\\Git\\cmd"
+        - "C:\\Program Files\\nodejs\\"
+        - "C:\\Program Files\\dotnet\\"
+        - "C:\\Users\\cheye_aj94fwz\\AppData\\Local\\Microsoft\\WindowsApps"
+        - "C:\\Users\\cheye_aj94fwz\\AppData\\Local\\Muse Hub\\lib"
+        - "C:\\Users\\cheye_aj94fwz\\AppData\\Local\\Python\\bin"
+        - "C:\\Users\\cheye_aj94fwz\\.dotnet\\tools"
+        - "C:\\Users\\cheye_aj94fwz\\AppData\\Roaming\\npm"
+      CMAKE_SYSTEM_PREFIX_PATH:
+        - "/usr/lib/x86_64-linux-android/26"
+      CMAKE_SYSROOT: "C:/Users/cheye_aj94fwz/AppData/Local/Android/Sdk/ndk/30.0.15729638/toolchains/llvm/prebuilt/windows-x86_64/sysroot"
+      CMAKE_FIND_ROOT_PATH: "C:/Users/cheye_aj94fwz/AppData/Local/Android/Sdk/ndk/30.0.15729638"
+  -
+    kind: "find-v1"
+    backtrace:
+      - "C:/Users/cheye_aj94fwz/AppData/Local/Android/Sdk/cmake/4.1.2/share/cmake-4.1/Modules/CMakeFindBinUtils.cmake:238 (find_program)"
+      - "C:/Users/cheye_aj94fwz/AppData/Local/Android/Sdk/cmake/4.1.2/share/cmake-4.1/Modules/CMakeDetermineCXXCompiler.cmake:206 (include)"
+      - "CMakeLists.txt:2 (project)"
+    mode: "program"
+    variable: "CMAKE_DLLTOOL"
+    description: "Path to a program."
+    settings:
+      SearchFramework: "NEVER"
+      SearchAppBundle: "NEVER"
+      CMAKE_FIND_USE_CMAKE_PATH: false
+      CMAKE_FIND_USE_CMAKE_ENVIRONMENT_PATH: false
+      CMAKE_FIND_USE_SYSTEM_ENVIRONMENT_PATH: true
+      CMAKE_FIND_USE_CMAKE_SYSTEM_PATH: true
+      CMAKE_FIND_USE_INSTALL_PREFIX: true
+    names:
+      - "llvm-dlltool"
+      - "dlltool"
+    candidate_directories:
+      - "C:/Users/cheye_aj94fwz/AppData/Local/Android/Sdk/ndk/30.0.15729638/toolchains/llvm/prebuilt/windows-x86_64/bin/"
+      - "C:/Program Files/Microsoft SDKs/Azure/CLI2/wbin/"
+      - "C:/Windows/System32/"
+      - "C:/Windows/"
+      - "C:/Windows/System32/wbem/"
+      - "C:/Windows/System32/WindowsPowerShell/v1.0/"
+      - "C:/Windows/System32/OpenSSH/"
+      - "C:/Users/cheye_aj94fwz/AppData/Local/Muse Hub/lib/"
+      - "C:/Program Files (x86)/Plantronics/Spokes3G/"
+      - "C:/Program Files/Git/cmd/"
+      - "C:/Program Files/nodejs/"
+      - "C:/Program Files/dotnet/"
+      - "C:/Users/cheye_aj94fwz/AppData/Local/Microsoft/WindowsApps/"
+      - "C:/Users/cheye_aj94fwz/AppData/Local/Python/bin/"
+      - "C:/Users/cheye_aj94fwz/.dotnet/tools/"
+      - "C:/Users/cheye_aj94fwz/AppData/Roaming/npm/"
+      - "/usr/lib/x86_64-linux-android/26/bin/"
+      - "/usr/lib/x86_64-linux-android/26/sbin/"
+      - "/usr/lib/x86_64-linux-android/26/"
+    searched_directories:
+      - "C:/Users/cheye_aj94fwz/AppData/Local/Android/Sdk/ndk/30.0.15729638/toolchains/llvm/prebuilt/windows-x86_64/bin/llvm-dlltool.com"
+    found: "C:/Users/cheye_aj94fwz/AppData/Local/Android/Sdk/ndk/30.0.15729638/toolchains/llvm/prebuilt/windows-x86_64/bin/llvm-dlltool.exe"
+    search_context:
+      CMAKE_PREFIX_PATH:
+        - "C:/Users/cheye_aj94fwz/AppData/Local/Android/Sdk/ndk/30.0.15729638/toolchains/llvm/prebuilt/windows-x86_64"
+      ENV{PATH}:
+        - "C:\\Program Files\\Microsoft SDKs\\Azure\\CLI2\\wbin"
+        - "C:\\Windows\\system32"
+        - "C:\\Windows"
+        - "C:\\Windows\\System32\\Wbem"
+        - "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\"
+        - "C:\\Windows\\System32\\OpenSSH\\"
+        - "C:\\Users\\cheye_aj94fwz\\AppData\\Local\\Muse Hub\\lib"
+        - "C:\\Program Files (x86)\\Plantronics\\Spokes3G\\"
+        - "C:\\Program Files\\Git\\cmd"
+        - "C:\\Program Files\\nodejs\\"
+        - "C:\\Program Files\\dotnet\\"
+        - "C:\\Users\\cheye_aj94fwz\\AppData\\Local\\Microsoft\\WindowsApps"
+        - "C:\\Users\\cheye_aj94fwz\\AppData\\Local\\Muse Hub\\lib"
+        - "C:\\Users\\cheye_aj94fwz\\AppData\\Local\\Python\\bin"
+        - "C:\\Users\\cheye_aj94fwz\\.dotnet\\tools"
+        - "C:\\Users\\cheye_aj94fwz\\AppData\\Roaming\\npm"
+      CMAKE_SYSTEM_PREFIX_PATH:
+        - "/usr/lib/x86_64-linux-android/26"
+      CMAKE_SYSROOT: "C:/Users/cheye_aj94fwz/AppData/Local/Android/Sdk/ndk/30.0.15729638/toolchains/llvm/prebuilt/windows-x86_64/sysroot"
+      CMAKE_FIND_ROOT_PATH: "C:/Users/cheye_aj94fwz/AppData/Local/Android/Sdk/ndk/30.0.15729638"
+  -
+    kind: "find-v1"
+    backtrace:
+      - "C:/Users/cheye_aj94fwz/AppData/Local/Android/Sdk/cmake/4.1.2/share/cmake-4.1/Modules/CMakeFindBinUtils.cmake:238 (find_program)"
+      - "C:/Users/cheye_aj94fwz/AppData/Local/Android/Sdk/cmake/4.1.2/share/cmake-4.1/Modules/CMakeDetermineCXXCompiler.cmake:206 (include)"
+      - "CMakeLists.txt:2 (project)"
+    mode: "program"
+    variable: "CMAKE_ADDR2LINE"
+    description: "Path to a program."
+    settings:
+      SearchFramework: "NEVER"
+      SearchAppBundle: "NEVER"
+      CMAKE_FIND_USE_CMAKE_PATH: false
+      CMAKE_FIND_USE_CMAKE_ENVIRONMENT_PATH: false
+      CMAKE_FIND_USE_SYSTEM_ENVIRONMENT_PATH: true
+      CMAKE_FIND_USE_CMAKE_SYSTEM_PATH: true
+      CMAKE_FIND_USE_INSTALL_PREFIX: true
+    names:
+      - "llvm-addr2line"
+      - "addr2line"
+    candidate_directories:
+      - "C:/Users/cheye_aj94fwz/AppData/Local/Android/Sdk/ndk/30.0.15729638/toolchains/llvm/prebuilt/windows-x86_64/bin/"
+      - "C:/Program Files/Microsoft SDKs/Azure/CLI2/wbin/"
+      - "C:/Windows/System32/"
+      - "C:/Windows/"
+      - "C:/Windows/System32/wbem/"
+      - "C:/Windows/System32/WindowsPowerShell/v1.0/"
+      - "C:/Windows/System32/OpenSSH/"
+      - "C:/Users/cheye_aj94fwz/AppData/Local/Muse Hub/lib/"
+      - "C:/Program Files (x86)/Plantronics/Spokes3G/"
+      - "C:/Program Files/Git/cmd/"
+      - "C:/Program Files/nodejs/"
+      - "C:/Program Files/dotnet/"
+      - "C:/Users/cheye_aj94fwz/AppData/Local/Microsoft/WindowsApps/"
+      - "C:/Users/cheye_aj94fwz/AppData/Local/Python/bin/"
+      - "C:/Users/cheye_aj94fwz/.dotnet/tools/"
+      - "C:/Users/cheye_aj94fwz/AppData/Roaming/npm/"
+      - "/usr/lib/x86_64-linux-android/26/bin/"
+      - "/usr/lib/x86_64-linux-android/26/sbin/"
+      - "/usr/lib/x86_64-linux-android/26/"
+    searched_directories:
+      - "C:/Users/cheye_aj94fwz/AppData/Local/Android/Sdk/ndk/30.0.15729638/toolchains/llvm/prebuilt/windows-x86_64/bin/llvm-addr2line.com"
+    found: "C:/Users/cheye_aj94fwz/AppData/Local/Android/Sdk/ndk/30.0.15729638/toolchains/llvm/prebuilt/windows-x86_64/bin/llvm-addr2line.exe"
+    search_context:
+      CMAKE_PREFIX_PATH:
+        - "C:/Users/cheye_aj94fwz/AppData/Local/Android/Sdk/ndk/30.0.15729638/toolchains/llvm/prebuilt/windows-x86_64"
+      ENV{PATH}:
+        - "C:\\Program Files\\Microsoft SDKs\\Azure\\CLI2\\wbin"
+        - "C:\\Windows\\system32"
+        - "C:\\Windows"
+        - "C:\\Windows\\System32\\Wbem"
+        - "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\"
+        - "C:\\Windows\\System32\\OpenSSH\\"
+        - "C:\\Users\\cheye_aj94fwz\\AppData\\Local\\Muse Hub\\lib"
+        - "C:\\Program Files (x86)\\Plantronics\\Spokes3G\\"
+        - "C:\\Program Files\\Git\\cmd"
+        - "C:\\Program Files\\nodejs\\"
+        - "C:\\Program Files\\dotnet\\"
+        - "C:\\Users\\cheye_aj94fwz\\AppData\\Local\\Microsoft\\WindowsApps"
+        - "C:\\Users\\cheye_aj94fwz\\AppData\\Local\\Muse Hub\\lib"
+        - "C:\\Users\\cheye_aj94fwz\\AppData\\Local\\Python\\bin"
+        - "C:\\Users\\cheye_aj94fwz\\.dotnet\\tools"
+        - "C:\\Users\\cheye_aj94fwz\\AppData\\Roaming\\npm"
+      CMAKE_SYSTEM_PREFIX_PATH:
+        - "/usr/lib/x86_64-linux-android/26"
+      CMAKE_SYSROOT: "C:/Users/cheye_aj94fwz/AppData/Local/Android/Sdk/ndk/30.0.15729638/toolchains/llvm/prebuilt/windows-x86_64/sysroot"
+      CMAKE_FIND_ROOT_PATH: "C:/Users/cheye_aj94fwz/AppData/Local/Android/Sdk/ndk/30.0.15729638"
+  -
+    kind: "find-v1"
+    backtrace:
+      - "C:/Users/cheye_aj94fwz/AppData/Local/Android/Sdk/cmake/4.1.2/share/cmake-4.1/Modules/CMakeFindBinUtils.cmake:238 (find_program)"
+      - "C:/Users/cheye_aj94fwz/AppData/Local/Android/Sdk/cmake/4.1.2/share/cmake-4.1/Modules/CMakeDetermineCXXCompiler.cmake:206 (include)"
+      - "CMakeLists.txt:2 (project)"
+    mode: "program"
+    variable: "CMAKE_TAPI"
+    description: "Path to a program."
+    settings:
+      SearchFramework: "NEVER"
+      SearchAppBundle: "NEVER"
+      CMAKE_FIND_USE_CMAKE_PATH: false
+      CMAKE_FIND_USE_CMAKE_ENVIRONMENT_PATH: false
+      CMAKE_FIND_USE_SYSTEM_ENVIRONMENT_PATH: true
+      CMAKE_FIND_USE_CMAKE_SYSTEM_PATH: true
+      CMAKE_FIND_USE_INSTALL_PREFIX: true
+    names:
+      - "tapi"
+    candidate_directories:
+      - "C:/Users/cheye_aj94fwz/AppData/Local/Android/Sdk/ndk/30.0.15729638/toolchains/llvm/prebuilt/windows-x86_64/bin/"
+      - "C:/Program Files/Microsoft SDKs/Azure/CLI2/wbin/"
+      - "C:/Windows/System32/"
+      - "C:/Windows/"
+      - "C:/Windows/System32/wbem/"
+      - "C:/Windows/System32/WindowsPowerShell/v1.0/"
+      - "C:/Windows/System32/OpenSSH/"
+      - "C:/Users/cheye_aj94fwz/AppData/Local/Muse Hub/lib/"
+      - "C:/Program Files (x86)/Plantronics/Spokes3G/"
+      - "C:/Program Files/Git/cmd/"
+      - "C:/Program Files/nodejs/"
+      - "C:/Program Files/dotnet/"
+      - "C:/Users/cheye_aj94fwz/AppData/Local/Microsoft/WindowsApps/"
+      - "C:/Users/cheye_aj94fwz/AppData/Local/Python/bin/"
+      - "C:/Users/cheye_aj94fwz/.dotnet/tools/"
+      - "C:/Users/cheye_aj94fwz/AppData/Roaming/npm/"
+      - "/usr/lib/x86_64-linux-android/26/bin/"
+      - "/usr/lib/x86_64-linux-android/26/sbin/"
+      - "/usr/lib/x86_64-linux-android/26/"
+    searched_directories:
+      - "C:/Users/cheye_aj94fwz/AppData/Local/Android/Sdk/ndk/30.0.15729638/toolchains/llvm/prebuilt/windows-x86_64/bin/tapi.com"
+      - "C:/Users/cheye_aj94fwz/AppData/Local/Android/Sdk/ndk/30.0.15729638/toolchains/llvm/prebuilt/windows-x86_64/bin/tapi.exe"
+      - "C:/Users/cheye_aj94fwz/AppData/Local/Android/Sdk/ndk/30.0.15729638/toolchains/llvm/prebuilt/windows-x86_64/bin/tapi"
+      - "C:/Program Files/Microsoft SDKs/Azure/CLI2/wbin/tapi.com"
+      - "C:/Program Files/Microsoft SDKs/Azure/CLI2/wbin/tapi.exe"
+      - "C:/Program Files/Microsoft SDKs/Azure/CLI2/wbin/tapi"
+      - "C:/Windows/System32/tapi.com"
+      - "C:/Windows/System32/tapi.exe"
+      - "C:/Windows/System32/tapi"
+      - "C:/Windows/tapi.com"
+      - "C:/Windows/tapi.exe"
+      - "C:/Windows/tapi"
+      - "C:/Windows/System32/wbem/tapi.com"
+      - "C:/Windows/System32/wbem/tapi.exe"
+      - "C:/Windows/System32/wbem/tapi"
+      - "C:/Windows/System32/WindowsPowerShell/v1.0/tapi.com"
+      - "C:/Windows/System32/WindowsPowerShell/v1.0/tapi.exe"
+      - "C:/Windows/System32/WindowsPowerShell/v1.0/tapi"
+      - "C:/Windows/System32/OpenSSH/tapi.com"
+      - "C:/Windows/System32/OpenSSH/tapi.exe"
+      - "C:/Windows/System32/OpenSSH/tapi"
+      - "C:/Users/cheye_aj94fwz/AppData/Local/Muse Hub/lib/tapi.com"
+      - "C:/Users/cheye_aj94fwz/AppData/Local/Muse Hub/lib/tapi.exe"
+      - "C:/Users/cheye_aj94fwz/AppData/Local/Muse Hub/lib/tapi"
+      - "C:/Program Files (x86)/Plantronics/Spokes3G/tapi.com"
+      - "C:/Program Files (x86)/Plantronics/Spokes3G/tapi.exe"
+      - "C:/Program Files (x86)/Plantronics/Spokes3G/tapi"
+      - "C:/Program Files/Git/cmd/tapi.com"
+      - "C:/Program Files/Git/cmd/tapi.exe"
+      - "C:/Program Files/Git/cmd/tapi"
+      - "C:/Program Files/nodejs/tapi.com"
+      - "C:/Program Files/nodejs/tapi.exe"
+      - "C:/Program Files/nodejs/tapi"
+      - "C:/Program Files/dotnet/tapi.com"
+      - "C:/Program Files/dotnet/tapi.exe"
+      - "C:/Program Files/dotnet/tapi"
+      - "C:/Users/cheye_aj94fwz/AppData/Local/Microsoft/WindowsApps/tapi.com"
+      - "C:/Users/cheye_aj94fwz/AppData/Local/Microsoft/WindowsApps/tapi.exe"
+      - "C:/Users/cheye_aj94fwz/AppData/Local/Microsoft/WindowsApps/tapi"
+      - "C:/Users/cheye_aj94fwz/AppData/Local/Python/bin/tapi.com"
+      - "C:/Users/cheye_aj94fwz/AppData/Local/Python/bin/tapi.exe"
+      - "C:/Users/cheye_aj94fwz/AppData/Local/Python/bin/tapi"
+      - "C:/Users/cheye_aj94fwz/.dotnet/tools/tapi.com"
+      - "C:/Users/cheye_aj94fwz/.dotnet/tools/tapi.exe"
+      - "C:/Users/cheye_aj94fwz/.dotnet/tools/tapi"
+      - "C:/Users/cheye_aj94fwz/AppData/Roaming/npm/tapi.com"
+      - "C:/Users/cheye_aj94fwz/AppData/Roaming/npm/tapi.exe"
+      - "C:/Users/cheye_aj94fwz/AppData/Roaming/npm/tapi"
+      - "/usr/lib/x86_64-linux-android/26/bin/tapi.com"
+      - "/usr/lib/x86_64-linux-android/26/bin/tapi.exe"
+      - "/usr/lib/x86_64-linux-android/26/bin/tapi"
+      - "/usr/lib/x86_64-linux-android/26/sbin/tapi.com"
+      - "/usr/lib/x86_64-linux-android/26/sbin/tapi.exe"
+      - "/usr/lib/x86_64-linux-android/26/sbin/tapi"
+      - "/usr/lib/x86_64-linux-android/26/tapi.com"
+      - "/usr/lib/x86_64-linux-android/26/tapi.exe"
+      - "/usr/lib/x86_64-linux-android/26/tapi"
+    found: false
+    search_context:
+      CMAKE_PREFIX_PATH:
+        - "C:/Users/cheye_aj94fwz/AppData/Local/Android/Sdk/ndk/30.0.15729638/toolchains/llvm/prebuilt/windows-x86_64"
+      ENV{PATH}:
+        - "C:\\Program Files\\Microsoft SDKs\\Azure\\CLI2\\wbin"
+        - "C:\\Windows\\system32"
+        - "C:\\Windows"
+        - "C:\\Windows\\System32\\Wbem"
+        - "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\"
+        - "C:\\Windows\\System32\\OpenSSH\\"
+        - "C:\\Users\\cheye_aj94fwz\\AppData\\Local\\Muse Hub\\lib"
+        - "C:\\Program Files (x86)\\Plantronics\\Spokes3G\\"
+        - "C:\\Program Files\\Git\\cmd"
+        - "C:\\Program Files\\nodejs\\"
+        - "C:\\Program Files\\dotnet\\"
+        - "C:\\Users\\cheye_aj94fwz\\AppData\\Local\\Microsoft\\WindowsApps"
+        - "C:\\Users\\cheye_aj94fwz\\AppData\\Local\\Muse Hub\\lib"
+        - "C:\\Users\\cheye_aj94fwz\\AppData\\Local\\Python\\bin"
+        - "C:\\Users\\cheye_aj94fwz\\.dotnet\\tools"
+        - "C:\\Users\\cheye_aj94fwz\\AppData\\Roaming\\npm"
+      CMAKE_SYSTEM_PREFIX_PATH:
+        - "/usr/lib/x86_64-linux-android/26"
+      CMAKE_SYSROOT: "C:/Users/cheye_aj94fwz/AppData/Local/Android/Sdk/ndk/30.0.15729638/toolchains/llvm/prebuilt/windows-x86_64/sysroot"
+      CMAKE_FIND_ROOT_PATH: "C:/Users/cheye_aj94fwz/AppData/Local/Android/Sdk/ndk/30.0.15729638"
+  -
+    kind: "find-v1"
+    backtrace:
+      - "C:/Users/cheye_aj94fwz/AppData/Local/Android/Sdk/cmake/4.1.2/share/cmake-4.1/Modules/Compiler/Clang-FindBinUtils.cmake:26 (find_program)"
+      - "C:/Users/cheye_aj94fwz/AppData/Local/Android/Sdk/cmake/4.1.2/share/cmake-4.1/Modules/CMakeDetermineCXXCompiler.cmake:207 (include)"
+      - "CMakeLists.txt:2 (project)"
+    mode: "program"
+    variable: "CMAKE_CXX_COMPILER_AR"
+    description: "LLVM archiver"
+    settings:
+      SearchFramework: "NEVER"
+      SearchAppBundle: "NEVER"
+      CMAKE_FIND_USE_CMAKE_PATH: false
+      CMAKE_FIND_USE_CMAKE_ENVIRONMENT_PATH: false
+      CMAKE_FIND_USE_SYSTEM_ENVIRONMENT_PATH: true
+      CMAKE_FIND_USE_CMAKE_SYSTEM_PATH: true
+      CMAKE_FIND_USE_INSTALL_PREFIX: true
+    names:
+      - "llvm-ar-21.0"
+      - "llvm-ar-21"
+      - "llvm-ar21"
+      - "llvm-ar"
+    candidate_directories:
+      - "C:/Users/cheye_aj94fwz/AppData/Local/Android/Sdk/ndk/30.0.15729638/toolchains/llvm/prebuilt/windows-x86_64/bin/"
+      - "C:/Program Files/Microsoft SDKs/Azure/CLI2/wbin/"
+      - "C:/Windows/System32/"
+      - "C:/Windows/"
+      - "C:/Windows/System32/wbem/"
+      - "C:/Windows/System32/WindowsPowerShell/v1.0/"
+      - "C:/Windows/System32/OpenSSH/"
+      - "C:/Users/cheye_aj94fwz/AppData/Local/Muse Hub/lib/"
+      - "C:/Program Files (x86)/Plantronics/Spokes3G/"
+      - "C:/Program Files/Git/cmd/"
+      - "C:/Program Files/nodejs/"
+      - "C:/Program Files/dotnet/"
+      - "C:/Users/cheye_aj94fwz/AppData/Local/Microsoft/WindowsApps/"
+      - "C:/Users/cheye_aj94fwz/AppData/Local/Python/bin/"
+      - "C:/Users/cheye_aj94fwz/.dotnet/tools/"
+      - "C:/Users/cheye_aj94fwz/AppData/Roaming/npm/"
+      - "/usr/lib/x86_64-linux-android/26/bin/"
+      - "/usr/lib/x86_64-linux-android/26/sbin/"
+      - "/usr/lib/x86_64-linux-android/26/"
+    searched_directories:
+      - "C:/Users/cheye_aj94fwz/AppData/Local/Android/Sdk/ndk/30.0.15729638/toolchains/llvm/prebuilt/windows-x86_64/bin/llvm-ar-21.0.com"
+      - "C:/Users/cheye_aj94fwz/AppData/Local/Android/Sdk/ndk/30.0.15729638/toolchains/llvm/prebuilt/windows-x86_64/bin/llvm-ar-21.0.exe"
+      - "C:/Users/cheye_aj94fwz/AppData/Local/Android/Sdk/ndk/30.0.15729638/toolchains/llvm/prebuilt/windows-x86_64/bin/llvm-ar-21.0"
+      - "C:/Program Files/Microsoft SDKs/Azure/CLI2/wbin/llvm-ar-21.0.com"
+      - "C:/Program Files/Microsoft SDKs/Azure/CLI2/wbin/llvm-ar-21.0.exe"
+      - "C:/Program Files/Microsoft SDKs/Azure/CLI2/wbin/llvm-ar-21.0"
+      - "C:/Windows/System32/llvm-ar-21.0.com"
+      - "C:/Windows/System32/llvm-ar-21.0.exe"
+      - "C:/Windows/System32/llvm-ar-21.0"
+      - "C:/Windows/llvm-ar-21.0.com"
+      - "C:/Windows/llvm-ar-21.0.exe"
+      - "C:/Windows/llvm-ar-21.0"
+      - "C:/Windows/System32/wbem/llvm-ar-21.0.com"
+      - "C:/Windows/System32/wbem/llvm-ar-21.0.exe"
+      - "C:/Windows/System32/wbem/llvm-ar-21.0"
+      - "C:/Windows/System32/WindowsPowerShell/v1.0/llvm-ar-21.0.com"
+      - "C:/Windows/System32/WindowsPowerShell/v1.0/llvm-ar-21.0.exe"
+      - "C:/Windows/System32/WindowsPowerShell/v1.0/llvm-ar-21.0"
+      - "C:/Windows/System32/OpenSSH/llvm-ar-21.0.com"
+      - "C:/Windows/System32/OpenSSH/llvm-ar-21.0.exe"
+      - "C:/Windows/System32/OpenSSH/llvm-ar-21.0"
+      - "C:/Users/cheye_aj94fwz/AppData/Local/Muse Hub/lib/llvm-ar-21.0.com"
+      - "C:/Users/cheye_aj94fwz/AppData/Local/Muse Hub/lib/llvm-ar-21.0.exe"
+      - "C:/Users/cheye_aj94fwz/AppData/Local/Muse Hub/lib/llvm-ar-21.0"
+      - "C:/Program Files (x86)/Plantronics/Spokes3G/llvm-ar-21.0.com"
+      - "C:/Program Files (x86)/Plantronics/Spokes3G/llvm-ar-21.0.exe"
+      - "C:/Program Files (x86)/Plantronics/Spokes3G/llvm-ar-21.0"
+      - "C:/Program Files/Git/cmd/llvm-ar-21.0.com"
+      - "C:/Program Files/Git/cmd/llvm-ar-21.0.exe"
+      - "C:/Program Files/Git/cmd/llvm-ar-21.0"
+      - "C:/Program Files/nodejs/llvm-ar-21.0.com"
+      - "C:/Program Files/nodejs/llvm-ar-21.0.exe"
+      - "C:/Program Files/nodejs/llvm-ar-21.0"
+      - "C:/Program Files/dotnet/llvm-ar-21.0.com"
+      - "C:/Program Files/dotnet/llvm-ar-21.0.exe"
+      - "C:/Program Files/dotnet/llvm-ar-21.0"
+      - "C:/Users/cheye_aj94fwz/AppData/Local/Microsoft/WindowsApps/llvm-ar-21.0.com"
+      - "C:/Users/cheye_aj94fwz/AppData/Local/Microsoft/WindowsApps/llvm-ar-21.0.exe"
+      - "C:/Users/cheye_aj94fwz/AppData/Local/Microsoft/WindowsApps/llvm-ar-21.0"
+      - "C:/Users/cheye_aj94fwz/AppData/Local/Python/bin/llvm-ar-21.0.com"
+      - "C:/Users/cheye_aj94fwz/AppData/Local/Python/bin/llvm-ar-21.0.exe"
+      - "C:/Users/cheye_aj94fwz/AppData/Local/Python/bin/llvm-ar-21.0"
+      - "C:/Users/cheye_aj94fwz/.dotnet/tools/llvm-ar-21.0.com"
+      - "C:/Users/cheye_aj94fwz/.dotnet/tools/llvm-ar-21.0.exe"
+      - "C:/Users/cheye_aj94fwz/.dotnet/tools/llvm-ar-21.0"
+      - "C:/Users/cheye_aj94fwz/AppData/Roaming/npm/llvm-ar-21.0.com"
+      - "C:/Users/cheye_aj94fwz/AppData/Roaming/npm/llvm-ar-21.0.exe"
+      - "C:/Users/cheye_aj94fwz/AppData/Roaming/npm/llvm-ar-21.0"
+      - "/usr/lib/x86_64-linux-android/26/bin/llvm-ar-21.0.com"
+      - "/usr/lib/x86_64-linux-android/26/bin/llvm-ar-21.0.exe"
+      - "/usr/lib/x86_64-linux-android/26/bin/llvm-ar-21.0"
+      - "/usr/lib/x86_64-linux-android/26/sbin/llvm-ar-21.0.com"
+      - "/usr/lib/x86_64-linux-android/26/sbin/llvm-ar-21.0.exe"
+      - "/usr/lib/x86_64-linux-android/26/sbin/llvm-ar-21.0"
+      - "/usr/lib/x86_64-linux-android/26/llvm-ar-21.0.com"
+      - "/usr/lib/x86_64-linux-android/26/llvm-ar-21.0.exe"
+      - "/usr/lib/x86_64-linux-android/26/llvm-ar-21.0"
+      - "C:/Users/cheye_aj94fwz/AppData/Local/Android/Sdk/ndk/30.0.15729638/toolchains/llvm/prebuilt/windows-x86_64/bin/llvm-ar-21.com"
+      - "C:/Users/cheye_aj94fwz/AppData/Local/Android/Sdk/ndk/30.0.15729638/toolchains/llvm/prebuilt/windows-x86_64/bin/llvm-ar-21.exe"
+      - "C:/Users/cheye_aj94fwz/AppData/Local/Android/Sdk/ndk/30.0.15729638/toolchains/llvm/prebuilt/windows-x86_64/bin/llvm-ar-21"
+      - "C:/Program Files/Microsoft SDKs/Azure/CLI2/wbin/llvm-ar-21.com"
+      - "C:/Program Files/Microsoft SDKs/Azure/CLI2/wbin/llvm-ar-21.exe"
+      - "C:/Program Files/Microsoft SDKs/Azure/CLI2/wbin/llvm-ar-21"
+      - "C:/Windows/System32/llvm-ar-21.com"
+      - "C:/Windows/System32/llvm-ar-21.exe"
+      - "C:/Windows/System32/llvm-ar-21"
+      - "C:/Windows/llvm-ar-21.com"
+      - "C:/Windows/llvm-ar-21.exe"
+      - "C:/Windows/llvm-ar-21"
+      - "C:/Windows/System32/wbem/llvm-ar-21.com"
+      - "C:/Windows/System32/wbem/llvm-ar-21.exe"
+      - "C:/Windows/System32/wbem/llvm-ar-21"
+      - "C:/Windows/System32/WindowsPowerShell/v1.0/llvm-ar-21.com"
+      - "C:/Windows/System32/WindowsPowerShell/v1.0/llvm-ar-21.exe"
+      - "C:/Windows/System32/WindowsPowerShell/v1.0/llvm-ar-21"
+      - "C:/Windows/System32/OpenSSH/llvm-ar-21.com"
+      - "C:/Windows/System32/OpenSSH/llvm-ar-21.exe"
+      - "C:/Windows/System32/OpenSSH/llvm-ar-21"
+      - "C:/Users/cheye_aj94fwz/AppData/Local/Muse Hub/lib/llvm-ar-21.com"
+      - "C:/Users/cheye_aj94fwz/AppData/Local/Muse Hub/lib/llvm-ar-21.exe"
+      - "C:/Users/cheye_aj94fwz/AppData/Local/Muse Hub/lib/llvm-ar-21"
+      - "C:/Program Files (x86)/Plantronics/Spokes3G/llvm-ar-21.com"
+      - "C:/Program Files (x86)/Plantronics/Spokes3G/llvm-ar-21.exe"
+      - "C:/Program Files (x86)/Plantronics/Spokes3G/llvm-ar-21"
+      - "C:/Program Files/Git/cmd/llvm-ar-21.com"
+      - "C:/Program Files/Git/cmd/llvm-ar-21.exe"
+      - "C:/Program Files/Git/cmd/llvm-ar-21"
+      - "C:/Program Files/nodejs/llvm-ar-21.com"
+      - "C:/Program Files/nodejs/llvm-ar-21.exe"
+      - "C:/Program Files/nodejs/llvm-ar-21"
+      - "C:/Program Files/dotnet/llvm-ar-21.com"
+      - "C:/Program Files/dotnet/llvm-ar-21.exe"
+      - "C:/Program Files/dotnet/llvm-ar-21"
+      - "C:/Users/cheye_aj94fwz/AppData/Local/Microsoft/WindowsApps/llvm-ar-21.com"
+      - "C:/Users/cheye_aj94fwz/AppData/Local/Microsoft/WindowsApps/llvm-ar-21.exe"
+      - "C:/Users/cheye_aj94fwz/AppData/Local/Microsoft/WindowsApps/llvm-ar-21"
+      - "C:/Users/cheye_aj94fwz/AppData/Local/Python/bin/llvm-ar-21.com"
+      - "C:/Users/cheye_aj94fwz/AppData/Local/Python/bin/llvm-ar-21.exe"
+      - "C:/Users/cheye_aj94fwz/AppData/Local/Python/bin/llvm-ar-21"
+      - "C:/Users/cheye_aj94fwz/.dotnet/tools/llvm-ar-21.com"
+      - "C:/Users/cheye_aj94fwz/.dotnet/tools/llvm-ar-21.exe"
+      - "C:/Users/cheye_aj94fwz/.dotnet/tools/llvm-ar-21"
+      - "C:/Users/cheye_aj94fwz/AppData/Roaming/npm/llvm-ar-21.com"
+      - "C:/Users/cheye_aj94fwz/AppData/Roaming/npm/llvm-ar-21.exe"
+      - "C:/Users/cheye_aj94fwz/AppData/Roaming/npm/llvm-ar-21"
+      - "/usr/lib/x86_64-linux-android/26/bin/llvm-ar-21.com"
+      - "/usr/lib/x86_64-linux-android/26/bin/llvm-ar-21.exe"
+      - "/usr/lib/x86_64-linux-android/26/bin/llvm-ar-21"
+      - "/usr/lib/x86_64-linux-android/26/sbin/llvm-ar-21.com"
+      - "/usr/lib/x86_64-linux-android/26/sbin/llvm-ar-21.exe"
+      - "/usr/lib/x86_64-linux-android/26/sbin/llvm-ar-21"
+      - "/usr/lib/x86_64-linux-android/26/llvm-ar-21.com"
+      - "/usr/lib/x86_64-linux-android/26/llvm-ar-21.exe"
+      - "/usr/lib/x86_64-linux-android/26/llvm-ar-21"
+      - "C:/Users/cheye_aj94fwz/AppData/Local/Android/Sdk/ndk/30.0.15729638/toolchains/llvm/prebuilt/windows-x86_64/bin/llvm-ar21.com"
+      - "C:/Users/cheye_aj94fwz/AppData/Local/Android/Sdk/ndk/30.0.15729638/toolchains/llvm/prebuilt/windows-x86_64/bin/llvm-ar21.exe"
+      - "C:/Users/cheye_aj94fwz/AppData/Local/Android/Sdk/ndk/30.0.15729638/toolchains/llvm/prebuilt/windows-x86_64/bin/llvm-ar21"
+      - "C:/Program Files/Microsoft SDKs/Azure/CLI2/wbin/llvm-ar21.com"
+      - "C:/Program Files/Microsoft SDKs/Azure/CLI2/wbin/llvm-ar21.exe"
+      - "C:/Program Files/Microsoft SDKs/Azure/CLI2/wbin/llvm-ar21"
+      - "C:/Windows/System32/llvm-ar21.com"
+      - "C:/Windows/System32/llvm-ar21.exe"
+      - "C:/Windows/System32/llvm-ar21"
+      - "C:/Windows/llvm-ar21.com"
+      - "C:/Windows/llvm-ar21.exe"
+      - "C:/Windows/llvm-ar21"
+      - "C:/Windows/System32/wbem/llvm-ar21.com"
+      - "C:/Windows/System32/wbem/llvm-ar21.exe"
+      - "C:/Windows/System32/wbem/llvm-ar21"
+      - "C:/Windows/System32/WindowsPowerShell/v1.0/llvm-ar21.com"
+      - "C:/Windows/System32/WindowsPowerShell/v1.0/llvm-ar21.exe"
+      - "C:/Windows/System32/WindowsPowerShell/v1.0/llvm-ar21"
+      - "C:/Windows/System32/OpenSSH/llvm-ar21.com"
+      - "C:/Windows/System32/OpenSSH/llvm-ar21.exe"
+      - "C:/Windows/System32/OpenSSH/llvm-ar21"
+      - "C:/Users/cheye_aj94fwz/AppData/Local/Muse Hub/lib/llvm-ar21.com"
+      - "C:/Users/cheye_aj94fwz/AppData/Local/Muse Hub/lib/llvm-ar21.exe"
+      - "C:/Users/cheye_aj94fwz/AppData/Local/Muse Hub/lib/llvm-ar21"
+      - "C:/Program Files (x86)/Plantronics/Spokes3G/llvm-ar21.com"
+      - "C:/Program Files (x86)/Plantronics/Spokes3G/llvm-ar21.exe"
+      - "C:/Program Files (x86)/Plantronics/Spokes3G/llvm-ar21"
+      - "C:/Program Files/Git/cmd/llvm-ar21.com"
+      - "C:/Program Files/Git/cmd/llvm-ar21.exe"
+      - "C:/Program Files/Git/cmd/llvm-ar21"
+      - "C:/Program Files/nodejs/llvm-ar21.com"
+      - "C:/Program Files/nodejs/llvm-ar21.exe"
+      - "C:/Program Files/nodejs/llvm-ar21"
+      - "C:/Program Files/dotnet/llvm-ar21.com"
+      - "C:/Program Files/dotnet/llvm-ar21.exe"
+      - "C:/Program Files/dotnet/llvm-ar21"
+      - "C:/Users/cheye_aj94fwz/AppData/Local/Microsoft/WindowsApps/llvm-ar21.com"
+      - "C:/Users/cheye_aj94fwz/AppData/Local/Microsoft/WindowsApps/llvm-ar21.exe"
+      - "C:/Users/cheye_aj94fwz/AppData/Local/Microsoft/WindowsApps/llvm-ar21"
+      - "C:/Users/cheye_aj94fwz/AppData/Local/Python/bin/llvm-ar21.com"
+      - "C:/Users/cheye_aj94fwz/AppData/Local/Python/bin/llvm-ar21.exe"
+      - "C:/Users/cheye_aj94fwz/AppData/Local/Python/bin/llvm-ar21"
+      - "C:/Users/cheye_aj94fwz/.dotnet/tools/llvm-ar21.com"
+      - "C:/Users/cheye_aj94fwz/.dotnet/tools/llvm-ar21.exe"
+      - "C:/Users/cheye_aj94fwz/.dotnet/tools/llvm-ar21"
+      - "C:/Users/cheye_aj94fwz/AppData/Roaming/npm/llvm-ar21.com"
+      - "C:/Users/cheye_aj94fwz/AppData/Roaming/npm/llvm-ar21.exe"
+      - "C:/Users/cheye_aj94fwz/AppData/Roaming/npm/llvm-ar21"
+      - "/usr/lib/x86_64-linux-android/26/bin/llvm-ar21.com"
+      - "/usr/lib/x86_64-linux-android/26/bin/llvm-ar21.exe"
+      - "/usr/lib/x86_64-linux-android/26/bin/llvm-ar21"
+      - "/usr/lib/x86_64-linux-android/26/sbin/llvm-ar21.com"
+      - "/usr/lib/x86_64-linux-android/26/sbin/llvm-ar21.exe"
+      - "/usr/lib/x86_64-linux-android/26/sbin/llvm-ar21"
+      - "/usr/lib/x86_64-linux-android/26/llvm-ar21.com"
+      - "/usr/lib/x86_64-linux-android/26/llvm-ar21.exe"
+      - "/usr/lib/x86_64-linux-android/26/llvm-ar21"
+      - "C:/Users/cheye_aj94fwz/AppData/Local/Android/Sdk/ndk/30.0.15729638/toolchains/llvm/prebuilt/windows-x86_64/bin/llvm-ar.com"
+    found: "C:/Users/cheye_aj94fwz/AppData/Local/Android/Sdk/ndk/30.0.15729638/toolchains/llvm/prebuilt/windows-x86_64/bin/llvm-ar.exe"
+    search_context:
+      CMAKE_PREFIX_PATH:
+        - "C:/Users/cheye_aj94fwz/AppData/Local/Android/Sdk/ndk/30.0.15729638/toolchains/llvm/prebuilt/windows-x86_64"
+      ENV{PATH}:
+        - "C:\\Program Files\\Microsoft SDKs\\Azure\\CLI2\\wbin"
+        - "C:\\Windows\\system32"
+        - "C:\\Windows"
+        - "C:\\Windows\\System32\\Wbem"
+        - "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\"
+        - "C:\\Windows\\System32\\OpenSSH\\"
+        - "C:\\Users\\cheye_aj94fwz\\AppData\\Local\\Muse Hub\\lib"
+        - "C:\\Program Files (x86)\\Plantronics\\Spokes3G\\"
+        - "C:\\Program Files\\Git\\cmd"
+        - "C:\\Program Files\\nodejs\\"
+        - "C:\\Program Files\\dotnet\\"
+        - "C:\\Users\\cheye_aj94fwz\\AppData\\Local\\Microsoft\\WindowsApps"
+        - "C:\\Users\\cheye_aj94fwz\\AppData\\Local\\Muse Hub\\lib"
+        - "C:\\Users\\cheye_aj94fwz\\AppData\\Local\\Python\\bin"
+        - "C:\\Users\\cheye_aj94fwz\\.dotnet\\tools"
+        - "C:\\Users\\cheye_aj94fwz\\AppData\\Roaming\\npm"
+      CMAKE_SYSTEM_PREFIX_PATH:
+        - "/usr/lib/x86_64-linux-android/26"
+      CMAKE_SYSROOT: "C:/Users/cheye_aj94fwz/AppData/Local/Android/Sdk/ndk/30.0.15729638/toolchains/llvm/prebuilt/windows-x86_64/sysroot"
+      CMAKE_FIND_ROOT_PATH: "C:/Users/cheye_aj94fwz/AppData/Local/Android/Sdk/ndk/30.0.15729638"
+  -
+    kind: "find-v1"
+    backtrace:
+      - "C:/Users/cheye_aj94fwz/AppData/Local/Android/Sdk/cmake/4.1.2/share/cmake-4.1/Modules/Compiler/Clang-FindBinUtils.cmake:38 (find_program)"
+      - "C:/Users/cheye_aj94fwz/AppData/Local/Android/Sdk/cmake/4.1.2/share/cmake-4.1/Modules/CMakeDetermineCXXCompiler.cmake:207 (include)"
+      - "CMakeLists.txt:2 (project)"
+    mode: "program"
+    variable: "CMAKE_CXX_COMPILER_RANLIB"
+    description: "Generate index for LLVM archive"
+    settings:
+      SearchFramework: "NEVER"
+      SearchAppBundle: "NEVER"
+      CMAKE_FIND_USE_CMAKE_PATH: false
+      CMAKE_FIND_USE_CMAKE_ENVIRONMENT_PATH: false
+      CMAKE_FIND_USE_SYSTEM_ENVIRONMENT_PATH: true
+      CMAKE_FIND_USE_CMAKE_SYSTEM_PATH: true
+      CMAKE_FIND_USE_INSTALL_PREFIX: true
+    names:
+      - "llvm-ranlib-21.0"
+      - "llvm-ranlib-21"
+      - "llvm-ranlib21"
+      - "llvm-ranlib"
+    candidate_directories:
+      - "C:/Users/cheye_aj94fwz/AppData/Local/Android/Sdk/ndk/30.0.15729638/toolchains/llvm/prebuilt/windows-x86_64/bin/"
+      - "C:/Program Files/Microsoft SDKs/Azure/CLI2/wbin/"
+      - "C:/Windows/System32/"
+      - "C:/Windows/"
+      - "C:/Windows/System32/wbem/"
+      - "C:/Windows/System32/WindowsPowerShell/v1.0/"
+      - "C:/Windows/System32/OpenSSH/"
+      - "C:/Users/cheye_aj94fwz/AppData/Local/Muse Hub/lib/"
+      - "C:/Program Files (x86)/Plantronics/Spokes3G/"
+      - "C:/Program Files/Git/cmd/"
+      - "C:/Program Files/nodejs/"
+      - "C:/Program Files/dotnet/"
+      - "C:/Users/cheye_aj94fwz/AppData/Local/Microsoft/WindowsApps/"
+      - "C:/Users/cheye_aj94fwz/AppData/Local/Python/bin/"
+      - "C:/Users/cheye_aj94fwz/.dotnet/tools/"
+      - "C:/Users/cheye_aj94fwz/AppData/Roaming/npm/"
+      - "/usr/lib/x86_64-linux-android/26/bin/"
+      - "/usr/lib/x86_64-linux-android/26/sbin/"
+      - "/usr/lib/x86_64-linux-android/26/"
+    searched_directories:
+      - "C:/Users/cheye_aj94fwz/AppData/Local/Android/Sdk/ndk/30.0.15729638/toolchains/llvm/prebuilt/windows-x86_64/bin/llvm-ranlib-21.0.com"
+      - "C:/Users/cheye_aj94fwz/AppData/Local/Android/Sdk/ndk/30.0.15729638/toolchains/llvm/prebuilt/windows-x86_64/bin/llvm-ranlib-21.0.exe"
+      - "C:/Users/cheye_aj94fwz/AppData/Local/Android/Sdk/ndk/30.0.15729638/toolchains/llvm/prebuilt/windows-x86_64/bin/llvm-ranlib-21.0"
+      - "C:/Program Files/Microsoft SDKs/Azure/CLI2/wbin/llvm-ranlib-21.0.com"
+      - "C:/Program Files/Microsoft SDKs/Azure/CLI2/wbin/llvm-ranlib-21.0.exe"
+      - "C:/Program Files/Microsoft SDKs/Azure/CLI2/wbin/llvm-ranlib-21.0"
+      - "C:/Windows/System32/llvm-ranlib-21.0.com"
+      - "C:/Windows/System32/llvm-ranlib-21.0.exe"
+      - "C:/Windows/System32/llvm-ranlib-21.0"
+      - "C:/Windows/llvm-ranlib-21.0.com"
+      - "C:/Windows/llvm-ranlib-21.0.exe"
+      - "C:/Windows/llvm-ranlib-21.0"
+      - "C:/Windows/System32/wbem/llvm-ranlib-21.0.com"
+      - "C:/Windows/System32/wbem/llvm-ranlib-21.0.exe"
+      - "C:/Windows/System32/wbem/llvm-ranlib-21.0"
+      - "C:/Windows/System32/WindowsPowerShell/v1.0/llvm-ranlib-21.0.com"
+      - "C:/Windows/System32/WindowsPowerShell/v1.0/llvm-ranlib-21.0.exe"
+      - "C:/Windows/System32/WindowsPowerShell/v1.0/llvm-ranlib-21.0"
+      - "C:/Windows/System32/OpenSSH/llvm-ranlib-21.0.com"
+      - "C:/Windows/System32/OpenSSH/llvm-ranlib-21.0.exe"
+      - "C:/Windows/System32/OpenSSH/llvm-ranlib-21.0"
+      - "C:/Users/cheye_aj94fwz/AppData/Local/Muse Hub/lib/llvm-ranlib-21.0.com"
+      - "C:/Users/cheye_aj94fwz/AppData/Local/Muse Hub/lib/llvm-ranlib-21.0.exe"
+      - "C:/Users/cheye_aj94fwz/AppData/Local/Muse Hub/lib/llvm-ranlib-21.0"
+      - "C:/Program Files (x86)/Plantronics/Spokes3G/llvm-ranlib-21.0.com"
+      - "C:/Program Files (x86)/Plantronics/Spokes3G/llvm-ranlib-21.0.exe"
+      - "C:/Program Files (x86)/Plantronics/Spokes3G/llvm-ranlib-21.0"
+      - "C:/Program Files/Git/cmd/llvm-ranlib-21.0.com"
+      - "C:/Program Files/Git/cmd/llvm-ranlib-21.0.exe"
+      - "C:/Program Files/Git/cmd/llvm-ranlib-21.0"
+      - "C:/Program Files/nodejs/llvm-ranlib-21.0.com"
+      - "C:/Program Files/nodejs/llvm-ranlib-21.0.exe"
+      - "C:/Program Files/nodejs/llvm-ranlib-21.0"
+      - "C:/Program Files/dotnet/llvm-ranlib-21.0.com"
+      - "C:/Program Files/dotnet/llvm-ranlib-21.0.exe"
+      - "C:/Program Files/dotnet/llvm-ranlib-21.0"
+      - "C:/Users/cheye_aj94fwz/AppData/Local/Microsoft/WindowsApps/llvm-ranlib-21.0.com"
+      - "C:/Users/cheye_aj94fwz/AppData/Local/Microsoft/WindowsApps/llvm-ranlib-21.0.exe"
+      - "C:/Users/cheye_aj94fwz/AppData/Local/Microsoft/WindowsApps/llvm-ranlib-21.0"
+      - "C:/Users/cheye_aj94fwz/AppData/Local/Python/bin/llvm-ranlib-21.0.com"
+      - "C:/Users/cheye_aj94fwz/AppData/Local/Python/bin/llvm-ranlib-21.0.exe"
+      - "C:/Users/cheye_aj94fwz/AppData/Local/Python/bin/llvm-ranlib-21.0"
+      - "C:/Users/cheye_aj94fwz/.dotnet/tools/llvm-ranlib-21.0.com"
+      - "C:/Users/cheye_aj94fwz/.dotnet/tools/llvm-ranlib-21.0.exe"
+      - "C:/Users/cheye_aj94fwz/.dotnet/tools/llvm-ranlib-21.0"
+      - "C:/Users/cheye_aj94fwz/AppData/Roaming/npm/llvm-ranlib-21.0.com"
+      - "C:/Users/cheye_aj94fwz/AppData/Roaming/npm/llvm-ranlib-21.0.exe"
+      - "C:/Users/cheye_aj94fwz/AppData/Roaming/npm/llvm-ranlib-21.0"
+      - "/usr/lib/x86_64-linux-android/26/bin/llvm-ranlib-21.0.com"
+      - "/usr/lib/x86_64-linux-android/26/bin/llvm-ranlib-21.0.exe"
+      - "/usr/lib/x86_64-linux-android/26/bin/llvm-ranlib-21.0"
+      - "/usr/lib/x86_64-linux-android/26/sbin/llvm-ranlib-21.0.com"
+      - "/usr/lib/x86_64-linux-android/26/sbin/llvm-ranlib-21.0.exe"
+      - "/usr/lib/x86_64-linux-android/26/sbin/llvm-ranlib-21.0"
+      - "/usr/lib/x86_64-linux-android/26/llvm-ranlib-21.0.com"
+      - "/usr/lib/x86_64-linux-android/26/llvm-ranlib-21.0.exe"
+      - "/usr/lib/x86_64-linux-android/26/llvm-ranlib-21.0"
+      - "C:/Users/cheye_aj94fwz/AppData/Local/Android/Sdk/ndk/30.0.15729638/toolchains/llvm/prebuilt/windows-x86_64/bin/llvm-ranlib-21.com"
+      - "C:/Users/cheye_aj94fwz/AppData/Local/Android/Sdk/ndk/30.0.15729638/toolchains/llvm/prebuilt/windows-x86_64/bin/llvm-ranlib-21.exe"
+      - "C:/Users/cheye_aj94fwz/AppData/Local/Android/Sdk/ndk/30.0.15729638/toolchains/llvm/prebuilt/windows-x86_64/bin/llvm-ranlib-21"
+      - "C:/Program Files/Microsoft SDKs/Azure/CLI2/wbin/llvm-ranlib-21.com"
+      - "C:/Program Files/Microsoft SDKs/Azure/CLI2/wbin/llvm-ranlib-21.exe"
+      - "C:/Program Files/Microsoft SDKs/Azure/CLI2/wbin/llvm-ranlib-21"
+      - "C:/Windows/System32/llvm-ranlib-21.com"
+      - "C:/Windows/System32/llvm-ranlib-21.exe"
+      - "C:/Windows/System32/llvm-ranlib-21"
+      - "C:/Windows/llvm-ranlib-21.com"
+      - "C:/Windows/llvm-ranlib-21.exe"
+      - "C:/Windows/llvm-ranlib-21"
+      - "C:/Windows/System32/wbem/llvm-ranlib-21.com"
+      - "C:/Windows/System32/wbem/llvm-ranlib-21.exe"
+      - "C:/Windows/System32/wbem/llvm-ranlib-21"
+      - "C:/Windows/System32/WindowsPowerShell/v1.0/llvm-ranlib-21.com"
+      - "C:/Windows/System32/WindowsPowerShell/v1.0/llvm-ranlib-21.exe"
+      - "C:/Windows/System32/WindowsPowerShell/v1.0/llvm-ranlib-21"
+      - "C:/Windows/System32/OpenSSH/llvm-ranlib-21.com"
+      - "C:/Windows/System32/OpenSSH/llvm-ranlib-21.exe"
+      - "C:/Windows/System32/OpenSSH/llvm-ranlib-21"
+      - "C:/Users/cheye_aj94fwz/AppData/Local/Muse Hub/lib/llvm-ranlib-21.com"
+      - "C:/Users/cheye_aj94fwz/AppData/Local/Muse Hub/lib/llvm-ranlib-21.exe"
+      - "C:/Users/cheye_aj94fwz/AppData/Local/Muse Hub/lib/llvm-ranlib-21"
+      - "C:/Program Files (x86)/Plantronics/Spokes3G/llvm-ranlib-21.com"
+      - "C:/Program Files (x86)/Plantronics/Spokes3G/llvm-ranlib-21.exe"
+      - "C:/Program Files (x86)/Plantronics/Spokes3G/llvm-ranlib-21"
+      - "C:/Program Files/Git/cmd/llvm-ranlib-21.com"
+      - "C:/Program Files/Git/cmd/llvm-ranlib-21.exe"
+      - "C:/Program Files/Git/cmd/llvm-ranlib-21"
+      - "C:/Program Files/nodejs/llvm-ranlib-21.com"
+      - "C:/Program Files/nodejs/llvm-ranlib-21.exe"
+      - "C:/Program Files/nodejs/llvm-ranlib-21"
+      - "C:/Program Files/dotnet/llvm-ranlib-21.com"
+      - "C:/Program Files/dotnet/llvm-ranlib-21.exe"
+      - "C:/Program Files/dotnet/llvm-ranlib-21"
+      - "C:/Users/cheye_aj94fwz/AppData/Local/Microsoft/WindowsApps/llvm-ranlib-21.com"
+      - "C:/Users/cheye_aj94fwz/AppData/Local/Microsoft/WindowsApps/llvm-ranlib-21.exe"
+      - "C:/Users/cheye_aj94fwz/AppData/Local/Microsoft/WindowsApps/llvm-ranlib-21"
+      - "C:/Users/cheye_aj94fwz/AppData/Local/Python/bin/llvm-ranlib-21.com"
+      - "C:/Users/cheye_aj94fwz/AppData/Local/Python/bin/llvm-ranlib-21.exe"
+      - "C:/Users/cheye_aj94fwz/AppData/Local/Python/bin/llvm-ranlib-21"
+      - "C:/Users/cheye_aj94fwz/.dotnet/tools/llvm-ranlib-21.com"
+      - "C:/Users/cheye_aj94fwz/.dotnet/tools/llvm-ranlib-21.exe"
+      - "C:/Users/cheye_aj94fwz/.dotnet/tools/llvm-ranlib-21"
+      - "C:/Users/cheye_aj94fwz/AppData/Roaming/npm/llvm-ranlib-21.com"
+      - "C:/Users/cheye_aj94fwz/AppData/Roaming/npm/llvm-ranlib-21.exe"
+      - "C:/Users/cheye_aj94fwz/AppData/Roaming/npm/llvm-ranlib-21"
+      - "/usr/lib/x86_64-linux-android/26/bin/llvm-ranlib-21.com"
+      - "/usr/lib/x86_64-linux-android/26/bin/llvm-ranlib-21.exe"
+      - "/usr/lib/x86_64-linux-android/26/bin/llvm-ranlib-21"
+      - "/usr/lib/x86_64-linux-android/26/sbin/llvm-ranlib-21.com"
+      - "/usr/lib/x86_64-linux-android/26/sbin/llvm-ranlib-21.exe"
+      - "/usr/lib/x86_64-linux-android/26/sbin/llvm-ranlib-21"
+      - "/usr/lib/x86_64-linux-android/26/llvm-ranlib-21.com"
+      - "/usr/lib/x86_64-linux-android/26/llvm-ranlib-21.exe"
+      - "/usr/lib/x86_64-linux-android/26/llvm-ranlib-21"
+      - "C:/Users/cheye_aj94fwz/AppData/Local/Android/Sdk/ndk/30.0.15729638/toolchains/llvm/prebuilt/windows-x86_64/bin/llvm-ranlib21.com"
+      - "C:/Users/cheye_aj94fwz/AppData/Local/Android/Sdk/ndk/30.0.15729638/toolchains/llvm/prebuilt/windows-x86_64/bin/llvm-ranlib21.exe"
+      - "C:/Users/cheye_aj94fwz/AppData/Local/Android/Sdk/ndk/30.0.15729638/toolchains/llvm/prebuilt/windows-x86_64/bin/llvm-ranlib21"
+      - "C:/Program Files/Microsoft SDKs/Azure/CLI2/wbin/llvm-ranlib21.com"
+      - "C:/Program Files/Microsoft SDKs/Azure/CLI2/wbin/llvm-ranlib21.exe"
+      - "C:/Program Files/Microsoft SDKs/Azure/CLI2/wbin/llvm-ranlib21"
+      - "C:/Windows/System32/llvm-ranlib21.com"
+      - "C:/Windows/System32/llvm-ranlib21.exe"
+      - "C:/Windows/System32/llvm-ranlib21"
+      - "C:/Windows/llvm-ranlib21.com"
+      - "C:/Windows/llvm-ranlib21.exe"
+      - "C:/Windows/llvm-ranlib21"
+      - "C:/Windows/System32/wbem/llvm-ranlib21.com"
+      - "C:/Windows/System32/wbem/llvm-ranlib21.exe"
+      - "C:/Windows/System32/wbem/llvm-ranlib21"
+      - "C:/Windows/System32/WindowsPowerShell/v1.0/llvm-ranlib21.com"
+      - "C:/Windows/System32/WindowsPowerShell/v1.0/llvm-ranlib21.exe"
+      - "C:/Windows/System32/WindowsPowerShell/v1.0/llvm-ranlib21"
+      - "C:/Windows/System32/OpenSSH/llvm-ranlib21.com"
+      - "C:/Windows/System32/OpenSSH/llvm-ranlib21.exe"
+      - "C:/Windows/System32/OpenSSH/llvm-ranlib21"
+      - "C:/Users/cheye_aj94fwz/AppData/Local/Muse Hub/lib/llvm-ranlib21.com"
+      - "C:/Users/cheye_aj94fwz/AppData/Local/Muse Hub/lib/llvm-ranlib21.exe"
+      - "C:/Users/cheye_aj94fwz/AppData/Local/Muse Hub/lib/llvm-ranlib21"
+      - "C:/Program Files (x86)/Plantronics/Spokes3G/llvm-ranlib21.com"
+      - "C:/Program Files (x86)/Plantronics/Spokes3G/llvm-ranlib21.exe"
+      - "C:/Program Files (x86)/Plantronics/Spokes3G/llvm-ranlib21"
+      - "C:/Program Files/Git/cmd/llvm-ranlib21.com"
+      - "C:/Program Files/Git/cmd/llvm-ranlib21.exe"
+      - "C:/Program Files/Git/cmd/llvm-ranlib21"
+      - "C:/Program Files/nodejs/llvm-ranlib21.com"
+      - "C:/Program Files/nodejs/llvm-ranlib21.exe"
+      - "C:/Program Files/nodejs/llvm-ranlib21"
+      - "C:/Program Files/dotnet/llvm-ranlib21.com"
+      - "C:/Program Files/dotnet/llvm-ranlib21.exe"
+      - "C:/Program Files/dotnet/llvm-ranlib21"
+      - "C:/Users/cheye_aj94fwz/AppData/Local/Microsoft/WindowsApps/llvm-ranlib21.com"
+      - "C:/Users/cheye_aj94fwz/AppData/Local/Microsoft/WindowsApps/llvm-ranlib21.exe"
+      - "C:/Users/cheye_aj94fwz/AppData/Local/Microsoft/WindowsApps/llvm-ranlib21"
+      - "C:/Users/cheye_aj94fwz/AppData/Local/Python/bin/llvm-ranlib21.com"
+      - "C:/Users/cheye_aj94fwz/AppData/Local/Python/bin/llvm-ranlib21.exe"
+      - "C:/Users/cheye_aj94fwz/AppData/Local/Python/bin/llvm-ranlib21"
+      - "C:/Users/cheye_aj94fwz/.dotnet/tools/llvm-ranlib21.com"
+      - "C:/Users/cheye_aj94fwz/.dotnet/tools/llvm-ranlib21.exe"
+      - "C:/Users/cheye_aj94fwz/.dotnet/tools/llvm-ranlib21"
+      - "C:/Users/cheye_aj94fwz/AppData/Roaming/npm/llvm-ranlib21.com"
+      - "C:/Users/cheye_aj94fwz/AppData/Roaming/npm/llvm-ranlib21.exe"
+      - "C:/Users/cheye_aj94fwz/AppData/Roaming/npm/llvm-ranlib21"
+      - "/usr/lib/x86_64-linux-android/26/bin/llvm-ranlib21.com"
+      - "/usr/lib/x86_64-linux-android/26/bin/llvm-ranlib21.exe"
+      - "/usr/lib/x86_64-linux-android/26/bin/llvm-ranlib21"
+      - "/usr/lib/x86_64-linux-android/26/sbin/llvm-ranlib21.com"
+      - "/usr/lib/x86_64-linux-android/26/sbin/llvm-ranlib21.exe"
+      - "/usr/lib/x86_64-linux-android/26/sbin/llvm-ranlib21"
+      - "/usr/lib/x86_64-linux-android/26/llvm-ranlib21.com"
+      - "/usr/lib/x86_64-linux-android/26/llvm-ranlib21.exe"
+      - "/usr/lib/x86_64-linux-android/26/llvm-ranlib21"
+      - "C:/Users/cheye_aj94fwz/AppData/Local/Android/Sdk/ndk/30.0.15729638/toolchains/llvm/prebuilt/windows-x86_64/bin/llvm-ranlib.com"
+    found: "C:/Users/cheye_aj94fwz/AppData/Local/Android/Sdk/ndk/30.0.15729638/toolchains/llvm/prebuilt/windows-x86_64/bin/llvm-ranlib.exe"
+    search_context:
+      CMAKE_PREFIX_PATH:
+        - "C:/Users/cheye_aj94fwz/AppData/Local/Android/Sdk/ndk/30.0.15729638/toolchains/llvm/prebuilt/windows-x86_64"
+      ENV{PATH}:
+        - "C:\\Program Files\\Microsoft SDKs\\Azure\\CLI2\\wbin"
+        - "C:\\Windows\\system32"
+        - "C:\\Windows"
+        - "C:\\Windows\\System32\\Wbem"
+        - "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\"
+        - "C:\\Windows\\System32\\OpenSSH\\"
+        - "C:\\Users\\cheye_aj94fwz\\AppData\\Local\\Muse Hub\\lib"
+        - "C:\\Program Files (x86)\\Plantronics\\Spokes3G\\"
+        - "C:\\Program Files\\Git\\cmd"
+        - "C:\\Program Files\\nodejs\\"
+        - "C:\\Program Files\\dotnet\\"
+        - "C:\\Users\\cheye_aj94fwz\\AppData\\Local\\Microsoft\\WindowsApps"
+        - "C:\\Users\\cheye_aj94fwz\\AppData\\Local\\Muse Hub\\lib"
+        - "C:\\Users\\cheye_aj94fwz\\AppData\\Local\\Python\\bin"
+        - "C:\\Users\\cheye_aj94fwz\\.dotnet\\tools"
+        - "C:\\Users\\cheye_aj94fwz\\AppData\\Roaming\\npm"
+      CMAKE_SYSTEM_PREFIX_PATH:
+        - "/usr/lib/x86_64-linux-android/26"
+      CMAKE_SYSROOT: "C:/Users/cheye_aj94fwz/AppData/Local/Android/Sdk/ndk/30.0.15729638/toolchains/llvm/prebuilt/windows-x86_64/sysroot"
+      CMAKE_FIND_ROOT_PATH: "C:/Users/cheye_aj94fwz/AppData/Local/Android/Sdk/ndk/30.0.15729638"
+  -
+    kind: "find-v1"
+    backtrace:
+      - "C:/Users/cheye_aj94fwz/AppData/Local/Android/Sdk/cmake/4.1.2/share/cmake-4.1/Modules/Compiler/Clang-FindBinUtils.cmake:50 (find_program)"
+      - "C:/Users/cheye_aj94fwz/AppData/Local/Android/Sdk/cmake/4.1.2/share/cmake-4.1/Modules/CMakeDetermineCXXCompiler.cmake:207 (include)"
+      - "CMakeLists.txt:2 (project)"
+    mode: "program"
+    variable: "CMAKE_CXX_COMPILER_CLANG_SCAN_DEPS"
+    description: "`clang-scan-deps` dependency scanner"
+    settings:
+      SearchFramework: "NEVER"
+      SearchAppBundle: "NEVER"
+      CMAKE_FIND_USE_CMAKE_PATH: false
+      CMAKE_FIND_USE_CMAKE_ENVIRONMENT_PATH: false
+      CMAKE_FIND_USE_SYSTEM_ENVIRONMENT_PATH: true
+      CMAKE_FIND_USE_CMAKE_SYSTEM_PATH: true
+      CMAKE_FIND_USE_INSTALL_PREFIX: true
+    names:
+      - "clang-scan-deps-21.0"
+      - "clang-scan-deps-21"
+      - "clang-scan-deps21"
+      - "clang-scan-deps"
+    candidate_directories:
+      - "C:/Users/cheye_aj94fwz/AppData/Local/Android/Sdk/ndk/30.0.15729638/toolchains/llvm/prebuilt/windows-x86_64/bin/"
+      - "C:/Program Files/Microsoft SDKs/Azure/CLI2/wbin/"
+      - "C:/Windows/System32/"
+      - "C:/Windows/"
+      - "C:/Windows/System32/wbem/"
+      - "C:/Windows/System32/WindowsPowerShell/v1.0/"
+      - "C:/Windows/System32/OpenSSH/"
+      - "C:/Users/cheye_aj94fwz/AppData/Local/Muse Hub/lib/"
+      - "C:/Program Files (x86)/Plantronics/Spokes3G/"
+      - "C:/Program Files/Git/cmd/"
+      - "C:/Program Files/nodejs/"
+      - "C:/Program Files/dotnet/"
+      - "C:/Users/cheye_aj94fwz/AppData/Local/Microsoft/WindowsApps/"
+      - "C:/Users/cheye_aj94fwz/AppData/Local/Python/bin/"
+      - "C:/Users/cheye_aj94fwz/.dotnet/tools/"
+      - "C:/Users/cheye_aj94fwz/AppData/Roaming/npm/"
+      - "/usr/lib/x86_64-linux-android/26/bin/"
+      - "/usr/lib/x86_64-linux-android/26/sbin/"
+      - "/usr/lib/x86_64-linux-android/26/"
+    searched_directories:
+      - "C:/Users/cheye_aj94fwz/AppData/Local/Android/Sdk/ndk/30.0.15729638/toolchains/llvm/prebuilt/windows-x86_64/bin/clang-scan-deps-21.0.com"
+      - "C:/Users/cheye_aj94fwz/AppData/Local/Android/Sdk/ndk/30.0.15729638/toolchains/llvm/prebuilt/windows-x86_64/bin/clang-scan-deps-21.0.exe"
+      - "C:/Users/cheye_aj94fwz/AppData/Local/Android/Sdk/ndk/30.0.15729638/toolchains/llvm/prebuilt/windows-x86_64/bin/clang-scan-deps-21.0"
+      - "C:/Program Files/Microsoft SDKs/Azure/CLI2/wbin/clang-scan-deps-21.0.com"
+      - "C:/Program Files/Microsoft SDKs/Azure/CLI2/wbin/clang-scan-deps-21.0.exe"
+      - "C:/Program Files/Microsoft SDKs/Azure/CLI2/wbin/clang-scan-deps-21.0"
+      - "C:/Windows/System32/clang-scan-deps-21.0.com"
+      - "C:/Windows/System32/clang-scan-deps-21.0.exe"
+      - "C:/Windows/System32/clang-scan-deps-21.0"
+      - "C:/Windows/clang-scan-deps-21.0.com"
+      - "C:/Windows/clang-scan-deps-21.0.exe"
+      - "C:/Windows/clang-scan-deps-21.0"
+      - "C:/Windows/System32/wbem/clang-scan-deps-21.0.com"
+      - "C:/Windows/System32/wbem/clang-scan-deps-21.0.exe"
+      - "C:/Windows/System32/wbem/clang-scan-deps-21.0"
+      - "C:/Windows/System32/WindowsPowerShell/v1.0/clang-scan-deps-21.0.com"
+      - "C:/Windows/System32/WindowsPowerShell/v1.0/clang-scan-deps-21.0.exe"
+      - "C:/Windows/System32/WindowsPowerShell/v1.0/clang-scan-deps-21.0"
+      - "C:/Windows/System32/OpenSSH/clang-scan-deps-21.0.com"
+      - "C:/Windows/System32/OpenSSH/clang-scan-deps-21.0.exe"
+      - "C:/Windows/System32/OpenSSH/clang-scan-deps-21.0"
+      - "C:/Users/cheye_aj94fwz/AppData/Local/Muse Hub/lib/clang-scan-deps-21.0.com"
+      - "C:/Users/cheye_aj94fwz/AppData/Local/Muse Hub/lib/clang-scan-deps-21.0.exe"
+      - "C:/Users/cheye_aj94fwz/AppData/Local/Muse Hub/lib/clang-scan-deps-21.0"
+      - "C:/Program Files (x86)/Plantronics/Spokes3G/clang-scan-deps-21.0.com"
+      - "C:/Program Files (x86)/Plantronics/Spokes3G/clang-scan-deps-21.0.exe"
+      - "C:/Program Files (x86)/Plantronics/Spokes3G/clang-scan-deps-21.0"
+      - "C:/Program Files/Git/cmd/clang-scan-deps-21.0.com"
+      - "C:/Program Files/Git/cmd/clang-scan-deps-21.0.exe"
+      - "C:/Program Files/Git/cmd/clang-scan-deps-21.0"
+      - "C:/Program Files/nodejs/clang-scan-deps-21.0.com"
+      - "C:/Program Files/nodejs/clang-scan-deps-21.0.exe"
+      - "C:/Program Files/nodejs/clang-scan-deps-21.0"
+      - "C:/Program Files/dotnet/clang-scan-deps-21.0.com"
+      - "C:/Program Files/dotnet/clang-scan-deps-21.0.exe"
+      - "C:/Program Files/dotnet/clang-scan-deps-21.0"
+      - "C:/Users/cheye_aj94fwz/AppData/Local/Microsoft/WindowsApps/clang-scan-deps-21.0.com"
+      - "C:/Users/cheye_aj94fwz/AppData/Local/Microsoft/WindowsApps/clang-scan-deps-21.0.exe"
+      - "C:/Users/cheye_aj94fwz/AppData/Local/Microsoft/WindowsApps/clang-scan-deps-21.0"
+      - "C:/Users/cheye_aj94fwz/AppData/Local/Python/bin/clang-scan-deps-21.0.com"
+      - "C:/Users/cheye_aj94fwz/AppData/Local/Python/bin/clang-scan-deps-21.0.exe"
+      - "C:/Users/cheye_aj94fwz/AppData/Local/Python/bin/clang-scan-deps-21.0"
+      - "C:/Users/cheye_aj94fwz/.dotnet/tools/clang-scan-deps-21.0.com"
+      - "C:/Users/cheye_aj94fwz/.dotnet/tools/clang-scan-deps-21.0.exe"
+      - "C:/Users/cheye_aj94fwz/.dotnet/tools/clang-scan-deps-21.0"
+      - "C:/Users/cheye_aj94fwz/AppData/Roaming/npm/clang-scan-deps-21.0.com"
+      - "C:/Users/cheye_aj94fwz/AppData/Roaming/npm/clang-scan-deps-21.0.exe"
+      - "C:/Users/cheye_aj94fwz/AppData/Roaming/npm/clang-scan-deps-21.0"
+      - "/usr/lib/x86_64-linux-android/26/bin/clang-scan-deps-21.0.com"
+      - "/usr/lib/x86_64-linux-android/26/bin/clang-scan-deps-21.0.exe"
+      - "/usr/lib/x86_64-linux-android/26/bin/clang-scan-deps-21.0"
+      - "/usr/lib/x86_64-linux-android/26/sbin/clang-scan-deps-21.0.com"
+      - "/usr/lib/x86_64-linux-android/26/sbin/clang-scan-deps-21.0.exe"
+      - "/usr/lib/x86_64-linux-android/26/sbin/clang-scan-deps-21.0"
+      - "/usr/lib/x86_64-linux-android/26/clang-scan-deps-21.0.com"
+      - "/usr/lib/x86_64-linux-android/26/clang-scan-deps-21.0.exe"
+      - "/usr/lib/x86_64-linux-android/26/clang-scan-deps-21.0"
+      - "C:/Users/cheye_aj94fwz/AppData/Local/Android/Sdk/ndk/30.0.15729638/toolchains/llvm/prebuilt/windows-x86_64/bin/clang-scan-deps-21.com"
+      - "C:/Users/cheye_aj94fwz/AppData/Local/Android/Sdk/ndk/30.0.15729638/toolchains/llvm/prebuilt/windows-x86_64/bin/clang-scan-deps-21.exe"
+      - "C:/Users/cheye_aj94fwz/AppData/Local/Android/Sdk/ndk/30.0.15729638/toolchains/llvm/prebuilt/windows-x86_64/bin/clang-scan-deps-21"
+      - "C:/Program Files/Microsoft SDKs/Azure/CLI2/wbin/clang-scan-deps-21.com"
+      - "C:/Program Files/Microsoft SDKs/Azure/CLI2/wbin/clang-scan-deps-21.exe"
+      - "C:/Program Files/Microsoft SDKs/Azure/CLI2/wbin/clang-scan-deps-21"
+      - "C:/Windows/System32/clang-scan-deps-21.com"
+      - "C:/Windows/System32/clang-scan-deps-21.exe"
+      - "C:/Windows/System32/clang-scan-deps-21"
+      - "C:/Windows/clang-scan-deps-21.com"
+      - "C:/Windows/clang-scan-deps-21.exe"
+      - "C:/Windows/clang-scan-deps-21"
+      - "C:/Windows/System32/wbem/clang-scan-deps-21.com"
+      - "C:/Windows/System32/wbem/clang-scan-deps-21.exe"
+      - "C:/Windows/System32/wbem/clang-scan-deps-21"
+      - "C:/Windows/System32/WindowsPowerShell/v1.0/clang-scan-deps-21.com"
+      - "C:/Windows/System32/WindowsPowerShell/v1.0/clang-scan-deps-21.exe"
+      - "C:/Windows/System32/WindowsPowerShell/v1.0/clang-scan-deps-21"
+      - "C:/Windows/System32/OpenSSH/clang-scan-deps-21.com"
+      - "C:/Windows/System32/OpenSSH/clang-scan-deps-21.exe"
+      - "C:/Windows/System32/OpenSSH/clang-scan-deps-21"
+      - "C:/Users/cheye_aj94fwz/AppData/Local/Muse Hub/lib/clang-scan-deps-21.com"
+      - "C:/Users/cheye_aj94fwz/AppData/Local/Muse Hub/lib/clang-scan-deps-21.exe"
+      - "C:/Users/cheye_aj94fwz/AppData/Local/Muse Hub/lib/clang-scan-deps-21"
+      - "C:/Program Files (x86)/Plantronics/Spokes3G/clang-scan-deps-21.com"
+      - "C:/Program Files (x86)/Plantronics/Spokes3G/clang-scan-deps-21.exe"
+      - "C:/Program Files (x86)/Plantronics/Spokes3G/clang-scan-deps-21"
+      - "C:/Program Files/Git/cmd/clang-scan-deps-21.com"
+      - "C:/Program Files/Git/cmd/clang-scan-deps-21.exe"
+      - "C:/Program Files/Git/cmd/clang-scan-deps-21"
+      - "C:/Program Files/nodejs/clang-scan-deps-21.com"
+      - "C:/Program Files/nodejs/clang-scan-deps-21.exe"
+      - "C:/Program Files/nodejs/clang-scan-deps-21"
+      - "C:/Program Files/dotnet/clang-scan-deps-21.com"
+      - "C:/Program Files/dotnet/clang-scan-deps-21.exe"
+      - "C:/Program Files/dotnet/clang-scan-deps-21"
+      - "C:/Users/cheye_aj94fwz/AppData/Local/Microsoft/WindowsApps/clang-scan-deps-21.com"
+      - "C:/Users/cheye_aj94fwz/AppData/Local/Microsoft/WindowsApps/clang-scan-deps-21.exe"
+      - "C:/Users/cheye_aj94fwz/AppData/Local/Microsoft/WindowsApps/clang-scan-deps-21"
+      - "C:/Users/cheye_aj94fwz/AppData/Local/Python/bin/clang-scan-deps-21.com"
+      - "C:/Users/cheye_aj94fwz/AppData/Local/Python/bin/clang-scan-deps-21.exe"
+      - "C:/Users/cheye_aj94fwz/AppData/Local/Python/bin/clang-scan-deps-21"
+      - "C:/Users/cheye_aj94fwz/.dotnet/tools/clang-scan-deps-21.com"
+      - "C:/Users/cheye_aj94fwz/.dotnet/tools/clang-scan-deps-21.exe"
+      - "C:/Users/cheye_aj94fwz/.dotnet/tools/clang-scan-deps-21"
+      - "C:/Users/cheye_aj94fwz/AppData/Roaming/npm/clang-scan-deps-21.com"
+      - "C:/Users/cheye_aj94fwz/AppData/Roaming/npm/clang-scan-deps-21.exe"
+      - "C:/Users/cheye_aj94fwz/AppData/Roaming/npm/clang-scan-deps-21"
+      - "/usr/lib/x86_64-linux-android/26/bin/clang-scan-deps-21.com"
+      - "/usr/lib/x86_64-linux-android/26/bin/clang-scan-deps-21.exe"
+      - "/usr/lib/x86_64-linux-android/26/bin/clang-scan-deps-21"
+      - "/usr/lib/x86_64-linux-android/26/sbin/clang-scan-deps-21.com"
+      - "/usr/lib/x86_64-linux-android/26/sbin/clang-scan-deps-21.exe"
+      - "/usr/lib/x86_64-linux-android/26/sbin/clang-scan-deps-21"
+      - "/usr/lib/x86_64-linux-android/26/clang-scan-deps-21.com"
+      - "/usr/lib/x86_64-linux-android/26/clang-scan-deps-21.exe"
+      - "/usr/lib/x86_64-linux-android/26/clang-scan-deps-21"
+      - "C:/Users/cheye_aj94fwz/AppData/Local/Android/Sdk/ndk/30.0.15729638/toolchains/llvm/prebuilt/windows-x86_64/bin/clang-scan-deps21.com"
+      - "C:/Users/cheye_aj94fwz/AppData/Local/Android/Sdk/ndk/30.0.15729638/toolchains/llvm/prebuilt/windows-x86_64/bin/clang-scan-deps21.exe"
+      - "C:/Users/cheye_aj94fwz/AppData/Local/Android/Sdk/ndk/30.0.15729638/toolchains/llvm/prebuilt/windows-x86_64/bin/clang-scan-deps21"
+      - "C:/Program Files/Microsoft SDKs/Azure/CLI2/wbin/clang-scan-deps21.com"
+      - "C:/Program Files/Microsoft SDKs/Azure/CLI2/wbin/clang-scan-deps21.exe"
+      - "C:/Program Files/Microsoft SDKs/Azure/CLI2/wbin/clang-scan-deps21"
+      - "C:/Windows/System32/clang-scan-deps21.com"
+      - "C:/Windows/System32/clang-scan-deps21.exe"
+      - "C:/Windows/System32/clang-scan-deps21"
+      - "C:/Windows/clang-scan-deps21.com"
+      - "C:/Windows/clang-scan-deps21.exe"
+      - "C:/Windows/clang-scan-deps21"
+      - "C:/Windows/System32/wbem/clang-scan-deps21.com"
+      - "C:/Windows/System32/wbem/clang-scan-deps21.exe"
+      - "C:/Windows/System32/wbem/clang-scan-deps21"
+      - "C:/Windows/System32/WindowsPowerShell/v1.0/clang-scan-deps21.com"
+      - "C:/Windows/System32/WindowsPowerShell/v1.0/clang-scan-deps21.exe"
+      - "C:/Windows/System32/WindowsPowerShell/v1.0/clang-scan-deps21"
+      - "C:/Windows/System32/OpenSSH/clang-scan-deps21.com"
+      - "C:/Windows/System32/OpenSSH/clang-scan-deps21.exe"
+      - "C:/Windows/System32/OpenSSH/clang-scan-deps21"
+      - "C:/Users/cheye_aj94fwz/AppData/Local/Muse Hub/lib/clang-scan-deps21.com"
+      - "C:/Users/cheye_aj94fwz/AppData/Local/Muse Hub/lib/clang-scan-deps21.exe"
+      - "C:/Users/cheye_aj94fwz/AppData/Local/Muse Hub/lib/clang-scan-deps21"
+      - "C:/Program Files (x86)/Plantronics/Spokes3G/clang-scan-deps21.com"
+      - "C:/Program Files (x86)/Plantronics/Spokes3G/clang-scan-deps21.exe"
+      - "C:/Program Files (x86)/Plantronics/Spokes3G/clang-scan-deps21"
+      - "C:/Program Files/Git/cmd/clang-scan-deps21.com"
+      - "C:/Program Files/Git/cmd/clang-scan-deps21.exe"
+      - "C:/Program Files/Git/cmd/clang-scan-deps21"
+      - "C:/Program Files/nodejs/clang-scan-deps21.com"
+      - "C:/Program Files/nodejs/clang-scan-deps21.exe"
+      - "C:/Program Files/nodejs/clang-scan-deps21"
+      - "C:/Program Files/dotnet/clang-scan-deps21.com"
+      - "C:/Program Files/dotnet/clang-scan-deps21.exe"
+      - "C:/Program Files/dotnet/clang-scan-deps21"
+      - "C:/Users/cheye_aj94fwz/AppData/Local/Microsoft/WindowsApps/clang-scan-deps21.com"
+      - "C:/Users/cheye_aj94fwz/AppData/Local/Microsoft/WindowsApps/clang-scan-deps21.exe"
+      - "C:/Users/cheye_aj94fwz/AppData/Local/Microsoft/WindowsApps/clang-scan-deps21"
+      - "C:/Users/cheye_aj94fwz/AppData/Local/Python/bin/clang-scan-deps21.com"
+      - "C:/Users/cheye_aj94fwz/AppData/Local/Python/bin/clang-scan-deps21.exe"
+      - "C:/Users/cheye_aj94fwz/AppData/Local/Python/bin/clang-scan-deps21"
+      - "C:/Users/cheye_aj94fwz/.dotnet/tools/clang-scan-deps21.com"
+      - "C:/Users/cheye_aj94fwz/.dotnet/tools/clang-scan-deps21.exe"
+      - "C:/Users/cheye_aj94fwz/.dotnet/tools/clang-scan-deps21"
+      - "C:/Users/cheye_aj94fwz/AppData/Roaming/npm/clang-scan-deps21.com"
+      - "C:/Users/cheye_aj94fwz/AppData/Roaming/npm/clang-scan-deps21.exe"
+      - "C:/Users/cheye_aj94fwz/AppData/Roaming/npm/clang-scan-deps21"
+      - "/usr/lib/x86_64-linux-android/26/bin/clang-scan-deps21.com"
+      - "/usr/lib/x86_64-linux-android/26/bin/clang-scan-deps21.exe"
+      - "/usr/lib/x86_64-linux-android/26/bin/clang-scan-deps21"
+      - "/usr/lib/x86_64-linux-android/26/sbin/clang-scan-deps21.com"
+      - "/usr/lib/x86_64-linux-android/26/sbin/clang-scan-deps21.exe"
+      - "/usr/lib/x86_64-linux-android/26/sbin/clang-scan-deps21"
+      - "/usr/lib/x86_64-linux-android/26/clang-scan-deps21.com"
+      - "/usr/lib/x86_64-linux-android/26/clang-scan-deps21.exe"
+      - "/usr/lib/x86_64-linux-android/26/clang-scan-deps21"
+      - "C:/Users/cheye_aj94fwz/AppData/Local/Android/Sdk/ndk/30.0.15729638/toolchains/llvm/prebuilt/windows-x86_64/bin/clang-scan-deps.com"
+    found: "C:/Users/cheye_aj94fwz/AppData/Local/Android/Sdk/ndk/30.0.15729638/toolchains/llvm/prebuilt/windows-x86_64/bin/clang-scan-deps.exe"
+    search_context:
+      CMAKE_PREFIX_PATH:
+        - "C:/Users/cheye_aj94fwz/AppData/Local/Android/Sdk/ndk/30.0.15729638/toolchains/llvm/prebuilt/windows-x86_64"
+      ENV{PATH}:
+        - "C:\\Program Files\\Microsoft SDKs\\Azure\\CLI2\\wbin"
+        - "C:\\Windows\\system32"
+        - "C:\\Windows"
+        - "C:\\Windows\\System32\\Wbem"
+        - "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\"
+        - "C:\\Windows\\System32\\OpenSSH\\"
+        - "C:\\Users\\cheye_aj94fwz\\AppData\\Local\\Muse Hub\\lib"
+        - "C:\\Program Files (x86)\\Plantronics\\Spokes3G\\"
+        - "C:\\Program Files\\Git\\cmd"
+        - "C:\\Program Files\\nodejs\\"
+        - "C:\\Program Files\\dotnet\\"
+        - "C:\\Users\\cheye_aj94fwz\\AppData\\Local\\Microsoft\\WindowsApps"
+        - "C:\\Users\\cheye_aj94fwz\\AppData\\Local\\Muse Hub\\lib"
+        - "C:\\Users\\cheye_aj94fwz\\AppData\\Local\\Python\\bin"
+        - "C:\\Users\\cheye_aj94fwz\\.dotnet\\tools"
+        - "C:\\Users\\cheye_aj94fwz\\AppData\\Roaming\\npm"
+      CMAKE_SYSTEM_PREFIX_PATH:
+        - "/usr/lib/x86_64-linux-android/26"
+      CMAKE_SYSROOT: "C:/Users/cheye_aj94fwz/AppData/Local/Android/Sdk/ndk/30.0.15729638/toolchains/llvm/prebuilt/windows-x86_64/sysroot"
+      CMAKE_FIND_ROOT_PATH: "C:/Users/cheye_aj94fwz/AppData/Local/Android/Sdk/ndk/30.0.15729638"
+  -
+    kind: "try_compile-v1"
+    backtrace:
+      - "C:/Users/cheye_aj94fwz/AppData/Local/Android/Sdk/cmake/4.1.2/share/cmake-4.1/Modules/CMakeDetermineCompilerABI.cmake:83 (try_compile)"
+      - "C:/Users/cheye_aj94fwz/AppData/Local/Android/Sdk/cmake/4.1.2/share/cmake-4.1/Modules/CMakeTestCXXCompiler.cmake:26 (CMAKE_DETERMINE_COMPILER_ABI)"
+      - "CMakeLists.txt:2 (project)"
+    checks:
+      - "Detecting CXX compiler ABI info"
+    directories:
+      source: "C:/Users/cheye_aj94fwz/Documents/GitHub/audiochoice/android-app/app/.cxx/Debug/532q214i/x86_64/CMakeFiles/CMakeScratch/TryCompile-4s43cr"
+      binary: "C:/Users/cheye_aj94fwz/Documents/GitHub/audiochoice/android-app/app/.cxx/Debug/532q214i/x86_64/CMakeFiles/CMakeScratch/TryCompile-4s43cr"
+    cmakeVariables:
+      ANDROID_ABI: "x86_64"
+      ANDROID_ARM_MODE: "thumb"
+      ANDROID_PIE: "TRUE"
+      ANDROID_PLATFORM: "android-26"
+      ANDROID_STL: "c++_static"
+      ANDROID_TOOLCHAIN: "clang"
+      CMAKE_CXX_COMPILER_CLANG_SCAN_DEPS: "C:/Users/cheye_aj94fwz/AppData/Local/Android/Sdk/ndk/30.0.15729638/toolchains/llvm/prebuilt/windows-x86_64/bin/clang-scan-deps.exe"
+      CMAKE_CXX_COMPILER_TARGET: "x86_64-none-linux-android26"
+      CMAKE_CXX_FLAGS: "-g -DANDROID -fdata-sections -ffunction-sections -funwind-tables -fstack-protector-strong -no-canonical-prefixes -D_FORTIFY_SOURCE=2 -Wformat  -O3"
+      CMAKE_CXX_FLAGS_DEBUG: "-fno-limit-debug-info "
+      CMAKE_CXX_SCAN_FOR_MODULES: "OFF"
+      CMAKE_C_COMPILER_TARGET: "x86_64-none-linux-android26"
+      CMAKE_EXE_LINKER_FLAGS: "-static-libstdc++ -Wl,--build-id=sha1 -Wl,--no-rosegment -Wl,--no-undefined-version -Wl,--fatal-warnings -Wl,--no-undefined -Qunused-arguments  "
+      CMAKE_POSITION_INDEPENDENT_CODE: "TRUE"
+      CMAKE_SYSROOT: "C:/Users/cheye_aj94fwz/AppData/Local/Android/Sdk/ndk/30.0.15729638/toolchains/llvm/prebuilt/windows-x86_64/sysroot"
+    buildResult:
+      variable: "CMAKE_CXX_ABI_COMPILED"
+      cached: true
+      stdout: |
+        Change Dir: 'C:/Users/cheye_aj94fwz/Documents/GitHub/audiochoice/android-app/app/.cxx/Debug/532q214i/x86_64/CMakeFiles/CMakeScratch/TryCompile-4s43cr'
+        
+        Run Build Command(s): C:\\Users\\cheye_aj94fwz\\AppData\\Local\\Android\\Sdk\\cmake\\4.1.2\\bin\\ninja.exe -v cmTC_d8da2
+        [1/2] C:\\Users\\cheye_aj94fwz\\AppData\\Local\\Android\\Sdk\\ndk\\30.0.15729638\\toolchains\\llvm\\prebuilt\\windows-x86_64\\bin\\clang++.exe --target=x86_64-none-linux-android26 --sysroot=C:/Users/cheye_aj94fwz/AppData/Local/Android/Sdk/ndk/30.0.15729638/toolchains/llvm/prebuilt/windows-x86_64/sysroot   -g -DANDROID -fdata-sections -ffunction-sections -funwind-tables -fstack-protector-strong -no-canonical-prefixes -D_FORTIFY_SOURCE=2 -Wformat  -O3  -fPIE   -v -MD -MT CMakeFiles/cmTC_d8da2.dir/CMakeCXXCompilerABI.cpp.o -MF CMakeFiles\\cmTC_d8da2.dir\\CMakeCXXCompilerABI.cpp.o.d -o CMakeFiles/cmTC_d8da2.dir/CMakeCXXCompilerABI.cpp.o -c C:/Users/cheye_aj94fwz/AppData/Local/Android/Sdk/cmake/4.1.2/share/cmake-4.1/Modules/CMakeCXXCompilerABI.cpp
+        Android (15422139, based on r574158b) clang version 21.0.0 (https://android.googlesource.com/toolchain/llvm-project 9f872551d3c681d06fd303b36f16ed5c274735eb)
+        Target: x86_64-none-linux-android26
+        Thread model: posix
+        InstalledDir: C:/Users/cheye_aj94fwz/AppData/Local/Android/Sdk/ndk/30.0.15729638/toolchains/llvm/prebuilt/windows-x86_64/bin
+         (in-process)
+         "C:/Users/cheye_aj94fwz/AppData/Local/Android/Sdk/ndk/30.0.15729638/toolchains/llvm/prebuilt/windows-x86_64/bin/clang++.exe" -cc1 -triple x86_64-none-linux-android26 -emit-obj -disable-free -clear-ast-before-backend -disable-llvm-verifier -discard-value-names -main-file-name CMakeCXXCompilerABI.cpp -mrelocation-model pic -pic-level 2 -pic-is-pie -mframe-pointer=non-leaf -ffp-contract=on -fno-rounding-math -mconstructor-aliases -funwind-tables=2 -target-cpu x86-64 -target-feature +sse4.2 -target-feature +popcnt -target-feature +cx16 -tune-cpu generic -debug-info-kind=constructor -dwarf-version=4 -debugger-tuning=gdb -fdebug-compilation-dir=C:/Users/cheye_aj94fwz/Documents/GitHub/audiochoice/android-app/app/.cxx/Debug/532q214i/x86_64/CMakeFiles/CMakeScratch/TryCompile-4s43cr -v -ffunction-sections -fdata-sections -fcoverage-compilation-dir=C:/Users/cheye_aj94fwz/Documents/GitHub/audiochoice/android-app/app/.cxx/Debug/532q214i/x86_64/CMakeFiles/CMakeScratch/TryCompile-4s43cr -resource-dir C:/Users/cheye_aj94fwz/AppData/Local/Android/Sdk/ndk/30.0.15729638/toolchains/llvm/prebuilt/windows-x86_64/lib/clang/21 -dependency-file "CMakeFiles\\\\cmTC_d8da2.dir\\\\CMakeCXXCompilerABI.cpp.o.d" -MT CMakeFiles/cmTC_d8da2.dir/CMakeCXXCompilerABI.cpp.o -sys-header-deps -D ANDROID -D _FORTIFY_SOURCE=2 -isysroot C:/Users/cheye_aj94fwz/AppData/Local/Android/Sdk/ndk/30.0.15729638/toolchains/llvm/prebuilt/windows-x86_64/sysroot -internal-isystem C:/Users/cheye_aj94fwz/AppData/Local/Android/Sdk/ndk/30.0.15729638/toolchains/llvm/prebuilt/windows-x86_64/sysroot/usr/include/c++/v1 -internal-isystem C:/Users/cheye_aj94fwz/AppData/Local/Android/Sdk/ndk/30.0.15729638/toolchains/llvm/prebuilt/windows-x86_64/lib/clang/21/include -internal-isystem C:/Users/cheye_aj94fwz/AppData/Local/Android/Sdk/ndk/30.0.15729638/toolchains/llvm/prebuilt/windows-x86_64/sysroot/usr/local/include -internal-externc-isystem C:/Users/cheye_aj94fwz/AppData/Local/Android/Sdk/ndk/30.0.15729638/toolchains/llvm/prebuilt/windows-x86_64/sysroot/usr/include/x86_64-linux-android -internal-externc-isystem C:/Users/cheye_aj94fwz/AppData/Local/Android/Sdk/ndk/30.0.15729638/toolchains/llvm/prebuilt/windows-x86_64/sysroot/include -internal-externc-isystem C:/Users/cheye_aj94fwz/AppData/Local/Android/Sdk/ndk/30.0.15729638/toolchains/llvm/prebuilt/windows-x86_64/sysroot/usr/include -O3 -Wformat -fdeprecated-macro -ferror-limit 19 -femulated-tls -stack-protector 2 -fgnuc-version=4.2.1 -fskip-odr-check-in-gmf -fcxx-exceptions -fexceptions -vectorize-loops -vectorize-slp -D__GCC_HAVE_DWARF2_CFI_ASM=1 -o CMakeFiles/cmTC_d8da2.dir/CMakeCXXCompilerABI.cpp.o -x c++ C:/Users/cheye_aj94fwz/AppData/Local/Android/Sdk/cmake/4.1.2/share/cmake-4.1/Modules/CMakeCXXCompilerABI.cpp
+        clang -cc1 version 21.0.0 based upon LLVM 21.0.0 default target x86_64-w64-windows-gnu
+        ignoring nonexistent directory "C:/Users/cheye_aj94fwz/AppData/Local/Android/Sdk/ndk/30.0.15729638/toolchains/llvm/prebuilt/windows-x86_64/sysroot/usr/local/include"
+        ignoring nonexistent directory "C:/Users/cheye_aj94fwz/AppData/Local/Android/Sdk/ndk/30.0.15729638/toolchains/llvm/prebuilt/windows-x86_64/sysroot/include"
+        #include "..." search starts here:
+        #include <...> search starts here:
+         C:/Users/cheye_aj94fwz/AppData/Local/Android/Sdk/ndk/30.0.15729638/toolchains/llvm/prebuilt/windows-x86_64/sysroot/usr/include/c++/v1
+         C:/Users/cheye_aj94fwz/AppData/Local/Android/Sdk/ndk/30.0.15729638/toolchains/llvm/prebuilt/windows-x86_64/lib/clang/21/include
+         C:/Users/cheye_aj94fwz/AppData/Local/Android/Sdk/ndk/30.0.15729638/toolchains/llvm/prebuilt/windows-x86_64/sysroot/usr/include/x86_64-linux-android
+         C:/Users/cheye_aj94fwz/AppData/Local/Android/Sdk/ndk/30.0.15729638/toolchains/llvm/prebuilt/windows-x86_64/sysroot/usr/include\x0d
+        End of search list.\x0d
+        [2/2] C:\\Windows\\system32\\cmd.exe /C "cd . && C:\\Users\\cheye_aj94fwz\\AppData\\Local\\Android\\Sdk\\ndk\\30.0.15729638\\toolchains\\llvm\\prebuilt\\windows-x86_64\\bin\\clang++.exe --target=x86_64-none-linux-android26 --sysroot=C:/Users/cheye_aj94fwz/AppData/Local/Android/Sdk/ndk/30.0.15729638/toolchains/llvm/prebuilt/windows-x86_64/sysroot -g -DANDROID -fdata-sections -ffunction-sections -funwind-tables -fstack-protector-strong -no-canonical-prefixes -D_FORTIFY_SOURCE=2 -Wformat  -O3 -static-libstdc++ -Wl,--build-id=sha1 -Wl,--no-rosegment -Wl,--no-undefined-version -Wl,--fatal-warnings -Wl,--no-undefined -Qunused-arguments   -v CMakeFiles/cmTC_d8da2.dir/CMakeCXXCompilerABI.cpp.o -o cmTC_d8da2   && cd ."
+        Android (15422139, based on r574158b) clang version 21.0.0 (https://android.googlesource.com/toolchain/llvm-project 9f872551d3c681d06fd303b36f16ed5c274735eb)
+        Target: x86_64-none-linux-android26
+        Thread model: posix
+        InstalledDir: C:/Users/cheye_aj94fwz/AppData/Local/Android/Sdk/ndk/30.0.15729638/toolchains/llvm/prebuilt/windows-x86_64/bin
+         "C:/Users/cheye_aj94fwz/AppData/Local/Android/Sdk/ndk/30.0.15729638/toolchains/llvm/prebuilt/windows-x86_64/bin/ld.lld" --sysroot=C:/Users/cheye_aj94fwz/AppData/Local/Android/Sdk/ndk/30.0.15729638/toolchains/llvm/prebuilt/windows-x86_64/sysroot -z now -z relro -z max-page-size=16384 --no-rosegment --hash-style=gnu --eh-frame-hdr -m elf_x86_64 -pie -dynamic-linker /system/bin/linker64 -o cmTC_d8da2 C:/Users/cheye_aj94fwz/AppData/Local/Android/Sdk/ndk/30.0.15729638/toolchains/llvm/prebuilt/windows-x86_64/sysroot/usr/lib/x86_64-linux-android/26/crtbegin_dynamic.o -LC:/Users/cheye_aj94fwz/AppData/Local/Android/Sdk/ndk/30.0.15729638/toolchains/llvm/prebuilt/windows-x86_64/lib/clang/21/lib/linux/x86_64 -LC:/Users/cheye_aj94fwz/AppData/Local/Android/Sdk/ndk/30.0.15729638/toolchains/llvm/prebuilt/windows-x86_64/sysroot/usr/lib/x86_64-linux-android/26 -LC:/Users/cheye_aj94fwz/AppData/Local/Android/Sdk/ndk/30.0.15729638/toolchains/llvm/prebuilt/windows-x86_64/sysroot/usr/lib/x86_64-linux-android -LC:/Users/cheye_aj94fwz/AppData/Local/Android/Sdk/ndk/30.0.15729638/toolchains/llvm/prebuilt/windows-x86_64/sysroot/usr/lib --build-id=sha1 --no-rosegment --no-undefined-version --fatal-warnings --no-undefined CMakeFiles/cmTC_d8da2.dir/CMakeCXXCompilerABI.cpp.o -Bstatic -lc++ -Bdynamic -lm C:/Users/cheye_aj94fwz/AppData/Local/Android/Sdk/ndk/30.0.15729638/toolchains/llvm/prebuilt/windows-x86_64/lib/clang/21/lib/linux/libclang_rt.builtins-x86_64-android.a -l:libunwind.a -ldl -lc C:/Users/cheye_aj94fwz/AppData/Local/Android/Sdk/ndk/30.0.15729638/toolchains/llvm/prebuilt/windows-x86_64/lib/clang/21/lib/linux/libclang_rt.builtins-x86_64-android.a -l:libunwind.a -ldl C:/Users/cheye_aj94fwz/AppData/Local/Android/Sdk/ndk/30.0.15729638/toolchains/llvm/prebuilt/windows-x86_64/sysroot/usr/lib/x86_64-linux-android/26/crtend_android.o\x0d
+        
+      exitCode: 0
+  -
+    kind: "message-v1"
+    backtrace:
+      - "C:/Users/cheye_aj94fwz/AppData/Local/Android/Sdk/cmake/4.1.2/share/cmake-4.1/Modules/CMakeDetermineCompilerABI.cmake:217 (message)"
+      - "C:/Users/cheye_aj94fwz/AppData/Local/Android/Sdk/cmake/4.1.2/share/cmake-4.1/Modules/CMakeTestCXXCompiler.cmake:26 (CMAKE_DETERMINE_COMPILER_ABI)"
+      - "CMakeLists.txt:2 (project)"
+    message: |
+      Parsed CXX implicit include dir info: rv=done
+        found start of include info
+        found start of implicit include info
+          add: [C:/Users/cheye_aj94fwz/AppData/Local/Android/Sdk/ndk/30.0.15729638/toolchains/llvm/prebuilt/windows-x86_64/sysroot/usr/include/c++/v1]
+          add: [C:/Users/cheye_aj94fwz/AppData/Local/Android/Sdk/ndk/30.0.15729638/toolchains/llvm/prebuilt/windows-x86_64/lib/clang/21/include]
+          add: [C:/Users/cheye_aj94fwz/AppData/Local/Android/Sdk/ndk/30.0.15729638/toolchains/llvm/prebuilt/windows-x86_64/sysroot/usr/include/x86_64-linux-android]
+          add: [C:/Users/cheye_aj94fwz/AppData/Local/Android/Sdk/ndk/30.0.15729638/toolchains/llvm/prebuilt/windows-x86_64/sysroot/usr/include]
+        end of search list found
+        collapse include dir [C:/Users/cheye_aj94fwz/AppData/Local/Android/Sdk/ndk/30.0.15729638/toolchains/llvm/prebuilt/windows-x86_64/sysroot/usr/include/c++/v1] ==> [C:/Users/cheye_aj94fwz/AppData/Local/Android/Sdk/ndk/30.0.15729638/toolchains/llvm/prebuilt/windows-x86_64/sysroot/usr/include/c++/v1]
+        collapse include dir [C:/Users/cheye_aj94fwz/AppData/Local/Android/Sdk/ndk/30.0.15729638/toolchains/llvm/prebuilt/windows-x86_64/lib/clang/21/include] ==> [C:/Users/cheye_aj94fwz/AppData/Local/Android/Sdk/ndk/30.0.15729638/toolchains/llvm/prebuilt/windows-x86_64/lib/clang/21/include]
+        collapse include dir [C:/Users/cheye_aj94fwz/AppData/Local/Android/Sdk/ndk/30.0.15729638/toolchains/llvm/prebuilt/windows-x86_64/sysroot/usr/include/x86_64-linux-android] ==> [C:/Users/cheye_aj94fwz/AppData/Local/Android/Sdk/ndk/30.0.15729638/toolchains/llvm/prebuilt/windows-x86_64/sysroot/usr/include/x86_64-linux-android]
+        collapse include dir [C:/Users/cheye_aj94fwz/AppData/Local/Android/Sdk/ndk/30.0.15729638/toolchains/llvm/prebuilt/windows-x86_64/sysroot/usr/include] ==> [C:/Users/cheye_aj94fwz/AppData/Local/Android/Sdk/ndk/30.0.15729638/toolchains/llvm/prebuilt/windows-x86_64/sysroot/usr/include]
+        implicit include dirs: [C:/Users/cheye_aj94fwz/AppData/Local/Android/Sdk/ndk/30.0.15729638/toolchains/llvm/prebuilt/windows-x86_64/sysroot/usr/include/c++/v1;C:/Users/cheye_aj94fwz/AppData/Local/Android/Sdk/ndk/30.0.15729638/toolchains/llvm/prebuilt/windows-x86_64/lib/clang/21/include;C:/Users/cheye_aj94fwz/AppData/Local/Android/Sdk/ndk/30.0.15729638/toolchains/llvm/prebuilt/windows-x86_64/sysroot/usr/include/x86_64-linux-android;C:/Users/cheye_aj94fwz/AppData/Local/Android/Sdk/ndk/30.0.15729638/toolchains/llvm/prebuilt/windows-x86_64/sysroot/usr/include]
+      
+      
+  -
+    kind: "message-v1"
+    backtrace:
+      - "C:/Users/cheye_aj94fwz/AppData/Local/Android/Sdk/cmake/4.1.2/share/cmake-4.1/Modules/CMakeDetermineCompilerABI.cmake:253 (message)"
+      - "C:/Users/cheye_aj94fwz/AppData/Local/Android/Sdk/cmake/4.1.2/share/cmake-4.1/Modules/CMakeTestCXXCompiler.cmake:26 (CMAKE_DETERMINE_COMPILER_ABI)"
+      - "CMakeLists.txt:2 (project)"
+    message: |
+      Parsed CXX implicit link information:
+        link line regex: [^( *|.*[/\\])(ld[0-9]*(|\\.[a-rt-z][a-z]*|\\.s[a-np-z][a-z]*|\\.so[a-z]+)|CMAKE_LINK_STARTFILE-NOTFOUND|([^/\\]+-)?ld|collect2)[^/\\]*( |$)]
+        linker tool regex: [^[ 	]*(->|")?[ 	]*(([^"]*[/\\])?(ld[0-9]*(|\\.[a-rt-z][a-z]*|\\.s[a-np-z][a-z]*|\\.so[a-z]+)))("|,| |$)]
+        ignore line: [Change Dir: 'C:/Users/cheye_aj94fwz/Documents/GitHub/audiochoice/android-app/app/.cxx/Debug/532q214i/x86_64/CMakeFiles/CMakeScratch/TryCompile-4s43cr']
+        ignore line: []
+        ignore line: [Run Build Command(s): C:\\Users\\cheye_aj94fwz\\AppData\\Local\\Android\\Sdk\\cmake\\4.1.2\\bin\\ninja.exe -v cmTC_d8da2]
+        ignore line: [[1/2] C:\\Users\\cheye_aj94fwz\\AppData\\Local\\Android\\Sdk\\ndk\\30.0.15729638\\toolchains\\llvm\\prebuilt\\windows-x86_64\\bin\\clang++.exe --target=x86_64-none-linux-android26 --sysroot=C:/Users/cheye_aj94fwz/AppData/Local/Android/Sdk/ndk/30.0.15729638/toolchains/llvm/prebuilt/windows-x86_64/sysroot   -g -DANDROID -fdata-sections -ffunction-sections -funwind-tables -fstack-protector-strong -no-canonical-prefixes -D_FORTIFY_SOURCE=2 -Wformat  -O3  -fPIE   -v -MD -MT CMakeFiles/cmTC_d8da2.dir/CMakeCXXCompilerABI.cpp.o -MF CMakeFiles\\cmTC_d8da2.dir\\CMakeCXXCompilerABI.cpp.o.d -o CMakeFiles/cmTC_d8da2.dir/CMakeCXXCompilerABI.cpp.o -c C:/Users/cheye_aj94fwz/AppData/Local/Android/Sdk/cmake/4.1.2/share/cmake-4.1/Modules/CMakeCXXCompilerABI.cpp]
+        ignore line: [Android (15422139  based on r574158b) clang version 21.0.0 (https://android.googlesource.com/toolchain/llvm-project 9f872551d3c681d06fd303b36f16ed5c274735eb)]
+        ignore line: [Target: x86_64-none-linux-android26]
+        ignore line: [Thread model: posix]
+        ignore line: [InstalledDir: C:/Users/cheye_aj94fwz/AppData/Local/Android/Sdk/ndk/30.0.15729638/toolchains/llvm/prebuilt/windows-x86_64/bin]
+        ignore line: [ (in-process)]
+        ignore line: [ "C:/Users/cheye_aj94fwz/AppData/Local/Android/Sdk/ndk/30.0.15729638/toolchains/llvm/prebuilt/windows-x86_64/bin/clang++.exe" -cc1 -triple x86_64-none-linux-android26 -emit-obj -disable-free -clear-ast-before-backend -disable-llvm-verifier -discard-value-names -main-file-name CMakeCXXCompilerABI.cpp -mrelocation-model pic -pic-level 2 -pic-is-pie -mframe-pointer=non-leaf -ffp-contract=on -fno-rounding-math -mconstructor-aliases -funwind-tables=2 -target-cpu x86-64 -target-feature +sse4.2 -target-feature +popcnt -target-feature +cx16 -tune-cpu generic -debug-info-kind=constructor -dwarf-version=4 -debugger-tuning=gdb -fdebug-compilation-dir=C:/Users/cheye_aj94fwz/Documents/GitHub/audiochoice/android-app/app/.cxx/Debug/532q214i/x86_64/CMakeFiles/CMakeScratch/TryCompile-4s43cr -v -ffunction-sections -fdata-sections -fcoverage-compilation-dir=C:/Users/cheye_aj94fwz/Documents/GitHub/audiochoice/android-app/app/.cxx/Debug/532q214i/x86_64/CMakeFiles/CMakeScratch/TryCompile-4s43cr -resource-dir C:/Users/cheye_aj94fwz/AppData/Local/Android/Sdk/ndk/30.0.15729638/toolchains/llvm/prebuilt/windows-x86_64/lib/clang/21 -dependency-file "CMakeFiles\\\\cmTC_d8da2.dir\\\\CMakeCXXCompilerABI.cpp.o.d" -MT CMakeFiles/cmTC_d8da2.dir/CMakeCXXCompilerABI.cpp.o -sys-header-deps -D ANDROID -D _FORTIFY_SOURCE=2 -isysroot C:/Users/cheye_aj94fwz/AppData/Local/Android/Sdk/ndk/30.0.15729638/toolchains/llvm/prebuilt/windows-x86_64/sysroot -internal-isystem C:/Users/cheye_aj94fwz/AppData/Local/Android/Sdk/ndk/30.0.15729638/toolchains/llvm/prebuilt/windows-x86_64/sysroot/usr/include/c++/v1 -internal-isystem C:/Users/cheye_aj94fwz/AppData/Local/Android/Sdk/ndk/30.0.15729638/toolchains/llvm/prebuilt/windows-x86_64/lib/clang/21/include -internal-isystem C:/Users/cheye_aj94fwz/AppData/Local/Android/Sdk/ndk/30.0.15729638/toolchains/llvm/prebuilt/windows-x86_64/sysroot/usr/local/include -internal-externc-isystem C:/Users/cheye_aj94fwz/AppData/Local/Android/Sdk/ndk/30.0.15729638/toolchains/llvm/prebuilt/windows-x86_64/sysroot/usr/include/x86_64-linux-android -internal-externc-isystem C:/Users/cheye_aj94fwz/AppData/Local/Android/Sdk/ndk/30.0.15729638/toolchains/llvm/prebuilt/windows-x86_64/sysroot/include -internal-externc-isystem C:/Users/cheye_aj94fwz/AppData/Local/Android/Sdk/ndk/30.0.15729638/toolchains/llvm/prebuilt/windows-x86_64/sysroot/usr/include -O3 -Wformat -fdeprecated-macro -ferror-limit 19 -femulated-tls -stack-protector 2 -fgnuc-version=4.2.1 -fskip-odr-check-in-gmf -fcxx-exceptions -fexceptions -vectorize-loops -vectorize-slp -D__GCC_HAVE_DWARF2_CFI_ASM=1 -o CMakeFiles/cmTC_d8da2.dir/CMakeCXXCompilerABI.cpp.o -x c++ C:/Users/cheye_aj94fwz/AppData/Local/Android/Sdk/cmake/4.1.2/share/cmake-4.1/Modules/CMakeCXXCompilerABI.cpp]
+        ignore line: [clang -cc1 version 21.0.0 based upon LLVM 21.0.0 default target x86_64-w64-windows-gnu]
+        ignore line: [ignoring nonexistent directory "C:/Users/cheye_aj94fwz/AppData/Local/Android/Sdk/ndk/30.0.15729638/toolchains/llvm/prebuilt/windows-x86_64/sysroot/usr/local/include"]
+        ignore line: [ignoring nonexistent directory "C:/Users/cheye_aj94fwz/AppData/Local/Android/Sdk/ndk/30.0.15729638/toolchains/llvm/prebuilt/windows-x86_64/sysroot/include"]
+        ignore line: [#include "..." search starts here:]
+        ignore line: [#include <...> search starts here:]
+        ignore line: [ C:/Users/cheye_aj94fwz/AppData/Local/Android/Sdk/ndk/30.0.15729638/toolchains/llvm/prebuilt/windows-x86_64/sysroot/usr/include/c++/v1]
+        ignore line: [ C:/Users/cheye_aj94fwz/AppData/Local/Android/Sdk/ndk/30.0.15729638/toolchains/llvm/prebuilt/windows-x86_64/lib/clang/21/include]
+        ignore line: [ C:/Users/cheye_aj94fwz/AppData/Local/Android/Sdk/ndk/30.0.15729638/toolchains/llvm/prebuilt/windows-x86_64/sysroot/usr/include/x86_64-linux-android]
+        ignore line: [ C:/Users/cheye_aj94fwz/AppData/Local/Android/Sdk/ndk/30.0.15729638/toolchains/llvm/prebuilt/windows-x86_64/sysroot/usr/include\x0d]
+        ignore line: [End of search list.\x0d]
+        ignore line: [[2/2] C:\\Windows\\system32\\cmd.exe /C "cd . && C:\\Users\\cheye_aj94fwz\\AppData\\Local\\Android\\Sdk\\ndk\\30.0.15729638\\toolchains\\llvm\\prebuilt\\windows-x86_64\\bin\\clang++.exe --target=x86_64-none-linux-android26 --sysroot=C:/Users/cheye_aj94fwz/AppData/Local/Android/Sdk/ndk/30.0.15729638/toolchains/llvm/prebuilt/windows-x86_64/sysroot -g -DANDROID -fdata-sections -ffunction-sections -funwind-tables -fstack-protector-strong -no-canonical-prefixes -D_FORTIFY_SOURCE=2 -Wformat  -O3 -static-libstdc++ -Wl --build-id=sha1 -Wl --no-rosegment -Wl --no-undefined-version -Wl --fatal-warnings -Wl --no-undefined -Qunused-arguments   -v CMakeFiles/cmTC_d8da2.dir/CMakeCXXCompilerABI.cpp.o -o cmTC_d8da2   && cd ."]
+        ignore line: [Android (15422139  based on r574158b) clang version 21.0.0 (https://android.googlesource.com/toolchain/llvm-project 9f872551d3c681d06fd303b36f16ed5c274735eb)]
+        ignore line: [Target: x86_64-none-linux-android26]
+        ignore line: [Thread model: posix]
+        ignore line: [InstalledDir: C:/Users/cheye_aj94fwz/AppData/Local/Android/Sdk/ndk/30.0.15729638/toolchains/llvm/prebuilt/windows-x86_64/bin]
+        link line: [ "C:/Users/cheye_aj94fwz/AppData/Local/Android/Sdk/ndk/30.0.15729638/toolchains/llvm/prebuilt/windows-x86_64/bin/ld.lld" --sysroot=C:/Users/cheye_aj94fwz/AppData/Local/Android/Sdk/ndk/30.0.15729638/toolchains/llvm/prebuilt/windows-x86_64/sysroot -z now -z relro -z max-page-size=16384 --no-rosegment --hash-style=gnu --eh-frame-hdr -m elf_x86_64 -pie -dynamic-linker /system/bin/linker64 -o cmTC_d8da2 C:/Users/cheye_aj94fwz/AppData/Local/Android/Sdk/ndk/30.0.15729638/toolchains/llvm/prebuilt/windows-x86_64/sysroot/usr/lib/x86_64-linux-android/26/crtbegin_dynamic.o -LC:/Users/cheye_aj94fwz/AppData/Local/Android/Sdk/ndk/30.0.15729638/toolchains/llvm/prebuilt/windows-x86_64/lib/clang/21/lib/linux/x86_64 -LC:/Users/cheye_aj94fwz/AppData/Local/Android/Sdk/ndk/30.0.15729638/toolchains/llvm/prebuilt/windows-x86_64/sysroot/usr/lib/x86_64-linux-android/26 -LC:/Users/cheye_aj94fwz/AppData/Local/Android/Sdk/ndk/30.0.15729638/toolchains/llvm/prebuilt/windows-x86_64/sysroot/usr/lib/x86_64-linux-android -LC:/Users/cheye_aj94fwz/AppData/Local/Android/Sdk/ndk/30.0.15729638/toolchains/llvm/prebuilt/windows-x86_64/sysroot/usr/lib --build-id=sha1 --no-rosegment --no-undefined-version --fatal-warnings --no-undefined CMakeFiles/cmTC_d8da2.dir/CMakeCXXCompilerABI.cpp.o -Bstatic -lc++ -Bdynamic -lm C:/Users/cheye_aj94fwz/AppData/Local/Android/Sdk/ndk/30.0.15729638/toolchains/llvm/prebuilt/windows-x86_64/lib/clang/21/lib/linux/libclang_rt.builtins-x86_64-android.a -l:libunwind.a -ldl -lc C:/Users/cheye_aj94fwz/AppData/Local/Android/Sdk/ndk/30.0.15729638/toolchains/llvm/prebuilt/windows-x86_64/lib/clang/21/lib/linux/libclang_rt.builtins-x86_64-android.a -l:libunwind.a -ldl C:/Users/cheye_aj94fwz/AppData/Local/Android/Sdk/ndk/30.0.15729638/toolchains/llvm/prebuilt/windows-x86_64/sysroot/usr/lib/x86_64-linux-android/26/crtend_android.o\x0d]
+          arg [C:/Users/cheye_aj94fwz/AppData/Local/Android/Sdk/ndk/30.0.15729638/toolchains/llvm/prebuilt/windows-x86_64/bin/ld.lld] ==> ignore
+          arg [--sysroot=C:/Users/cheye_aj94fwz/AppData/Local/Android/Sdk/ndk/30.0.15729638/toolchains/llvm/prebuilt/windows-x86_64/sysroot] ==> ignore
+          arg [-znow] ==> ignore
+          arg [-zrelro] ==> ignore
+          arg [-zmax-page-size=16384] ==> ignore
+          arg [--no-rosegment] ==> ignore
+          arg [--hash-style=gnu] ==> ignore
+          arg [--eh-frame-hdr] ==> ignore
+          arg [-m] ==> ignore
+          arg [elf_x86_64] ==> ignore
+          arg [-pie] ==> ignore
+          arg [-dynamic-linker] ==> ignore
+          arg [/system/bin/linker64] ==> ignore
+          arg [-o] ==> ignore
+          arg [cmTC_d8da2] ==> ignore
+          arg [C:/Users/cheye_aj94fwz/AppData/Local/Android/Sdk/ndk/30.0.15729638/toolchains/llvm/prebuilt/windows-x86_64/sysroot/usr/lib/x86_64-linux-android/26/crtbegin_dynamic.o] ==> obj [C:/Users/cheye_aj94fwz/AppData/Local/Android/Sdk/ndk/30.0.15729638/toolchains/llvm/prebuilt/windows-x86_64/sysroot/usr/lib/x86_64-linux-android/26/crtbegin_dynamic.o]
+          arg [-LC:/Users/cheye_aj94fwz/AppData/Local/Android/Sdk/ndk/30.0.15729638/toolchains/llvm/prebuilt/windows-x86_64/lib/clang/21/lib/linux/x86_64] ==> dir [C:/Users/cheye_aj94fwz/AppData/Local/Android/Sdk/ndk/30.0.15729638/toolchains/llvm/prebuilt/windows-x86_64/lib/clang/21/lib/linux/x86_64]
+          arg [-LC:/Users/cheye_aj94fwz/AppData/Local/Android/Sdk/ndk/30.0.15729638/toolchains/llvm/prebuilt/windows-x86_64/sysroot/usr/lib/x86_64-linux-android/26] ==> dir [C:/Users/cheye_aj94fwz/AppData/Local/Android/Sdk/ndk/30.0.15729638/toolchains/llvm/prebuilt/windows-x86_64/sysroot/usr/lib/x86_64-linux-android/26]
+          arg [-LC:/Users/cheye_aj94fwz/AppData/Local/Android/Sdk/ndk/30.0.15729638/toolchains/llvm/prebuilt/windows-x86_64/sysroot/usr/lib/x86_64-linux-android] ==> dir [C:/Users/cheye_aj94fwz/AppData/Local/Android/Sdk/ndk/30.0.15729638/toolchains/llvm/prebuilt/windows-x86_64/sysroot/usr/lib/x86_64-linux-android]
+          arg [-LC:/Users/cheye_aj94fwz/AppData/Local/Android/Sdk/ndk/30.0.15729638/toolchains/llvm/prebuilt/windows-x86_64/sysroot/usr/lib] ==> dir [C:/Users/cheye_aj94fwz/AppData/Local/Android/Sdk/ndk/30.0.15729638/toolchains/llvm/prebuilt/windows-x86_64/sysroot/usr/lib]
+          arg [--build-id=sha1] ==> ignore
+          arg [--no-rosegment] ==> ignore
+          arg [--no-undefined-version] ==> ignore
+          arg [--fatal-warnings] ==> ignore
+          arg [--no-undefined] ==> ignore
+          arg [CMakeFiles/cmTC_d8da2.dir/CMakeCXXCompilerABI.cpp.o] ==> ignore
+          arg [-Bstatic] ==> search static
+          arg [-lc++] ==> lib [c++]
+          arg [-Bdynamic] ==> search dynamic
+          arg [-lm] ==> lib [m]
+          arg [C:/Users/cheye_aj94fwz/AppData/Local/Android/Sdk/ndk/30.0.15729638/toolchains/llvm/prebuilt/windows-x86_64/lib/clang/21/lib/linux/libclang_rt.builtins-x86_64-android.a] ==> lib [C:/Users/cheye_aj94fwz/AppData/Local/Android/Sdk/ndk/30.0.15729638/toolchains/llvm/prebuilt/windows-x86_64/lib/clang/21/lib/linux/libclang_rt.builtins-x86_64-android.a]
+          arg [-l:libunwind.a] ==> lib [-l:libunwind.a]
+          arg [-ldl] ==> lib [dl]
+          arg [-lc] ==> lib [c]
+          arg [C:/Users/cheye_aj94fwz/AppData/Local/Android/Sdk/ndk/30.0.15729638/toolchains/llvm/prebuilt/windows-x86_64/lib/clang/21/lib/linux/libclang_rt.builtins-x86_64-android.a] ==> lib [C:/Users/cheye_aj94fwz/AppData/Local/Android/Sdk/ndk/30.0.15729638/toolchains/llvm/prebuilt/windows-x86_64/lib/clang/21/lib/linux/libclang_rt.builtins-x86_64-android.a]
+          arg [-l:libunwind.a] ==> lib [-l:libunwind.a]
+          arg [-ldl] ==> lib [dl]
+          arg [C:/Users/cheye_aj94fwz/AppData/Local/Android/Sdk/ndk/30.0.15729638/toolchains/llvm/prebuilt/windows-x86_64/sysroot/usr/lib/x86_64-linux-android/26/crtend_android.o] ==> obj [C:/Users/cheye_aj94fwz/AppData/Local/Android/Sdk/ndk/30.0.15729638/toolchains/llvm/prebuilt/windows-x86_64/sysroot/usr/lib/x86_64-linux-android/26/crtend_android.o]
+        linker tool for 'CXX': C:/Users/cheye_aj94fwz/AppData/Local/Android/Sdk/ndk/30.0.15729638/toolchains/llvm/prebuilt/windows-x86_64/bin/ld.lld
+        remove lib [C:/Users/cheye_aj94fwz/AppData/Local/Android/Sdk/ndk/30.0.15729638/toolchains/llvm/prebuilt/windows-x86_64/lib/clang/21/lib/linux/libclang_rt.builtins-x86_64-android.a]
+        remove lib [C:/Users/cheye_aj94fwz/AppData/Local/Android/Sdk/ndk/30.0.15729638/toolchains/llvm/prebuilt/windows-x86_64/lib/clang/21/lib/linux/libclang_rt.builtins-x86_64-android.a]
+        collapse library dir [C:/Users/cheye_aj94fwz/AppData/Local/Android/Sdk/ndk/30.0.15729638/toolchains/llvm/prebuilt/windows-x86_64/lib/clang/21/lib/linux/x86_64] ==> [C:/Users/cheye_aj94fwz/AppData/Local/Android/Sdk/ndk/30.0.15729638/toolchains/llvm/prebuilt/windows-x86_64/lib/clang/21/lib/linux/x86_64]
+        collapse library dir [C:/Users/cheye_aj94fwz/AppData/Local/Android/Sdk/ndk/30.0.15729638/toolchains/llvm/prebuilt/windows-x86_64/sysroot/usr/lib/x86_64-linux-android/26] ==> [C:/Users/cheye_aj94fwz/AppData/Local/Android/Sdk/ndk/30.0.15729638/toolchains/llvm/prebuilt/windows-x86_64/sysroot/usr/lib/x86_64-linux-android/26]
+        collapse library dir [C:/Users/cheye_aj94fwz/AppData/Local/Android/Sdk/ndk/30.0.15729638/toolchains/llvm/prebuilt/windows-x86_64/sysroot/usr/lib/x86_64-linux-android] ==> [C:/Users/cheye_aj94fwz/AppData/Local/Android/Sdk/ndk/30.0.15729638/toolchains/llvm/prebuilt/windows-x86_64/sysroot/usr/lib/x86_64-linux-android]
+        collapse library dir [C:/Users/cheye_aj94fwz/AppData/Local/Android/Sdk/ndk/30.0.15729638/toolchains/llvm/prebuilt/windows-x86_64/sysroot/usr/lib] ==> [C:/Users/cheye_aj94fwz/AppData/Local/Android/Sdk/ndk/30.0.15729638/toolchains/llvm/prebuilt/windows-x86_64/sysroot/usr/lib]
+        implicit libs: [c++;m;-l:libunwind.a;dl;c;-l:libunwind.a;dl]
+        implicit objs: [C:/Users/cheye_aj94fwz/AppData/Local/Android/Sdk/ndk/30.0.15729638/toolchains/llvm/prebuilt/windows-x86_64/sysroot/usr/lib/x86_64-linux-android/26/crtbegin_dynamic.o;C:/Users/cheye_aj94fwz/AppData/Local/Android/Sdk/ndk/30.0.15729638/toolchains/llvm/prebuilt/windows-x86_64/sysroot/usr/lib/x86_64-linux-android/26/crtend_android.o]
+        implicit dirs: [C:/Users/cheye_aj94fwz/AppData/Local/Android/Sdk/ndk/30.0.15729638/toolchains/llvm/prebuilt/windows-x86_64/lib/clang/21/lib/linux/x86_64;C:/Users/cheye_aj94fwz/AppData/Local/Android/Sdk/ndk/30.0.15729638/toolchains/llvm/prebuilt/windows-x86_64/sysroot/usr/lib/x86_64-linux-android/26;C:/Users/cheye_aj94fwz/AppData/Local/Android/Sdk/ndk/30.0.15729638/toolchains/llvm/prebuilt/windows-x86_64/sysroot/usr/lib/x86_64-linux-android;C:/Users/cheye_aj94fwz/AppData/Local/Android/Sdk/ndk/30.0.15729638/toolchains/llvm/prebuilt/windows-x86_64/sysroot/usr/lib]
+        implicit fwks: []
+      
+      
+  -
+    kind: "message-v1"
+    backtrace:
+      - "C:/Users/cheye_aj94fwz/AppData/Local/Android/Sdk/cmake/4.1.2/share/cmake-4.1/Modules/Internal/CMakeDetermineLinkerId.cmake:36 (message)"
+      - "C:/Users/cheye_aj94fwz/AppData/Local/Android/Sdk/cmake/4.1.2/share/cmake-4.1/Modules/CMakeDetermineCompilerABI.cmake:299 (cmake_determine_linker_id)"
+      - "C:/Users/cheye_aj94fwz/AppData/Local/Android/Sdk/cmake/4.1.2/share/cmake-4.1/Modules/CMakeTestCXXCompiler.cmake:26 (CMAKE_DETERMINE_COMPILER_ABI)"
+      - "CMakeLists.txt:2 (project)"
+    message: |
+      Running the CXX compiler's linker: "C:/Users/cheye_aj94fwz/AppData/Local/Android/Sdk/ndk/30.0.15729638/toolchains/llvm/prebuilt/windows-x86_64/bin/ld.lld" "-v"
+      LLD 21.0.0 (/mnt/disks/build-disk/src/googleplex-android/llvm-r574158-release/out/llvm-project/llvm 9f872551d3c681d06fd303b36f16ed5c274735eb) (compatible with GNU linkers)
+...

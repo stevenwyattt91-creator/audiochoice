@@ -1,0 +1,38 @@
+{
+  "buildFiles": [
+    "C:\\Users\\cheye_aj94fwz\\Documents\\GitHub\\audiochoice\\android-app\\app\\src\\main\\cpp\\CMakeLists.txt"
+  ],
+  "cleanCommandsComponents": [
+    [
+      "C:\\Users\\cheye_aj94fwz\\AppData\\Local\\Android\\Sdk\\cmake\\4.1.2\\bin\\ninja.exe",
+      "-C",
+      "C:\\Users\\cheye_aj94fwz\\Documents\\GitHub\\audiochoice\\android-app\\app\\.cxx\\Debug\\532q214i\\x86_64",
+      "clean"
+    ]
+  ],
+  "buildTargetsCommandComponents": [
+    "C:\\Users\\cheye_aj94fwz\\AppData\\Local\\Android\\Sdk\\cmake\\4.1.2\\bin\\ninja.exe",
+    "-C",
+    "C:\\Users\\cheye_aj94fwz\\Documents\\GitHub\\audiochoice\\android-app\\app\\.cxx\\Debug\\532q214i\\x86_64",
+    "{LIST_OF_TARGETS_TO_BUILD}"
+  ],
+  "libraries": {
+    "audiochoice_aax::@6890427a1f51a3e7e1df": {
+      "toolchain": "toolchain",
+      "abi": "x86_64",
+      "artifactName": "audiochoice_aax",
+      "output": "C:\\Users\\cheye_aj94fwz\\Documents\\GitHub\\audiochoice\\android-app\\app\\build\\intermediates\\cxx\\Debug\\532q214i\\obj\\x86_64\\libaudiochoice_aax.so",
+      "runtimeFiles": []
+    }
+  },
+  "toolchains": {
+    "toolchain": {
+      "cCompilerExecutable": "C:\\Users\\cheye_aj94fwz\\AppData\\Local\\Android\\Sdk\\ndk\\30.0.15729638\\toolchains\\llvm\\prebuilt\\windows-x86_64\\bin\\clang.exe",
+      "cppCompilerExecutable": "C:\\Users\\cheye_aj94fwz\\AppData\\Local\\Android\\Sdk\\ndk\\30.0.15729638\\toolchains\\llvm\\prebuilt\\windows-x86_64\\bin\\clang++.exe"
+    }
+  },
+  "cFileExtensions": [],
+  "cppFileExtensions": [
+    "cpp"
+  ]
+}

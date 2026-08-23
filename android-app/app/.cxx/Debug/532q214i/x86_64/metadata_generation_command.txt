@@ -1,0 +1,19 @@
+                        -HC:\Users\cheye_aj94fwz\Documents\GitHub\audiochoice\android-app\app\src\main\cpp
+-DCMAKE_SYSTEM_NAME=Android
+-DCMAKE_EXPORT_COMPILE_COMMANDS=ON
+-DCMAKE_SYSTEM_VERSION=26
+-DANDROID_PLATFORM=android-26
+-DANDROID_ABI=x86_64
+-DCMAKE_ANDROID_ARCH_ABI=x86_64
+-DANDROID_NDK=C:\Users\cheye_aj94fwz\AppData\Local\Android\Sdk\ndk\30.0.15729638
+-DCMAKE_ANDROID_NDK=C:\Users\cheye_aj94fwz\AppData\Local\Android\Sdk\ndk\30.0.15729638
+-DCMAKE_TOOLCHAIN_FILE=C:\Users\cheye_aj94fwz\AppData\Local\Android\Sdk\ndk\30.0.15729638\build\cmake\android.toolchain.cmake
+-DCMAKE_MAKE_PROGRAM=C:\Users\cheye_aj94fwz\AppData\Local\Android\Sdk\cmake\4.1.2\bin\ninja.exe
+-DCMAKE_CXX_FLAGS=-O3
+-DCMAKE_LIBRARY_OUTPUT_DIRECTORY=C:\Users\cheye_aj94fwz\Documents\GitHub\audiochoice\android-app\app\build\intermediates\cxx\Debug\532q214i\obj\x86_64
+-DCMAKE_RUNTIME_OUTPUT_DIRECTORY=C:\Users\cheye_aj94fwz\Documents\GitHub\audiochoice\android-app\app\build\intermediates\cxx\Debug\532q214i\obj\x86_64
+-DCMAKE_BUILD_TYPE=Debug
+-BC:\Users\cheye_aj94fwz\Documents\GitHub\audiochoice\android-app\app\.cxx\Debug\532q214i\x86_64
+-GNinja
+                        Build command args: []
+                        Version: 2
