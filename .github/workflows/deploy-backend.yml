@@ -97,7 +97,7 @@ jobs:
           az deployment group create \
             --resource-group "${{ secrets.AZURE_RESOURCE_GROUP }}" \
             --template-file deploy/azure/api.bicep \
-            --parameters location="$LOCATION" imageTag="$GITHUB_SHA" googleClientID=''
+            --parameters location="$LOCATION" imageTag="$GITHUB_SHA" googleClientID='105248861745-34kh2v9g9825kb1drs3jrgmijjum2p3o.apps.googleusercontent.com'
 
       - name: Show API endpoint
         shell: bash
