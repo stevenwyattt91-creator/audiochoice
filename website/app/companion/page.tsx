@@ -14,6 +14,23 @@ const API_URL = (process.env.NEXT_PUBLIC_AUDIOCHOICE_API_URL ?? "https://audioch
 const GOOGLE_CLIENT_ID = process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID || "105248861745-34kh2v9g9825kb1drs3jrgmijjum2p3o.apps.googleusercontent.com";
 declare global { interface Window { google?: any } }
 
+function uploadWithProgress(url: string, method: string, headers: Record<string, string>, file: File, onProgress: (percent: number) => void) {
+  return new Promise<void>((resolve, reject) => {
+    const request = new XMLHttpRequest();
+    request.open(method, url);
+    Object.entries(headers).forEach(([name, value]) => request.setRequestHeader(name, value));
+    request.upload.onprogress = event => {
+      if (event.lengthComputable) onProgress(Math.round((event.loaded / event.total) * 100));
+    };
+    request.onload = () => request.status >= 200 && request.status < 300
+      ? resolve()
+      : reject(new Error("The audiobook upload was not completed."));
+    request.onerror = () => reject(new Error("The audiobook upload was interrupted. Check your connection and try again."));
+    request.onabort = () => reject(new Error("The audiobook upload was cancelled."));
+    request.send(file);
+  });
+}
+
 export default function CompanionPage() {
   const [file, setFile] = useState<File | null>(null);
   const [stage, setStage] = useState<Stage>("choose");
@@ -49,8 +66,13 @@ export default function CompanionPage() {
       const create = await fetch(`${API_URL}/v1/companion/transfers`, { method: "POST", headers: auth, body: JSON.stringify({ fileName: file.name, contentType: file.type || "application/octet-stream", fileSize: file.size, sha256 }) });
       const authorization = await create.json().catch(() => ({}));
       if (!create.ok) throw new Error(authorization.error ?? "AudioChoice could not authorize the private transfer.");
-      const upload = await fetch(authorization.uploadURL, { method: authorization.method ?? "PUT", headers: authorization.headers ?? {}, body: file });
-      if (!upload.ok) throw new Error("The audiobook upload was not completed.");
+      await uploadWithProgress(
+        authorization.uploadURL,
+        authorization.method ?? "PUT",
+        authorization.headers ?? {},
+        file,
+        percent => setProgress(5 + Math.round(percent * 0.87)),
+      );
       setProgress(92);
       const complete = await fetch(`${API_URL}/v1/companion/transfers/${authorization.transferID}/complete`, { method: "POST", headers: { Authorization: `Bearer ${accessToken}` } });
       if (!complete.ok) { const body = await complete.json().catch(() => ({})); throw new Error(body.error ?? "AudioChoice could not verify the uploaded audiobook."); }
