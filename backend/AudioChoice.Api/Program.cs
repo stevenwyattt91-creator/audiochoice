@@ -575,7 +575,7 @@ app.MapPost("/v1/companion/transfers", async (
     var transfer = transfers.Create(user.ID, fileName, request.ContentType, request.FileSize, sha256!, expiration, receiverCode);
     var authorization = await storage.CreateUploadAuthorization(transfer, cancellationToken);
     if (authorization is null) return Results.Problem("A transfer upload could not be authorized.", statusCode: StatusCodes.Status503ServiceUnavailable);
-    var receiverURL = $"audiochoice://transfer/{transfer.ID}?code={receiverCode}";
+    var receiverURL = $"audiochoice-beta://transfer/{transfer.ID}?code={receiverCode}";
     return Results.Ok(new CompanionTransferUploadResponse(transfer.ID, authorization.UploadURL, authorization.Method, authorization.Headers, receiverURL, expiration));
 });
 
@@ -607,7 +607,7 @@ app.MapGet("/v1/companion/transfers/{transferID:guid}/qr", (
     if (transfer is null || transfer.Status != "uploaded" || transfer.ExpiresAt <= DateTimeOffset.UtcNow ||
         !CryptographicOperations.FixedTimeEquals(System.Text.Encoding.UTF8.GetBytes(transfer.ReceiverCodeHash), System.Text.Encoding.UTF8.GetBytes(suppliedHash)))
         return Results.NotFound();
-    var receiverURL = $"audiochoice://transfer/{transferID}?code={Uri.EscapeDataString(code ?? string.Empty)}";
+    var receiverURL = $"audiochoice-beta://transfer/{transferID}?code={Uri.EscapeDataString(code ?? string.Empty)}";
     using var generator = new QRCodeGenerator();
     using var data = generator.CreateQrCode(receiverURL, QRCodeGenerator.ECCLevel.M);
     var png = new PngByteQRCode(data).GetGraphic(8);
