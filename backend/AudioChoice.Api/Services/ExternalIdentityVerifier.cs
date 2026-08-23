@@ -25,7 +25,10 @@ public sealed record VerifiedIdentity(
     string Email,
     bool EmailVerified);
 
-public sealed class ExternalIdentityVerifier(HttpClient client, ExternalAuthOptions options)
+public sealed class ExternalIdentityVerifier(
+    HttpClient client,
+    ExternalAuthOptions options,
+    ILogger<ExternalIdentityVerifier> logger)
 {
     public async Task<VerifiedIdentity?> Verify(
         string provider,
@@ -95,8 +98,12 @@ public sealed class ExternalIdentityVerifier(HttpClient client, ExternalAuthOpti
             return new VerifiedIdentity(
                 "google", payload.Subject, payload.Email, true);
         }
-        catch (InvalidJwtException)
+        catch (InvalidJwtException exception)
         {
+            logger.LogWarning(
+                "Google ID token validation failed for configured audiences {Audiences}: {Reason}",
+                string.Join(",", acceptedAudiences),
+                exception.Message);
             return null;
         }
 #else
