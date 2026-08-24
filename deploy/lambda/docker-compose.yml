@@ -59,7 +59,11 @@ services:
       AudioChoice__OpenAI__LocalCandidateFunnelEnabled: "false"
       # Scan every transcript segment locally in Lambda first. Only high-recall
       # sexual-content windows proceed to Terra, then qualifying scenes to Sol.
-      AudioChoice__OpenAI__LambdaFirstPassEnabled: "true"
+      # Use the semantic analysis path so every event receives a contextual,
+      # non-explicit description like the established app screenshots. Sexual
+      # candidates still pass through Terra and then Sol; mild/intense/death
+      # violence remains excluded by the scanner policy.
+      AudioChoice__OpenAI__LambdaFirstPassEnabled: "false"
       AudioChoice__OpenAI__MaximumSceneVerificationRequestsPerJob: "300"
       AudioChoice__OpenAI__MaximumSceneEscalationRequestsPerJob: "300"
       # Apply new schema migrations (including chunk progress/title backfill)
