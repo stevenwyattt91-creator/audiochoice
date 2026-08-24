@@ -5,7 +5,7 @@ struct FilterEventListScreen: View {
     @State private var reportedIDs: Set<UUID> = []
 
     private var events: [ScanEvent] {
-        record.scanResult?.events.sorted { $0.startTime < $1.startTime } ?? []
+        IOSContentTaxonomy.userFacingEvents(record.scanResult?.events ?? [])
     }
 
     var body: some View {

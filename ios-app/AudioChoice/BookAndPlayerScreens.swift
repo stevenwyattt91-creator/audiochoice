@@ -93,7 +93,9 @@ struct BookDetailScreen: View {
                             detailRow(
                                 "Filters",
                                 icon: "ear.badge.checkmark",
-                                value: record?.scanResult.map { "\($0.events.count) Events" } ?? "Not Scanned"
+                                value: record?.scanResult.map {
+                                    "\(IOSContentTaxonomy.controlCount($0.events)) Events"
+                                } ?? "Not Scanned"
                             )
                         }
                     }

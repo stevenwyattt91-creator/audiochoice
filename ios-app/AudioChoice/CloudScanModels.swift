@@ -27,6 +27,10 @@ struct ScanEvent: Codable, Identifiable, Equatable {
     let groupID: UUID
     let eventID: UUID
     let confidence: Double
+    let stableKey: String?
+    let safeDescription: String?
+    let aggregateKey: String?
+    let aggregateDisplay: String?
 }
 
 struct ScanResult: Codable, Equatable {

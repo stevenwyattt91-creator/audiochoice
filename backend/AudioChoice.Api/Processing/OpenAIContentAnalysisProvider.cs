@@ -17,9 +17,9 @@ public sealed class OpenAIContentAnalysisProvider(
 {
     // Bump this whenever the baseline classification policy changes so cached batch
     // answers cannot silently reintroduce events produced under an older policy.
-    private const string BaseAnalysisPromptVersion = "2.4-strict-sexual-escalation";
-    private const string SceneVerificationVersion = "3.3-explicit-sol-routing";
-    private const string SceneEscalationVersion = "3.2-parallel-sol";
+    private const string BaseAnalysisPromptVersion = "2.5-discreet-descriptions";
+    private const string SceneVerificationVersion = "3.4-discreet-descriptions";
+    private const string SceneEscalationVersion = "3.3-discreet-descriptions";
     private readonly string _checkpointFolder = dataPaths.AnalysisCheckpoints;
     public string ScannerVersion => options.ScannerVersion;
 
@@ -80,7 +80,8 @@ public sealed class OpenAIContentAnalysisProvider(
             logger.LogInformation(
                 "Lambda-first content analysis completed with {EventCount} events.",
                 lambdaResult.Length);
-            return ApplyCompleteSceneSafetyGuard(lambdaResult, segments);
+            return UserFacingEventPostProcessor.Process(
+                ApplyCompleteSceneSafetyGuard(lambdaResult, segments));
         }
 
         var batchSize = Math.Max(1, options.MaximumSegmentsPerAnalysisRequest);
@@ -151,7 +152,7 @@ public sealed class OpenAIContentAnalysisProvider(
         logger.LogInformation(
             "Content analysis completed with {EventCount} unique events.",
             result.Length);
-        return result;
+        return UserFacingEventPostProcessor.Process(result);
     }
 
     private async Task<IReadOnlyList<ContentBatchResult>> RunContentBatches(
@@ -307,8 +308,12 @@ public sealed class OpenAIContentAnalysisProvider(
 
     private static string SafeDescriptionForEvent(string label, string? supplied)
     {
-        if (!string.Equals(supplied, "Local Lambda content cue", StringComparison.Ordinal) &&
-            !string.Equals(supplied, "Lambda sexual-content candidate window", StringComparison.Ordinal))
+        var isInternalDescription =
+            string.Equals(supplied, "Local Lambda content cue", StringComparison.Ordinal) ||
+            string.Equals(supplied, "Lambda sexual-content candidate window", StringComparison.Ordinal);
+        if (!string.IsNullOrWhiteSpace(supplied) && !isInternalDescription &&
+            !(label.StartsWith("sexual_", StringComparison.Ordinal) &&
+              ContainsGraphicSexualDetail(supplied)))
         {
             return SafeDescription(supplied);
         }
@@ -338,6 +343,17 @@ public sealed class OpenAIContentAnalysisProvider(
             "self_harm_depiction" => "Self-harm depicted",
             _ => "Content event detected"
         };
+    }
+
+    private static bool ContainsGraphicSexualDetail(string value)
+    {
+        var graphicTerms = new[]
+        {
+            "breast", "nipple", "penis", "vagina", "clitoris", "genital", "buttock",
+            "anus", "intercourse", "penetrat", "oral sex", "thrust", "squeez", "grop",
+            "fondl"
+        };
+        return graphicTerms.Any(term => value.Contains(term, StringComparison.OrdinalIgnoreCase));
     }
 
     private async Task<AnalysisPayload> AnalyzeBatch(
@@ -501,7 +517,7 @@ public sealed class OpenAIContentAnalysisProvider(
                 Guid.NewGuid(), start, end, mapping.CategoryID, mapping.GroupID,
                 mapping.EventID, verification.Confidence,
                 Hash($"verified-scene|{start:F1}|{end:F1}|{verification.CandidateKey}"),
-                SafeDescription(verification.SafeDescription)));
+                SafeDescriptionForEvent("sexual_complete_scene", verification.SafeDescription)));
         }
 
         reportProgress?.Invoke(1);
@@ -760,7 +776,8 @@ Keep timestamps within the supplied excerpt. Use a neutral, non-graphic but usef
 that distinguishes the scene from a single explicit phrase. Do not return the generic wording
 "Complete sexual scene". Examples of acceptable style are "Sustained consensual sexual
 activity" or "Sexual activity following romantic dialogue". Do not include graphic details
-or quotations. Return one decision for every candidateKey.
+or quotations. Never name intimate anatomy or describe touching mechanics, positions, squeezing,
+or similar physical details. Return one decision for every candidateKey.
 
 Candidates:
 """ + JsonSerializer.Serialize(candidates);
@@ -830,7 +847,10 @@ substance_alcohol_use, substance_intoxication, substance_drug_reference,
 substance_drug_use, substance_abuse_overdose, blasphemy_religious_profanity,
 blasphemy_statement, self_harm_reference, self_harm_suicidal_thoughts,
 self_harm_suicide_attempt, self_harm_depiction.
-For safeDescription, write a neutral, non-graphic summary of at most 80 characters.
+For safeDescription, write a neutral, discreet, non-graphic summary of at most 80 characters.
+Never name intimate anatomy or describe touching, squeezing, positions, or mechanics. Prefer
+phrasing such as "Intimate touching is described", "Nudity is described", "A sexual reference
+is made", or "Sustained sexual activity follows intimate escalation".
 Do not quote transcript text. For profanity labels only, return the exact single profane word
 in profanityWord so the server can censor and count it; otherwise return null.
 For profanity, emit one event for every occurrence so playback can skip each timestamp; the

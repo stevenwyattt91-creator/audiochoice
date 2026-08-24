@@ -61,8 +61,26 @@ enum IOSContentTaxonomy {
     }
 
     static func detail(for event: ScanEvent) -> String {
+        if let aggregateDisplay = event.aggregateDisplay, !aggregateDisplay.isEmpty {
+            return aggregateDisplay
+        }
+        if let safeDescription = event.safeDescription, !safeDescription.isEmpty {
+            return safeDescription
+        }
         if event.eventID == explicit { return "Explicit sexual content" }
         return category(for: event)?.title ?? "Unsupported event"
+    }
+
+    static func userFacingEvents(_ events: [ScanEvent]) -> [ScanEvent] {
+        var aggregateKeys = Set<String>()
+        return events.sorted { $0.startTime < $1.startTime }.filter { event in
+            guard let key = event.aggregateKey, !key.isEmpty else { return true }
+            return aggregateKeys.insert(key).inserted
+        }
+    }
+
+    static func controlCount(_ events: [ScanEvent]) -> Int {
+        userFacingEvents(events).count
     }
 }
 

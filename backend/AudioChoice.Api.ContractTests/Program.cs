@@ -31,6 +31,30 @@ var result = new ScanResult(
     DateTimeOffset.UtcNow,
     "1.0");
 
+var alcoholMapping = ContentTaxonomy.Mappings["substance_alcohol_use"];
+var intoxicationMapping = ContentTaxonomy.Mappings["substance_intoxication"];
+var drugMapping = ContentTaxonomy.Mappings["substance_drug_use"];
+var graphicViolenceMapping = ContentTaxonomy.Mappings["violence_graphic"];
+var condensedControls = UserFacingEventPostProcessor.Process([
+    new ScanEvent(Guid.NewGuid(), 1, 2, alcoholMapping.CategoryID, alcoholMapping.GroupID,
+        alcoholMapping.EventID, 1),
+    new ScanEvent(Guid.NewGuid(), 3, 4, intoxicationMapping.CategoryID, intoxicationMapping.GroupID,
+        intoxicationMapping.EventID, 1),
+    new ScanEvent(Guid.NewGuid(), 5, 6, drugMapping.CategoryID, drugMapping.GroupID,
+        drugMapping.EventID, 1),
+    new ScanEvent(Guid.NewGuid(), 10, 12, graphicViolenceMapping.CategoryID,
+        graphicViolenceMapping.GroupID, graphicViolenceMapping.EventID, 1),
+    new ScanEvent(Guid.NewGuid(), 18, 20, graphicViolenceMapping.CategoryID,
+        graphicViolenceMapping.GroupID, graphicViolenceMapping.EventID, 1)
+]);
+Assert(condensedControls.Count == 5, "User-facing aggregation discarded raw event ranges.");
+Assert(condensedControls.Where(item => item.CategoryID == alcoholMapping.CategoryID)
+    .Select(item => item.AggregateKey).Distinct().Count() == 2,
+    "Alcohol and drug events were not reduced to two aggregate controls.");
+Assert(condensedControls.Where(item => item.CategoryID == graphicViolenceMapping.CategoryID)
+    .Select(item => item.AggregateKey).Distinct().Count() == 1,
+    "Nearby violence events were not grouped into one control.");
+
 catalog.SaveResult(fingerprint, result);
 Assert(catalog.FindResult(fingerprint) == result, "Fingerprint lookup failed.");
 Assert(catalog.RecoverableJobs().Count == 0, "Completed-only catalog reported recoverable jobs.");
