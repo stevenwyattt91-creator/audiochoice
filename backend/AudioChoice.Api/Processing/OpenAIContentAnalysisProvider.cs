@@ -349,14 +349,19 @@ public sealed class OpenAIContentAnalysisProvider(
             return retained;
         }
 
-        // Every sexual-content candidate goes through Terra. Do not reuse an older
-        // prefilter here: euphemistic escalation cues must reach the strict verifier.
-        var verificationCandidates = candidates;
+        // Every sexual-content candidate goes through Terra. Coalesce overlapping
+        // or nearby high-recall events first: the first pass can emit several labels
+        // for the same scene, and sending each label separately wastes requests and
+        // can trip the spending guard without improving recall.
+        var verificationCandidates = CoalesceSceneCandidates(candidates);
+        logger.LogInformation(
+            "Coalesced {RawCandidateCount} sexual candidates into {VerificationCandidateCount} Terra review windows.",
+            candidates.Length, verificationCandidates.Count);
 
-        if (verificationCandidates.Length > options.MaximumSceneVerificationRequestsPerJob)
+        if (verificationCandidates.Count > options.MaximumSceneVerificationRequestsPerJob)
         {
             throw new InvalidOperationException(
-                $"Scene verification produced {verificationCandidates.Length} candidates, " +
+                $"Scene verification produced {verificationCandidates.Count} candidates, " +
                 $"above the configured limit of {options.MaximumSceneVerificationRequestsPerJob}. " +
                 "The job was stopped to prevent unbounded model spending.");
         }
@@ -366,6 +371,10 @@ public sealed class OpenAIContentAnalysisProvider(
         logger.LogInformation(
             "Terra verification planned: {TerraCandidateCount} sexual events will be sent to Terra.",
             batches.Length);
+        var sourceRanges = verificationCandidates.ToDictionary(
+            item => item.CandidateKey,
+            item => (item.ProposedStartTime, item.ProposedEndTime),
+            StringComparer.Ordinal);
         var terraResults = await RunSceneVerifications(
             batches, options.SceneVerificationModel, options.SceneVerificationConcurrency,
             progress => reportProgress?.Invoke(progress * .5), cancellationToken);
@@ -418,16 +427,14 @@ public sealed class OpenAIContentAnalysisProvider(
             foreach (var verification in decisions.Where(item =>
                 item.Accepted && item.DirectSexualActEvidence && item.SustainedBeyondKissing))
             {
-                var source = events.FirstOrDefault(item =>
-                    sexualEventIDs.Contains(item.EventID) &&
-                    string.Equals(item.StableKey, verification.CandidateKey, StringComparison.Ordinal));
-                if (source is null || verification.Confidence < .85) continue;
-                var start = Math.Clamp(verification.StartTime, source.StartTime - 30, source.EndTime);
-                var end = Math.Clamp(verification.EndTime, start, source.EndTime + 30);
+                if (!sourceRanges.TryGetValue(verification.CandidateKey, out var sourceRange) ||
+                    verification.Confidence < .85) continue;
+                var start = Math.Clamp(verification.StartTime, sourceRange.ProposedStartTime - 30, sourceRange.ProposedEndTime);
+                var end = Math.Clamp(verification.EndTime, start, sourceRange.ProposedEndTime + 30);
                 retained.Add(new ScanEvent(
                     Guid.NewGuid(), start, end, mapping.CategoryID, mapping.GroupID,
                     mapping.EventID, verification.Confidence,
-                    Hash($"verified-scene|{start:F1}|{end:F1}|{source.StableKey}"),
+                    Hash($"verified-scene|{start:F1}|{end:F1}|{verification.CandidateKey}"),
                     SafeDescription(verification.SafeDescription))
                 {
                 });
@@ -440,9 +447,47 @@ public sealed class OpenAIContentAnalysisProvider(
             "Sexual-scene verification retained {RetainedCount} of {CandidateCount} candidates " +
             "after {EscalationCount} capped escalation requests.",
             retained.Count(item => item.EventID == mapping.EventID),
-            verificationCandidates.Length,
+            verificationCandidates.Count,
             escalationRequests);
         return retained;
+    }
+
+    private static IReadOnlyList<SceneVerificationCandidate> CoalesceSceneCandidates(
+        IReadOnlyList<SceneVerificationCandidate> candidates)
+    {
+        const double mergeGapSeconds = 45;
+        var ordered = candidates.OrderBy(item => item.ProposedStartTime).ToArray();
+        var result = new List<SceneVerificationCandidate>();
+        var group = new List<SceneVerificationCandidate>();
+        var groupEnd = double.MinValue;
+
+        void Flush()
+        {
+            if (group.Count == 0) return;
+            var first = group[0];
+            var last = group[^1];
+            var start = group.Min(item => item.ProposedStartTime);
+            var end = group.Max(item => item.ProposedEndTime);
+            var mergedSegments = group
+                .SelectMany(item => item.Segments)
+                .DistinctBy(item => (item.StartTime, item.EndTime))
+                .OrderBy(item => item.StartTime)
+                .ToArray();
+            result.Add(new SceneVerificationCandidate(
+                Hash($"coalesced-scene|{first.CandidateKey}|{last.CandidateKey}"),
+                start, end, mergedSegments));
+            group.Clear();
+        }
+
+        foreach (var candidate in ordered)
+        {
+            if (group.Count > 0 && candidate.ProposedStartTime > groupEnd + mergeGapSeconds)
+                Flush();
+            group.Add(candidate);
+            groupEnd = Math.Max(groupEnd, candidate.ProposedEndTime);
+        }
+        Flush();
+        return result;
     }
 
     private async Task<IReadOnlyList<SceneBatchResult>> RunSceneVerifications(
