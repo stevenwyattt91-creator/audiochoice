@@ -17,3 +17,6 @@ curl http://127.0.0.1:8001/health
 ```
 
 The transcription endpoint is host-local only and is not exposed to the internet.
+
+For an admin-only rerun of the current filter pipeline against a saved transcript,
+see [Admin-only Lambda backend rescan](../../docs/LAMBDA_BACKEND_RESCAN.md).
