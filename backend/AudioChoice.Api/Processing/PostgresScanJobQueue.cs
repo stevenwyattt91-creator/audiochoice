@@ -40,6 +40,7 @@ public sealed class PostgresScanJobQueue(
                     where (
                         (
                             status = 'queued' and available_at <= now() and attempt_count < $2
+                            and (lease_expires_at is null or lease_expires_at <= now())
                         ) or (
                             status = 'processing'
                             and attempt_count < $2
