@@ -116,6 +116,9 @@ class ImportViewModel(
         if (uri.scheme !in setOf("audiochoice", "audiochoice-beta") || uri.host != "transfer" ||
             mutableState.value.phase !in listOf(ImportPhase.IDLE, ImportPhase.COMPLETE, ImportPhase.FAILED)) return false
         if (mutableState.value.phase != ImportPhase.IDLE) reset()
+        val wakeLock = (appContext.getSystemService(Context.POWER_SERVICE) as PowerManager)
+            .newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "AudioChoice::CompanionTransfer")
+            .apply { setReferenceCounted(false); acquire(6 * 60 * 60 * 1000L) }
         viewModelScope.launch {
             runCatching {
                 update(ImportPhase.READING, 0)
@@ -134,6 +137,7 @@ class ImportViewModel(
                     error = error.message ?: "AudioChoice could not receive that companion transfer.",
                 )
             }
+            if (wakeLock.isHeld) wakeLock.release()
         }
         return true
     }
@@ -145,7 +149,10 @@ class ImportViewModel(
             val destination = File(directory, "${System.currentTimeMillis()}-$safeName")
             val connection = (URL(url).openConnection() as HttpURLConnection).apply {
                 connectTimeout = 30_000
-                readTimeout = 120_000
+                // M4A/M4B files can be large, and the phone may be locked while
+                // the relay is downloading. Keep the socket alive long enough
+                // for a slow or backgrounded transfer to finish.
+                readTimeout = 30 * 60 * 1000
             }
             try {
                 val digest = MessageDigest.getInstance("SHA-256")
