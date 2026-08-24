@@ -271,6 +271,7 @@ if (openAIOptions.WorkerEnabled)
 
     if (openAIOptions.MaximumRetries < 0 ||
         openAIOptions.MaximumJobAttempts <= 0 ||
+        openAIOptions.ScanWorkerConcurrency <= 0 ||
         openAIOptions.MaximumSegmentsPerAnalysisRequest <= 0 ||
         openAIOptions.MaximumSceneVerificationRequestsPerJob <= 0 ||
         openAIOptions.MaximumChunksPerJob <= 0 ||

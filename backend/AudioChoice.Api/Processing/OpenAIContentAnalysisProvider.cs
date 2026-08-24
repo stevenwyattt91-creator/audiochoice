@@ -375,8 +375,10 @@ public sealed class OpenAIContentAnalysisProvider(
             var batch = terraResults[index].Batch;
             var payload = terraResults[index].Payload;
             var decisions = payload.Candidates.ToList();
+            // Sol receives only Terra decisions that already describe a sustained
+            // scene with direct sexual evidence—not isolated innuendo or references.
             var ambiguous = payload.Candidates.Where(item =>
-                    item.DirectSexualActEvidence || item.SustainedBeyondKissing || item.Confidence >= .55)
+                    item.DirectSexualActEvidence && item.SustainedBeyondKissing)
                 .Take(Math.Max(0,
                     options.MaximumSceneEscalationRequestsPerJob - escalationRequests))
                 .ToArray();

@@ -13,6 +13,7 @@ public sealed class OpenAIProcessingOptions
     public int TranscriptionWorkers { get; init; } = 3;
     public int TranscriptionConcurrencyPerWorker { get; init; } = 2;
     public int TranscriptionMaximumRetries { get; init; } = 3;
+    public int ScanWorkerConcurrency { get; init; } = 1;
     public int ContentAnalysisConcurrency { get; init; } = 3;
     public int SceneVerificationConcurrency { get; init; } = 3;
     public int SceneEscalationConcurrency { get; init; } = 2;

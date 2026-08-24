@@ -11,9 +11,18 @@ public sealed class ScanWorker(
     IPrivateTranscriptStore transcriptStore,
     ITransactionalEmailSender emailSender,
     IInternalAuditStore audits,
+    OpenAIProcessingOptions options,
     ILogger<ScanWorker> logger) : BackgroundService
 {
     protected override async Task ExecuteAsync(
+        CancellationToken stoppingToken)
+    {
+        var laneTasks = Enumerable.Range(0, Math.Max(1, options.ScanWorkerConcurrency))
+            .Select(_ => RunLane(stoppingToken));
+        await Task.WhenAll(laneTasks);
+    }
+
+    private async Task RunLane(
         CancellationToken stoppingToken)
     {
         while (!stoppingToken.IsCancellationRequested)

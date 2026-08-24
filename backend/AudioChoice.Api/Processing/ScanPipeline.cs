@@ -148,9 +148,27 @@ public sealed class ScanPipeline(
         Guid? scanID)
     {
         var chunks = await preChunker.Materialize(upload.StoredPath!, cancellationToken);
-        var completedThrough = existingTranscript?.Segments.Count > 0
-            ? existingTranscript.Segments.Max(segment => segment.EndTime)
-            : 0;
+        // Chunks finish out of order. Never use the maximum transcript timestamp as the
+        // resume point, because that could skip a failed chunk that sits before a later one.
+        // Checkpoints are matched to materialized chunk boundaries and only the contiguous
+        // prefix is considered complete.
+        var completedThrough = 0d;
+        var completedEnds = existingTranscript?.Checkpoints?
+            .Where(checkpoint => string.Equals(checkpoint.Status, "completed", StringComparison.OrdinalIgnoreCase))
+            .Select(checkpoint => checkpoint.EndTime)
+            .ToArray() ?? [];
+        if (completedEnds.Length > 0)
+        {
+            foreach (var chunk in chunks.OrderBy(item => item.StartTime))
+            {
+                if (!completedEnds.Any(end => Math.Abs(end - chunk.EndTime) <= 0.01)) break;
+                completedThrough = chunk.EndTime;
+            }
+        }
+        else if (existingTranscript?.Segments.Count > 0)
+        {
+            completedThrough = existingTranscript.Segments.Max(segment => segment.EndTime);
+        }
         var pending = chunks.Where(chunk =>
             chunk.EndTime > completedThrough + 0.001 &&
             chunk.EndTime <= options.MaximumAudioDurationSeconds).ToArray();
@@ -158,26 +176,42 @@ public sealed class ScanPipeline(
             foreach (var skipped in chunks.Where(chunk => !pending.Contains(chunk))) skipped.DisposeFile();
         if (concurrentTranscriber is null)
             throw new InvalidOperationException("Concurrent transcription is not configured.");
-        var results = await concurrentTranscriber.Transcribe(
-            pending, reportChunkProgress, cancellationToken);
         var segments = existingTranscript?.Segments.ToList() ?? [];
         var checkpoints = existingTranscript?.Checkpoints?.ToList() ?? [];
+        var checkpointGate = new SemaphoreSlim(1, 1);
+        async Task CheckpointCompletedChunk(TranscribedChunk result)
+        {
+            await checkpointGate.WaitAsync(cancellationToken);
+            try
+            {
+                segments.AddRange(result.Segments.Select(segment => segment with
+                {
+                    StartTime = segment.StartTime + result.Chunk.StartTime,
+                    EndTime = segment.EndTime + result.Chunk.StartTime
+                }));
+                checkpoints.Add(new TranscriptionChunkCheckpoint(
+                    scanID ?? Guid.Empty, result.Index, result.Total,
+                    result.Chunk.StartTime, result.Chunk.EndTime,
+                    result.Segments, "completed", result.RetryCount, result.ModelName));
+                await transcriptStore.Save(upload.Fingerprint,
+                    new PrivateTranscript("1.0", "en", result.ModelName,
+                        existingTranscript?.CreatedAt ?? DateTimeOffset.UtcNow,
+                        NormalizeSegments(segments), false, checkpoints.ToArray()), cancellationToken);
+            }
+            finally { checkpointGate.Release(); }
+        }
+
+        IReadOnlyList<TranscribedChunk> results;
+        try
+        {
+            results = await concurrentTranscriber.Transcribe(
+                pending, reportChunkProgress, cancellationToken, CheckpointCompletedChunk);
+        }
+        finally { checkpointGate.Dispose(); }
+
         foreach (var result in results)
         {
-            segments.AddRange(result.Segments.Select(segment => segment with
-            {
-                StartTime = segment.StartTime + result.Chunk.StartTime,
-                EndTime = segment.EndTime + result.Chunk.StartTime
-            }));
             result.Chunk.DisposeFile();
-            checkpoints.Add(new TranscriptionChunkCheckpoint(
-                scanID ?? Guid.Empty, result.Index, result.Total,
-                result.Chunk.StartTime, result.Chunk.EndTime,
-                result.Segments, "completed", result.RetryCount, result.ModelName));
-            await transcriptStore.Save(upload.Fingerprint,
-                new PrivateTranscript("1.0", "en", result.ModelName,
-                    existingTranscript?.CreatedAt ?? DateTimeOffset.UtcNow,
-                    NormalizeSegments(segments), false, checkpoints.ToArray()), cancellationToken);
         }
         var normalized = NormalizeSegments(segments);
         await transcriptStore.Save(upload.Fingerprint,

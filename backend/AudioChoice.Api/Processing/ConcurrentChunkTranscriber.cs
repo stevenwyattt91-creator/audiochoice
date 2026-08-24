@@ -19,20 +19,23 @@ public sealed class ConcurrentChunkTranscriber(
     public async Task<IReadOnlyList<TranscribedChunk>> Transcribe(
         IReadOnlyList<AudioChunk> chunks,
         Action<int, int>? progress,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        Func<TranscribedChunk, Task>? completedChunk = null)
     {
         var parallelism = Math.Max(1, options.TranscriptionWorkers) *
                           Math.Max(1, options.TranscriptionConcurrencyPerWorker);
         using var gate = new SemaphoreSlim(parallelism, parallelism);
         var completed = 0;
         var tasks = chunks.Select((chunk, index) => Run(index, chunk, chunks.Count, gate,
-            () => progress?.Invoke(Interlocked.Increment(ref completed), chunks.Count), cancellationToken));
+            () => progress?.Invoke(Interlocked.Increment(ref completed), chunks.Count),
+            completedChunk, cancellationToken));
         return (await Task.WhenAll(tasks)).OrderBy(item => item.Index).ToArray();
     }
 
     private async Task<TranscribedChunk> Run(
         int index, AudioChunk chunk, int total, SemaphoreSlim gate,
-        Action completed, CancellationToken cancellationToken)
+        Action completed, Func<TranscribedChunk, Task>? completedChunk,
+        CancellationToken cancellationToken)
     {
         await gate.WaitAsync(cancellationToken);
         try
@@ -45,11 +48,18 @@ public sealed class ConcurrentChunkTranscriber(
                     var segments = await provider.Transcribe(chunk, cancellationToken);
                     logger.LogInformation("Transcription chunk {Index} / {Total} completed; retries {Retries}; elapsedMs {ElapsedMs}.",
                         index + 1, total, retry, Stopwatch.GetElapsedTime(started).TotalMilliseconds);
-                    // Progress persistence is observability, not transcription. Never turn a
-                    // successful Whisper result into an expensive retranscription if its save fails.
+                    var result = new TranscribedChunk(index, total, chunk, segments, retry, provider.ModelName);
+                    // Progress/checkpoint persistence must never turn a successful Whisper result
+                    // into an expensive retranscription if the storage write itself fails.
                     try { completed(); }
                     catch (Exception error) { logger.LogWarning(error, "Could not persist progress for chunk {Index} / {Total}.", index + 1, total); }
-                    return new TranscribedChunk(index, total, chunk, segments, retry, provider.ModelName);
+                    if (completedChunk is not null)
+                    {
+                        try { await completedChunk(result); }
+                        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
+                        catch (Exception error) { logger.LogWarning(error, "Could not checkpoint completed chunk {Index} / {Total}; the transcript result will still be returned.", index + 1, total); }
+                    }
+                    return result;
                 }
                 catch (Exception) when (retry < Math.Max(0, options.TranscriptionMaximumRetries))
                 {

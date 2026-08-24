@@ -95,12 +95,12 @@ public static partial class DeterministicContentDetector
     private static partial Regex WordRegex();
 
     [GeneratedRegex(
-        @"\b(?:damn|bastard|bitch|shit|fuck|fucking|motherfucker|asshole|naked|nude|sex|sexual|orgasm|rape|stabbed|shot|killed|murdered|blood|torture|suicide|overdose)\b",
+        @"\b(?:damn|bastard|bitch|shit|fuck|fucking|motherfucker|asshole|naked|nude|sex|sexual|orgasm|rape|stabbed|shot|killed|murdered|blood|torture|suicide|overdose|opening\s+(?:my|his|her|their)\s+legs|opened\s+(?:my|his|her|their)\s+legs|spreading\s+(?:my|his|her|their)\s+legs|spread\s+(?:my|his|her|their)\s+legs)\b",
         RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
     private static partial Regex ObviousContentRegex();
 
     [GeneratedRegex(
-        @"\b(?:naked|nude|undress(?:ed|ing)?|sex(?:ual|ually)?|orgasm|climax|penetrat(?:e|ed|ing|ion)|thrust(?:ed|ing)?|moan(?:ed|ing)?|kiss(?:ed|ing)?|breast|nipples?|genitals?|erect(?:ion)?|masturbat(?:e|ed|ing|ion)|rape|assault(?:ed|ing)?|stab(?:bed|bing)?|shoot(?:ing|s)?|murder(?:ed|ing)?|blood(?:y)?|torture|suicide|overdose)\b",
+        @"\b(?:naked|nude|undress(?:ed|ing)?|sex(?:ual|ually)?|orgasm|climax|penetrat(?:e|ed|ing|ion)|thrust(?:ed|ing)?|moan(?:ed|ing)?|kiss(?:ed|ing)?|breast|nipples?|genitals?|erect(?:ion)?|masturbat(?:e|ed|ing|ion)|rape|assault(?:ed|ing)?|stab(?:bed|bing)?|shoot(?:ing|s)?|murder(?:ed|ing)?|blood(?:y)?|torture|suicide|overdose|opening\s+(?:my|his|her|their)\s+legs|opened\s+(?:my|his|her|their)\s+legs|spreading\s+(?:my|his|her|their)\s+legs|spread\s+(?:my|his|her|their)\s+legs|between\s+(?:her|his|their)\s+thighs?)\b",
         RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
     private static partial Regex SceneCueRegex();
 }

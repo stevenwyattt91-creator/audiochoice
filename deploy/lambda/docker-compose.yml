@@ -14,8 +14,8 @@ services:
       WHISPER_FALLBACK_MODEL: ${WHISPER_FALLBACK_MODEL:-large-v3}
       WHISPER_DEVICE: cuda
       WHISPER_COMPUTE_TYPE: float16
-      WHISPER_WORKERS: ${WHISPER_WORKERS:-4}
-      WHISPER_CONCURRENCY_PER_WORKER: ${WHISPER_CONCURRENCY_PER_WORKER:-3}
+      WHISPER_WORKERS: ${WHISPER_WORKERS:-1}
+      WHISPER_CONCURRENCY_PER_WORKER: ${WHISPER_CONCURRENCY_PER_WORKER:-2}
     deploy:
       resources:
         reservations:
@@ -40,16 +40,21 @@ services:
       AudioChoice__OpenAI__TranscriptionProvider: faster-whisper
       AudioChoice__OpenAI__FasterWhisperEndpoint: http://127.0.0.1:8001/
       AudioChoice__OpenAI__FasterWhisperTimeoutSeconds: "600"
+      AudioChoice__OpenAI__ScanWorkerConcurrency: "2"
+      # Two end-to-end lanes share two total GPU transcription slots. Avoid
+      # creating a deep per-lane HTTP backlog behind the Whisper semaphore.
+      AudioChoice__OpenAI__TranscriptionWorkers: "1"
+      AudioChoice__OpenAI__TranscriptionConcurrencyPerWorker: "1"
       # Bounded parallel model work: independent transcript windows can run together,
       # while Terra remains the gate before any Sol escalation.
-      AudioChoice__OpenAI__ContentAnalysisConcurrency: "3"
-      AudioChoice__OpenAI__SceneVerificationConcurrency: "3"
+      AudioChoice__OpenAI__ContentAnalysisConcurrency: "2"
+      AudioChoice__OpenAI__SceneVerificationConcurrency: "2"
       AudioChoice__OpenAI__SceneEscalationConcurrency: "2"
       # Review every transcript window so euphemistic sexual cues are not
       # excluded before Terra/Sol receive them.
       # Keep Whisper local, then send only high-recall candidate windows to OpenAI.
       # Sexual candidates from that pass continue through Terra and Sol.
-      AudioChoice__OpenAI__LocalCandidateFunnelEnabled: "true"
+      AudioChoice__OpenAI__LocalCandidateFunnelEnabled: "false"
       AudioChoice__OpenAI__MaximumSceneVerificationRequestsPerJob: "300"
       AudioChoice__OpenAI__MaximumSceneEscalationRequestsPerJob: "300"
       # Apply new schema migrations (including chunk progress/title backfill)
