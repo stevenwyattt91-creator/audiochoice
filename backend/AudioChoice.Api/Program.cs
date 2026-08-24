@@ -288,7 +288,14 @@ if (openAIOptions.WorkerEnabled)
     builder.Services.AddSingleton<ITranscriptionProvider>(services =>
         string.Equals(openAIOptions.TranscriptionProvider, "faster-whisper", StringComparison.OrdinalIgnoreCase)
             ? new FasterWhisperTranscriptionProvider(
-                new HttpClient { BaseAddress = new Uri(openAIOptions.FasterWhisperEndpoint) })
+                new HttpClient
+                {
+                    BaseAddress = new Uri(openAIOptions.FasterWhisperEndpoint),
+                    // A faster-whisper chunk can legitimately take several minutes on
+                    // a busy GPU. The HttpClient default is 100 seconds, which cancels
+                    // otherwise healthy chunks mid-transcription.
+                    Timeout = TimeSpan.FromMinutes(10)
+                })
             : new OpenAITranscriptionProvider(
                 services.GetRequiredService<IHttpClientFactory>()
                     .CreateClient("OpenAIProcessing"),
