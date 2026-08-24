@@ -18,8 +18,8 @@ public sealed class OpenAIContentAnalysisProvider(
     // Bump this whenever the baseline classification policy changes so cached batch
     // answers cannot silently reintroduce events produced under an older policy.
     private const string BaseAnalysisPromptVersion = "2.4-strict-sexual-escalation";
-    private const string SceneVerificationVersion = "3.2-strict-sexual-escalation";
-    private const string SceneEscalationVersion = "3.1-sol";
+    private const string SceneVerificationVersion = "3.3-explicit-sol-routing";
+    private const string SceneEscalationVersion = "3.2-parallel-sol";
     private readonly string _checkpointFolder = dataPaths.AnalysisCheckpoints;
     public string ScannerVersion => options.ScannerVersion;
 
@@ -454,78 +454,114 @@ public sealed class OpenAIContentAnalysisProvider(
         var terraResults = await RunSceneVerifications(
             batches, options.SceneVerificationModel, options.SceneVerificationConcurrency,
             progress => reportProgress?.Invoke(progress * .5), cancellationToken);
-        var escalationRequests = 0;
-        for (var index = 0; index < terraResults.Count; index += 1)
+        var sourceCandidates = verificationCandidates.ToDictionary(
+            item => item.CandidateKey, StringComparer.Ordinal);
+        var terraDecisions = terraResults
+            .SelectMany(result => result.Payload.Candidates.Select(decision =>
+                (TerraIndex: result.Index, Decision: decision)))
+            .ToArray();
+        var escalationCandidates = terraDecisions
+            .Where(item => item.Decision.Accepted || item.Decision.NeedsEscalation)
+            .Select(item => sourceCandidates.TryGetValue(
+                    item.Decision.CandidateKey, out var source)
+                ? new SolEscalationCandidate(item.TerraIndex, source)
+                : null)
+            .Where(item => item is not null)
+            .Select(item => item!)
+            .DistinctBy(item => item.Source.CandidateKey)
+            .Take(options.MaximumSceneEscalationRequestsPerJob)
+            .ToArray();
+
+        logger.LogInformation(
+            "Sol escalation planned: {SolCandidateCount} confirmed or ambiguous scene candidates " +
+            "from {TerraCandidateCount} Terra decisions; concurrency {SolConcurrency}.",
+            escalationCandidates.Length, terraDecisions.Length,
+            Math.Max(1, options.SceneEscalationConcurrency));
+
+        var solDecisions = await RunSolEscalations(
+            escalationCandidates,
+            progress => reportProgress?.Invoke(.5 + progress * .5),
+            cancellationToken);
+        var solByCandidate = solDecisions.ToDictionary(
+            item => item.CandidateKey, StringComparer.Ordinal);
+
+        foreach (var (_, terraDecision) in terraDecisions)
         {
-            var batch = terraResults[index].Batch;
-            var payload = terraResults[index].Payload;
-            var decisions = payload.Candidates.ToList();
-            // Sol receives only Terra decisions that already describe a sustained
-            // scene with direct sexual evidence—not isolated innuendo or references.
-            var ambiguous = payload.Candidates.Where(item =>
-                    item.DirectSexualActEvidence && item.SustainedBeyondKissing)
-                .Take(Math.Max(0,
-                    options.MaximumSceneEscalationRequestsPerJob - escalationRequests))
-                .ToArray();
-            logger.LogInformation(
-                "Sol escalation candidates after Terra {TerraBatchNumber} / {TerraTotal}: {SolCandidatesFound}; " +
-                "planned Sol total so far: {SolPlannedSoFar} / {SolLimit}.",
-                index + 1, batches.Length, ambiguous.Length,
-                escalationRequests + ambiguous.Length,
-                options.MaximumSceneEscalationRequestsPerJob);
-            foreach (var candidate in ambiguous)
-            {
-                escalationRequests += 1;
-                logger.LogInformation(
-                    "Sol escalation {SolNumber} / up to {SolLimit} for Terra candidate {TerraBatchNumber} / {TerraTotal}.",
-                    escalationRequests, options.MaximumSceneEscalationRequestsPerJob,
-                    index + 1, batches.Length);
-                var sourceCandidate = batch.FirstOrDefault(item =>
-                    string.Equals(item.CandidateKey, candidate.CandidateKey, StringComparison.Ordinal));
-                if (sourceCandidate is null) continue;
-                var escalationBatch = new[] { sourceCandidate };
-                var escalationPath = SceneVerificationCheckpointPath(
-                    escalationBatch, SceneEscalationVersion, options.SceneEscalationModel);
-                var escalated = await LoadSceneVerificationCheckpoint(
-                    escalationPath, cancellationToken);
-                if (escalated is null)
-                {
-                    escalated = await VerifySceneBatch(
-                        escalationBatch, options.SceneEscalationModel, cancellationToken);
-                    await SaveSceneVerificationCheckpoint(
-                        escalationPath, escalated, cancellationToken);
-                }
-                decisions.RemoveAll(item => string.Equals(
-                    item.CandidateKey, candidate.CandidateKey, StringComparison.Ordinal));
-                decisions.AddRange(escalated.Candidates);
-            }
-
-            foreach (var verification in decisions.Where(item =>
-                item.Accepted && item.DirectSexualActEvidence && item.SustainedBeyondKissing))
-            {
-                if (!sourceRanges.TryGetValue(verification.CandidateKey, out var sourceRange) ||
-                    verification.Confidence < .85) continue;
-                var start = Math.Clamp(verification.StartTime, sourceRange.ProposedStartTime - 30, sourceRange.ProposedEndTime);
-                var end = Math.Clamp(verification.EndTime, start, sourceRange.ProposedEndTime + 30);
-                retained.Add(new ScanEvent(
-                    Guid.NewGuid(), start, end, mapping.CategoryID, mapping.GroupID,
-                    mapping.EventID, verification.Confidence,
-                    Hash($"verified-scene|{start:F1}|{end:F1}|{verification.CandidateKey}"),
-                    SafeDescription(verification.SafeDescription))
-                {
-                });
-            }
-
-            reportProgress?.Invoke(.5 + (index + 1) / (double)batches.Length * .5);
+            var verification = solByCandidate.GetValueOrDefault(
+                terraDecision.CandidateKey, terraDecision);
+            if (!verification.Accepted || !verification.DirectSexualActEvidence ||
+                !verification.SustainedBeyondKissing || verification.Confidence < .85 ||
+                !sourceRanges.TryGetValue(verification.CandidateKey, out var sourceRange))
+                continue;
+            var start = Math.Clamp(verification.StartTime,
+                sourceRange.ProposedStartTime - 30, sourceRange.ProposedEndTime);
+            var end = Math.Clamp(verification.EndTime,
+                start, sourceRange.ProposedEndTime + 30);
+            retained.Add(new ScanEvent(
+                Guid.NewGuid(), start, end, mapping.CategoryID, mapping.GroupID,
+                mapping.EventID, verification.Confidence,
+                Hash($"verified-scene|{start:F1}|{end:F1}|{verification.CandidateKey}"),
+                SafeDescription(verification.SafeDescription)));
         }
+
+        reportProgress?.Invoke(1);
 
         logger.LogInformation(
             "Sexual-scene verification retained {RetainedCount} of {CandidateCount} candidates " +
             "after {EscalationCount} capped escalation requests.",
             retained.Count(item => item.EventID == mapping.EventID),
             verificationCandidates.Count,
-            escalationRequests);
+            escalationCandidates.Length);
         return retained;
+    }
+
+    private async Task<IReadOnlyList<VerifiedSceneCandidate>> RunSolEscalations(
+        IReadOnlyList<SolEscalationCandidate> candidates,
+        Action<double>? reportProgress,
+        CancellationToken cancellationToken)
+    {
+        if (candidates.Count == 0)
+        {
+            reportProgress?.Invoke(1);
+            return [];
+        }
+
+        using var gate = new SemaphoreSlim(Math.Max(1, options.SceneEscalationConcurrency));
+        var completed = 0;
+        var tasks = candidates.Select(async (candidate, index) =>
+        {
+            await gate.WaitAsync(cancellationToken);
+            try
+            {
+                var batch = new[] { candidate.Source };
+                var checkpointPath = SceneVerificationCheckpointPath(
+                    batch, SceneEscalationVersion, options.SceneEscalationModel);
+                var payload = await LoadSceneVerificationCheckpoint(
+                    checkpointPath, cancellationToken);
+                if (payload is null)
+                {
+                    payload = await VerifySceneBatch(
+                        batch, options.SceneEscalationModel, cancellationToken);
+                    await SaveSceneVerificationCheckpoint(
+                        checkpointPath, payload, cancellationToken);
+                }
+
+                var finished = Interlocked.Increment(ref completed);
+                logger.LogInformation(
+                    "Sol escalation progress: {Completed}/{Total} candidate scenes; " +
+                    "Terra candidate {TerraCandidateNumber}.",
+                    finished, candidates.Count, candidate.TerraIndex + 1);
+                reportProgress?.Invoke(finished / (double)candidates.Count);
+                return payload.Candidates;
+            }
+            finally
+            {
+                gate.Release();
+            }
+        });
+
+        var results = await Task.WhenAll(tasks);
+        return results.SelectMany(item => item).ToArray();
     }
 
     private static IReadOnlyList<SceneVerificationCandidate> CoalesceSceneCandidates(
@@ -711,8 +747,12 @@ of an ongoing sexual encounter. A combination of these cues must not be downgrad
 the narration is euphemistic or non-graphic.
 
 accepted may be true only when BOTH evidence booleans are true and confidence is at least
-0.85. Otherwise accepted must be false. Reject uncertain candidates. Confidence must describe
-the evidence for the sustained act, not merely for one suggestive word.
+0.85. Otherwise accepted must be false. Set needsEscalation=true only when the candidate is
+still a plausible ongoing sexual scene but the evidence, confidence, or exact boundaries are
+uncertain and require a stronger final review. Set needsEscalation=false for clear rejections,
+isolated innuendo, references, attraction, kissing, or nudity alone. Confirmed accepted scenes
+will also receive final review. Confidence must describe the evidence for the sustained act,
+not merely for one suggestive word.
 
 For an accepted candidate, refine startTime to the beginning of the sustained sexual activity
 or its immediate unmistakable lead-in, and endTime where that activity clearly finishes.
@@ -896,13 +936,14 @@ Transcript segments:
                                 ["type"] = "object",
                                 ["additionalProperties"] = false,
                                 ["required"] = new JsonArray(
-                                    "candidateKey", "accepted", "directSexualActEvidence",
+                                    "candidateKey", "accepted", "needsEscalation", "directSexualActEvidence",
                                     "sustainedBeyondKissing", "startTime", "endTime",
                                     "confidence", "safeDescription"),
                                 ["properties"] = new JsonObject
                                 {
                                     ["candidateKey"] = new JsonObject { ["type"] = "string" },
                                     ["accepted"] = new JsonObject { ["type"] = "boolean" },
+                                    ["needsEscalation"] = new JsonObject { ["type"] = "boolean" },
                                     ["directSexualActEvidence"] = new JsonObject { ["type"] = "boolean" },
                                     ["sustainedBeyondKissing"] = new JsonObject { ["type"] = "boolean" },
                                     ["startTime"] = new JsonObject { ["type"] = "number" },
@@ -981,9 +1022,14 @@ Transcript segments:
         IReadOnlyList<SceneVerificationCandidate> Batch,
         SceneVerificationPayload Payload);
 
+    private sealed record SolEscalationCandidate(
+        int TerraIndex,
+        SceneVerificationCandidate Source);
+
     private sealed record VerifiedSceneCandidate(
         [property: JsonPropertyName("candidateKey")] string CandidateKey,
         [property: JsonPropertyName("accepted")] bool Accepted,
+        [property: JsonPropertyName("needsEscalation")] bool NeedsEscalation,
         [property: JsonPropertyName("directSexualActEvidence")] bool DirectSexualActEvidence,
         [property: JsonPropertyName("sustainedBeyondKissing")] bool SustainedBeyondKissing,
         [property: JsonPropertyName("startTime")] double StartTime,
