@@ -17,6 +17,11 @@ public sealed class ExternalAuthOptions
         .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
         .Distinct(StringComparer.Ordinal)
         .ToArray();
+
+    public IReadOnlyList<string> AppleClientIDs => AppleClientID
+        .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+        .Distinct(StringComparer.Ordinal)
+        .ToArray();
 }
 
 public sealed record VerifiedIdentity(
@@ -38,20 +43,25 @@ public sealed class ExternalIdentityVerifier(
     {
         return provider.ToLowerInvariant() switch
         {
-            "apple" => await VerifyApple(authorizationCode, cancellationToken),
+            "apple" => await VerifyApple(authorizationCode, identityToken, cancellationToken),
             "google" => await VerifyGoogle(identityToken, cancellationToken),
             _ => null
         };
     }
 
-    private async Task<VerifiedIdentity?> VerifyApple(string code, CancellationToken cancellationToken)
+    private async Task<VerifiedIdentity?> VerifyApple(string code, string? identityToken, CancellationToken cancellationToken)
     {
-        if (string.IsNullOrWhiteSpace(options.AppleClientID) ||
+        // Native iOS sign-in returns an identity token whose audience is the
+        // primary App ID. Web Sign in with Apple uses the grouped Services ID.
+        // Accept either audience so both paths resolve to the same Apple subject.
+        var direct = ParseAppleIdentity(identityToken);
+        if (direct is not null) return direct;
+        if (options.AppleClientIDs.Count == 0 ||
             string.IsNullOrWhiteSpace(options.AppleClientSecret) ||
             string.IsNullOrWhiteSpace(code)) return null;
         using var content = new FormUrlEncodedContent(new Dictionary<string, string>
         {
-            ["client_id"] = options.AppleClientID,
+            ["client_id"] = options.AppleClientIDs[0],
             ["client_secret"] = options.AppleClientSecret,
             ["code"] = code,
             ["grant_type"] = "authorization_code"
@@ -70,7 +80,7 @@ public sealed class ExternalIdentityVerifier(
             if (payload is null) return null;
             payload = payload.PadRight(payload.Length + (4 - payload.Length % 4) % 4, '=');
             var claims = JsonSerializer.Deserialize<AppleClaims>(Convert.FromBase64String(payload));
-            if (claims is null || claims.Audience != options.AppleClientID || claims.Issuer != "https://appleid.apple.com" || claims.ExpiresAt <= DateTimeOffset.UtcNow.ToUnixTimeSeconds()) return null;
+            if (claims is null || !options.AppleClientIDs.Contains(claims.Audience, StringComparer.Ordinal) || claims.Issuer != "https://appleid.apple.com" || claims.ExpiresAt <= DateTimeOffset.UtcNow.ToUnixTimeSeconds()) return null;
             return new VerifiedIdentity("apple", claims.Subject, claims.Email ?? string.Empty, false);
         }
         catch { return null; }
