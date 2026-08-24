@@ -97,7 +97,7 @@ jobs:
           az deployment group create \
             --resource-group "${{ secrets.AZURE_RESOURCE_GROUP }}" \
             --template-file deploy/azure/api.bicep \
-            --parameters location="$LOCATION" imageTag="$GITHUB_SHA" googleClientID='105248861745-34kh2v9g9825kb1drs3jrgmijjum2p3o.apps.googleusercontent.com,105248861745-hikuiqttbh10okeksf972rk5osdf4d0c.apps.googleusercontent.com'
+            --parameters location="$LOCATION" imageTag="$GITHUB_SHA" googleClientID='105248861745-34kh2v9g9825kb1drs3jrgmijjum2p3o.apps.googleusercontent.com,105248861745-hikuiqttbh10okeksf972rk5osdf4d0c.apps.googleusercontent.com' appleClientID='com.audiochoice.website,com.audiochoice.mobile'
 
       - name: Show API endpoint
         shell: bash

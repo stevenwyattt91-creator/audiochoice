@@ -9,6 +9,9 @@ param imageTag string = 'staging-020'
 @description('Comma-separated Google OAuth client IDs accepted as token audiences (for example Android/web and iOS). Leave empty until configured.')
 param googleClientID string = ''
 
+@description('Comma-separated Apple client IDs accepted as token audiences (website Services ID and native App ID).')
+param appleClientID string = 'com.audiochoice.website,com.audiochoice.mobile'
+
 var suffix = take(uniqueString(subscription().subscriptionId, resourceGroup().id), 8)
 var registryName = 'audiochoicestg${suffix}'
 var storageName = 'audiochoicestg${suffix}'
@@ -142,6 +145,11 @@ resource api 'Microsoft.App/containerApps@2024-03-01' = {
           keyVaultUrl: '${vault.properties.vaultUri}secrets/postgres-connection-string'
           identity: pullIdentity.id
         }
+        {
+          name: 'apple-client-secret'
+          keyVaultUrl: '${vault.properties.vaultUri}secrets/apple-client-secret'
+          identity: pullIdentity.id
+        }
       ]
     }
     template: {
@@ -205,6 +213,14 @@ resource api 'Microsoft.App/containerApps@2024-03-01' = {
             {
               name: 'AudioChoice__Authentication__GoogleClientID'
               value: googleClientID
+            }
+            {
+              name: 'AudioChoice__Authentication__AppleClientID'
+              value: appleClientID
+            }
+            {
+              name: 'AudioChoice__Authentication__AppleClientSecret'
+              secretRef: 'apple-client-secret'
             }
             {
               name: 'AudioChoice__TransactionalEmail__Enabled'
