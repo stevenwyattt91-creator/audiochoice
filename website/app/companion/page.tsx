@@ -156,7 +156,14 @@ function SignInDialog({ busy, error, onClose, onGoogle, onApple, onPassword }: {
     if (window.google) draw(); else { const script = document.createElement("script"); script.src = "https://accounts.google.com/gsi/client"; script.async = true; script.onload = draw; document.head.appendChild(script); }
     return () => { active = false; };
   }, [onGoogle]);
-  useEffect(() => { if (!APPLE_SERVICE_ID || document.querySelector("script[data-apple-auth]") ) return; const script = document.createElement("script"); script.src = "https://appleid.cdn-apple.com/appleauth/static/jsapi/appleid/1/en_US/appleid.auth.js"; script.async = true; script.dataset.appleAuth = "true"; document.head.appendChild(script); }, []);
-  useEffect(() => { if (APPLE_SERVICE_ID && (window as any).AppleID?.auth) (window as any).AppleID.auth.init({ clientId: APPLE_SERVICE_ID, scope: "name email", redirectURI: `${window.location.origin}/companion`, usePopup: true }); }, []);
+  useEffect(() => {
+    if (!APPLE_SERVICE_ID) return;
+    const initialize = () => (window as any).AppleID?.auth?.init({ clientId: APPLE_SERVICE_ID, scope: "name email", redirectURI: `${window.location.origin}/companion`, usePopup: true });
+    if ((window as any).AppleID?.auth) { initialize(); return; }
+    let script = document.querySelector<HTMLScriptElement>("script[data-apple-auth]");
+    if (!script) { script = document.createElement("script"); script.src = "https://appleid.cdn-apple.com/appleauth/static/jsapi/appleid/1/en_US/appleid.auth.js"; script.async = true; script.dataset.appleAuth = "true"; document.head.appendChild(script); }
+    script.addEventListener("load", initialize, { once: true });
+    return () => script?.removeEventListener("load", initialize);
+  }, []);
   return <div className="signin-overlay" role="dialog" aria-modal="true" aria-labelledby="signin-title"><section className="signin-dialog"><button className="signin-close" type="button" onClick={onClose} aria-label="Close sign in">×</button><img src="/audiochoice-logo.png" alt=""/><span className="portal-kicker">AUDIOCHOICE ACCOUNT</span><h2 id="signin-title">Sign in to transfer</h2><p>Sign in first so AudioChoice can create a private, one-time handoff to your phone.</p><button className="apple-login" type="button" onClick={onApple} disabled={busy}>&nbsp; Continue with Apple</button><div className={busy ? "google-login disabled" : "google-login"} ref={googleHost}/><div className="signin-divider"><span>or use email</span></div><form onSubmit={onPassword}><label>Email address<input name="email" type="email" autoComplete="email" required /></label><label>Password<input name="password" type="password" autoComplete="current-password" required /></label><button className="primary" type="submit" disabled={busy}>{busy ? "Signing in…" : "Sign in and continue"}<span>→</span></button>{error && <p className="form-error" role="alert">{error}</p>}</form><small>Use the same AudioChoice account you use in the app.</small></section></div>;
 }
