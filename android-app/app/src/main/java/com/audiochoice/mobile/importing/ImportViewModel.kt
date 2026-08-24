@@ -591,6 +591,13 @@ class ImportViewModel(
         resolver.query(uri, arrayOf(android.provider.OpenableColumns.DISPLAY_NAME), null, null, null)?.use {
             if (it.moveToFirst()) return it.getString(0) ?: "Imported audiobook"
         }
+        // Companion transfers are downloaded into app-private storage and arrive as
+        // file:// URIs. ContentResolver metadata is unavailable for those URIs, but
+        // the path still contains the original sanitized filename.
+        if (uri.scheme.equals("file", ignoreCase = true)) {
+            return java.io.File(uri.path ?: "").name.takeIf { it.isNotBlank() }
+                ?: "Imported audiobook"
+        }
         return uri.lastPathSegment ?: "Imported audiobook"
     }
 

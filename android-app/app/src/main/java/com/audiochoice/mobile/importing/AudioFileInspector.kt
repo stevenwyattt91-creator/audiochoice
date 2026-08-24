@@ -51,7 +51,14 @@ class AudioFileInspector(private val context: Context) {
         var embeddedSeries: String? = null
         var embeddedCover: ByteArray? = null
         val duration = runCatching {
-            retriever.setDataSource(context, uri)
+            // MediaMetadataRetriever is more reliable with a direct path for the
+            // file:// URI used by website companion transfers. The content-resolver
+            // overload remains necessary for document-provider imports.
+            if (uri.scheme.equals("file", ignoreCase = true) && !uri.path.isNullOrBlank()) {
+                retriever.setDataSource(uri.path)
+            } else {
+                retriever.setDataSource(context, uri)
+            }
             embeddedTitle = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_TITLE)
             embeddedAuthor = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_ARTIST)
                 ?: retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_AUTHOR)
