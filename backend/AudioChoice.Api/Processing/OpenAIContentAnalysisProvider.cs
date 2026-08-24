@@ -17,7 +17,7 @@ public sealed class OpenAIContentAnalysisProvider(
 {
     // Bump this whenever the baseline classification policy changes so cached batch
     // answers cannot silently reintroduce events produced under an older policy.
-    private const string BaseAnalysisPromptVersion = "2.5-discreet-descriptions";
+    private const string BaseAnalysisPromptVersion = "2.6-clean-descriptions";
     private const string SceneVerificationVersion = "3.4-discreet-descriptions";
     private const string SceneEscalationVersion = "3.3-discreet-descriptions";
     private readonly string _checkpointFolder = dataPaths.AnalysisCheckpoints;
@@ -306,14 +306,13 @@ public sealed class OpenAIContentAnalysisProvider(
             AggregateKey(profanityWord), CensorWord(profanityWord)));
     }
 
-    private static string SafeDescriptionForEvent(string label, string? supplied)
+    public static string SafeDescriptionForEvent(string label, string? supplied)
     {
         var isInternalDescription =
             string.Equals(supplied, "Local Lambda content cue", StringComparison.Ordinal) ||
             string.Equals(supplied, "Lambda sexual-content candidate window", StringComparison.Ordinal);
         if (!string.IsNullOrWhiteSpace(supplied) && !isInternalDescription &&
-            !(label.StartsWith("sexual_", StringComparison.Ordinal) &&
-              ContainsGraphicSexualDetail(supplied)))
+            !ContainsUncleanDetail(supplied))
         {
             return SafeDescription(supplied);
         }
@@ -345,15 +344,19 @@ public sealed class OpenAIContentAnalysisProvider(
         };
     }
 
-    private static bool ContainsGraphicSexualDetail(string value)
+    private static bool ContainsUncleanDetail(string value)
     {
-        var graphicTerms = new[]
+        var uncleanTerms = new[]
         {
             "breast", "nipple", "penis", "vagina", "clitoris", "genital", "buttock",
             "anus", "intercourse", "penetrat", "oral sex", "thrust", "squeez", "grop",
-            "fondl"
+            "fondl", "severed", "bloodied", "dismember", "decapitat", "behead", "gore",
+            "guts", "intestine", "mutilat", "wet impact", "slit", "cut their wrist",
+            "cut his wrist", "cut her wrist", "cut my wrist", "stabbed their own",
+            "stabbed his own", "stabbed her own", "stabbed my own", "hanging themself",
+            "hanging himself", "hanging herself"
         };
-        return graphicTerms.Any(term => value.Contains(term, StringComparison.OrdinalIgnoreCase));
+        return uncleanTerms.Any(term => value.Contains(term, StringComparison.OrdinalIgnoreCase));
     }
 
     private async Task<AnalysisPayload> AnalyzeBatch(
@@ -851,6 +854,10 @@ For safeDescription, write a neutral, discreet, non-graphic summary of at most 8
 Never name intimate anatomy or describe touching, squeezing, positions, or mechanics. Prefer
 phrasing such as "Intimate touching is described", "Nudity is described", "A sexual reference
 is made", or "Sustained sexual activity follows intimate escalation".
+Never describe gore, wounds, removed body parts, or the method used for self-harm or suicide.
+Use clean wording such as "Graphic violence is described", "Torture is described",
+"Self-harm is depicted", or "Suicidal thoughts are described". The description itself must
+not expose a listener to the unwanted graphic or explicit material they are trying to avoid.
 Do not quote transcript text. For profanity labels only, return the exact single profane word
 in profanityWord so the server can censor and count it; otherwise return null.
 For profanity, emit one event for every occurrence so playback can skip each timestamp; the

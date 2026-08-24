@@ -63,6 +63,18 @@ Assert(condensedControls.Where(item => item.CategoryID == graphicViolenceMapping
 Assert(condensedControls.Where(item => item.CategoryID == sexualReferenceMapping.CategoryID)
     .Select(item => item.AggregateKey).Distinct().Count() == 1,
     "Simultaneous sexual-content events were not grouped into one control.");
+Assert(OpenAIContentAnalysisProvider.SafeDescriptionForEvent(
+        "sexual_explicit_activity", "A character squeezes a partner's breast.") ==
+    "Sexual activity described",
+    "Graphic sexual detail reached the user-facing description.");
+Assert(OpenAIContentAnalysisProvider.SafeDescriptionForEvent(
+        "violence_graphic", "A severed, bloodied head is displayed.") ==
+    "Graphic violence described",
+    "Graphic violence detail reached the user-facing description.");
+Assert(OpenAIContentAnalysisProvider.SafeDescriptionForEvent(
+        "self_harm_suicidal_thoughts", "A character considers slitting their throat.") ==
+    "Suicidal thoughts described",
+    "A self-harm method reached the user-facing description.");
 
 catalog.SaveResult(fingerprint, result);
 Assert(catalog.FindResult(fingerprint) == result, "Fingerprint lookup failed.");
