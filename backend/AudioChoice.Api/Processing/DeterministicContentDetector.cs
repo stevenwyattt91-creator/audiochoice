@@ -32,6 +32,29 @@ public static partial class DeterministicContentDetector
             ["cunt"] = "profanity_sexual"
         };
 
+    // Lambda's local first pass deliberately keeps high-recall cues for the
+    // non-sexual filters too. Mild/intense/death violence are excluded by policy;
+    // graphic/torture/child/animal violence remain filterable.
+    private static readonly IReadOnlyDictionary<string, Regex> CategoryCues =
+        new Dictionary<string, Regex>(StringComparer.Ordinal)
+        {
+            ["violence_graphic"] = Cue(@"\b(?:gore|blood(?:y)?|dismember(?:ed|ment)?|behead(?:ed|ing)?|guts|eviscerat(?:e|ed|ion)|corpse|graphic violence)\b"),
+            ["violence_torture"] = Cue(@"\b(?:torture|tortured|waterboarding|rack(?:ed|ing)?|electrocute(?:d|ion)?)\b"),
+            ["violence_children"] = Cue(@"\b(?:child|children|kid|infant|baby)\b.{0,50}\b(?:killed|murdered|abused|tortured|stabbed|shot|beaten)\b"),
+            ["violence_animals"] = Cue(@"\b(?:dog|cat|horse|animal|puppy|kitten)\b.{0,50}\b(?:killed|murdered|abused|tortured|stabbed|shot|beaten)\b"),
+            ["substance_alcohol_use"] = Cue(@"\b(?:drink|drank|drinking|whiskey|whisky|vodka|beer|wine|bourbon|tequila|rum|alcohol)\b"),
+            ["substance_intoxication"] = Cue(@"\b(?:drunk|intoxicated|blacked out|hungover|high)\b"),
+            ["substance_drug_reference"] = Cue(@"\b(?:cocaine|heroin|meth|methamphetamine|fentanyl|opioid|marijuana|weed|pot|drug|drugs)\b"),
+            ["substance_drug_use"] = Cue(@"\b(?:snort(?:ed|ing)?|inject(?:ed|ing)?|smoke|smoked|shoot up|take drugs|used cocaine|used heroin)\b"),
+            ["substance_abuse_overdose"] = Cue(@"\b(?:overdose|overdosed|poison(?:ed|ing)?)\b"),
+            ["blasphemy_religious_profanity"] = Cue(@"\b(?:goddamn|god damn|dammit|damn it|jesus christ)\b"),
+            ["blasphemy_statement"] = Cue(@"\b(?:there is no god|god is dead|curse god|blasphem(?:e|y|ous))\b"),
+            ["self_harm_reference"] = Cue(@"\b(?:self[- ]harm|cut myself|hurt myself|suicid(?:e|al)|kill myself)\b"),
+            ["self_harm_suicidal_thoughts"] = Cue(@"\b(?:want to die|don't want to live|do not want to live|ending my life)\b"),
+            ["self_harm_suicide_attempt"] = Cue(@"\b(?:attempted suicide|suicide attempt|tried to kill myself)\b"),
+            ["self_harm_depiction"] = Cue(@"\b(?:cut her wrists|cut his wrists|cut my wrists|hanging himself|hanging herself|overdosed intentionally)\b")
+        };
+
     public static IReadOnlyList<DeterministicDetection> Detect(
         IReadOnlyList<TranscriptSegment> segments)
     {
@@ -50,9 +73,25 @@ public static partial class DeterministicContentDetector
                     "Profanity detected",
                     word));
             }
+
+            foreach (var cue in CategoryCues)
+            {
+                if (!cue.Value.IsMatch(segment.Text)) continue;
+                detections.Add(new(
+                    cue.Key,
+                    segment.StartTime,
+                    segment.EndTime,
+                    .35,
+                    "Local Lambda content cue",
+                    null));
+            }
         }
         return detections;
     }
+
+    private static Regex Cue(string pattern) => new(
+        pattern,
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.Compiled);
 
     public static bool ContainsObviousContent(IReadOnlyList<TranscriptSegment> segments) =>
         segments.Any(segment => ObviousContentRegex().IsMatch(segment.Text));
