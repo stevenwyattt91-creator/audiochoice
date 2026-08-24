@@ -35,7 +35,15 @@ enum CloudClientError: LocalizedError {
 struct CloudScanClient {
     let baseURL: URL
     let accessToken: String
-    var session: URLSession = .shared
+    var session: URLSession = CloudScanClient.uploadSession
+
+    private static let uploadSession: URLSession = {
+        let configuration = URLSessionConfiguration.default
+        configuration.waitsForConnectivity = true
+        configuration.timeoutIntervalForRequest = 30 * 60
+        configuration.timeoutIntervalForResource = 2 * 60 * 60
+        return URLSession(configuration: configuration)
+    }()
 
     static func configured() throws -> CloudScanClient {
         let defaults = UserDefaults.standard

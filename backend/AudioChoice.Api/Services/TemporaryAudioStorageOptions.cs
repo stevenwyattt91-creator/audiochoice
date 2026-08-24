@@ -5,7 +5,9 @@ public sealed class TemporaryAudioStorageOptions
     public bool BlobEnabled { get; init; }
     public string StorageAccountName { get; init; } = string.Empty;
     public string ContainerName { get; init; } = "temporary-audio";
-    public int UploadAuthorizationMinutes { get; init; } = 15;
+    // Mobile uploads may take a while on real-world connections. The client
+    // still verifies size/hash and the authorization remains scoped to one user.
+    public int UploadAuthorizationMinutes { get; init; } = 120;
     public int MaximumRetentionHours { get; init; } = 24;
     public string CompanionTransferContainerName { get; init; } = "companion-transfers";
     public string AuditReviewContainerName { get; init; } = "audit-review-media";

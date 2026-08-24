@@ -48,7 +48,6 @@ public sealed class OpenAIContentAnalysisProvider(
         // ensure an interrupted reanalysis resumes without paying for completed requests.
         var overlap = Math.Max(0, batchSize / 2);
         var step = Math.Max(1, batchSize - overlap);
-        var batchNumber = 0;
         IReadOnlyList<(int StartIndex, int EndExclusive)> batchRanges = options.LocalCandidateFunnelEnabled
             ? DeterministicContentDetector.CandidateWindows(segments)
             : Enumerable.Range(0, (int)Math.Ceiling(segments.Count / (double)step))
@@ -63,31 +62,19 @@ public sealed class OpenAIContentAnalysisProvider(
                 batchRanges.Count, segments.Count);
         }
 
-        foreach (var range in batchRanges)
+        var batchResults = await RunContentBatches(batchRanges, segments, reportProgress, cancellationToken);
+        foreach (var batchResult in batchResults.OrderBy(item => item.Index))
         {
-            batchNumber += 1;
-            var batch = segments.Skip(range.StartIndex)
-                .Take(range.EndExclusive - range.StartIndex).ToArray();
-            var checkpointPath = CheckpointPath(batch);
-            var classified = await LoadCheckpoint(checkpointPath, cancellationToken);
-            if (classified is null)
-            {
-                classified = await AnalyzeBatch(batch, cancellationToken);
-                await SaveCheckpoint(checkpointPath, classified, cancellationToken);
-            }
-            else
-            {
-                logger.LogInformation(
-                    "Reused content-analysis checkpoint for batch {BatchNumber}; no API request was made.",
-                    batchNumber);
-            }
+            var batchNumber = batchResult.Index + 1;
+            var batch = batchResult.Batch;
+            var classified = batchResult.Payload;
             var batchStart = batch.Min(item => item.StartTime);
             var batchEnd = batch.Max(item => item.EndTime);
             logger.LogInformation(
                 "Content analysis batch {BatchNumber} returned {EventCount} events for {SegmentCount} segments.",
                 batchNumber,
                 classified.Events.Count,
-                batch.Length);
+                batch.Count);
 
             foreach (var item in classified.Events)
             {
@@ -95,9 +82,6 @@ public sealed class OpenAIContentAnalysisProvider(
                     item.Confidence, item.SafeDescription, item.ProfanityWord,
                     batchStart, batchEnd);
             }
-            reportProgress?.Invoke(Math.Clamp(
-                batchNumber / (double)Math.Max(1, batchRanges.Count) * .75,
-                0, .75));
         }
 
         var uniqueEvents = events
@@ -127,6 +111,54 @@ public sealed class OpenAIContentAnalysisProvider(
             "Content analysis completed with {EventCount} unique events.",
             result.Length);
         return result;
+    }
+
+    private async Task<IReadOnlyList<ContentBatchResult>> RunContentBatches(
+        IReadOnlyList<(int StartIndex, int EndExclusive)> ranges,
+        IReadOnlyList<TranscriptSegment> segments,
+        Action<double>? reportProgress,
+        CancellationToken cancellationToken)
+    {
+        using var gate = new SemaphoreSlim(Math.Max(1, options.ContentAnalysisConcurrency));
+        var completed = 0;
+        var tasks = ranges.Select((range, index) => ProcessContentBatch(
+            index, range, segments, gate,
+            () => reportProgress?.Invoke(Math.Clamp(
+                Interlocked.Increment(ref completed) / (double)Math.Max(1, ranges.Count) * .75,
+                0, .75)), cancellationToken));
+        return await Task.WhenAll(tasks);
+    }
+
+    private async Task<ContentBatchResult> ProcessContentBatch(
+        int index,
+        (int StartIndex, int EndExclusive) range,
+        IReadOnlyList<TranscriptSegment> segments,
+        SemaphoreSlim gate,
+        Action completed,
+        CancellationToken cancellationToken)
+    {
+        await gate.WaitAsync(cancellationToken);
+        try
+        {
+            var batch = segments.Skip(range.StartIndex)
+                .Take(range.EndExclusive - range.StartIndex).ToArray();
+            var checkpointPath = CheckpointPath(batch);
+            var classified = await LoadCheckpoint(checkpointPath, cancellationToken);
+            if (classified is null)
+            {
+                classified = await AnalyzeBatch(batch, cancellationToken);
+                await SaveCheckpoint(checkpointPath, classified, cancellationToken);
+            }
+            else
+            {
+                logger.LogInformation(
+                    "Reused content-analysis checkpoint for batch {BatchNumber}; no API request was made.",
+                    index + 1);
+            }
+            completed();
+            return new ContentBatchResult(index, batch, classified);
+        }
+        finally { gate.Release(); }
     }
 
     private static ScanEvent[] ApplyNarrowViolencePolicy(IReadOnlyList<ScanEvent> events)
@@ -329,32 +361,19 @@ public sealed class OpenAIContentAnalysisProvider(
                 "The job was stopped to prevent unbounded model spending.");
         }
 
-        // Verify one scene at a time. Mixing unrelated excerpts in one request caused
-        // evidence from a real scene to influence decisions for nearby false positives.
+        // Keep each request isolated to one scene, but run independent scenes concurrently.
         var batches = verificationCandidates.Chunk(1).ToArray();
         logger.LogInformation(
             "Terra verification planned: {TerraCandidateCount} sexual events will be sent to Terra.",
             batches.Length);
+        var terraResults = await RunSceneVerifications(
+            batches, options.SceneVerificationModel, options.SceneVerificationConcurrency,
+            progress => reportProgress?.Invoke(progress * .5), cancellationToken);
         var escalationRequests = 0;
-        for (var index = 0; index < batches.Length; index += 1)
+        for (var index = 0; index < terraResults.Count; index += 1)
         {
-            var batch = batches[index];
-            var checkpointPath = SceneVerificationCheckpointPath(
-                batch, model: options.SceneVerificationModel);
-            var payload = await LoadSceneVerificationCheckpoint(checkpointPath, cancellationToken);
-            if (payload is null)
-            {
-                payload = await VerifySceneBatch(
-                    batch, options.SceneVerificationModel, cancellationToken);
-                await SaveSceneVerificationCheckpoint(checkpointPath, payload, cancellationToken);
-            }
-            else
-            {
-                logger.LogInformation(
-                    "Reused sexual-scene verification checkpoint {BatchNumber}; no API request was made.",
-                    index + 1);
-            }
-
+            var batch = terraResults[index].Batch;
+            var payload = terraResults[index].Payload;
             var decisions = payload.Candidates.ToList();
             var ambiguous = payload.Candidates.Where(item =>
                     item.DirectSexualActEvidence || item.SustainedBeyondKissing || item.Confidence >= .55)
@@ -412,7 +431,7 @@ public sealed class OpenAIContentAnalysisProvider(
                 });
             }
 
-            reportProgress?.Invoke((index + 1) / (double)batches.Length);
+            reportProgress?.Invoke(.5 + (index + 1) / (double)batches.Length * .5);
         }
 
         logger.LogInformation(
@@ -422,6 +441,53 @@ public sealed class OpenAIContentAnalysisProvider(
             verificationCandidates.Length,
             escalationRequests);
         return retained;
+    }
+
+    private async Task<IReadOnlyList<SceneBatchResult>> RunSceneVerifications(
+        IReadOnlyList<SceneVerificationCandidate[]> batches,
+        string model,
+        int concurrency,
+        Action<double>? reportProgress,
+        CancellationToken cancellationToken)
+    {
+        using var gate = new SemaphoreSlim(Math.Max(1, concurrency));
+        var completed = 0;
+        var tasks = batches.Select((batch, index) => VerifySceneBatchWithCheckpoint(
+            index, batch, model, gate,
+            () => reportProgress?.Invoke(
+                Interlocked.Increment(ref completed) / (double)Math.Max(1, batches.Count)),
+            cancellationToken));
+        return await Task.WhenAll(tasks);
+    }
+
+    private async Task<SceneBatchResult> VerifySceneBatchWithCheckpoint(
+        int index,
+        IReadOnlyList<SceneVerificationCandidate> batch,
+        string model,
+        SemaphoreSlim gate,
+        Action completed,
+        CancellationToken cancellationToken)
+    {
+        await gate.WaitAsync(cancellationToken);
+        try
+        {
+            var checkpointPath = SceneVerificationCheckpointPath(batch, model: model);
+            var payload = await LoadSceneVerificationCheckpoint(checkpointPath, cancellationToken);
+            if (payload is null)
+            {
+                payload = await VerifySceneBatch(batch, model, cancellationToken);
+                await SaveSceneVerificationCheckpoint(checkpointPath, payload, cancellationToken);
+            }
+            else
+            {
+                logger.LogInformation(
+                    "Reused sexual-scene verification checkpoint {BatchNumber}; no API request was made.",
+                    index + 1);
+            }
+            completed();
+            return new SceneBatchResult(index, batch, payload);
+        }
+        finally { gate.Release(); }
     }
 
     private async Task<SceneVerificationCandidate[]> PrefilterWithVersion1p1(
@@ -758,6 +824,11 @@ Transcript segments:
         [property: JsonPropertyName("events")]
         IReadOnlyList<ClassifiedEvent> Events);
 
+    private sealed record ContentBatchResult(
+        int Index,
+        IReadOnlyList<TranscriptSegment> Batch,
+        AnalysisPayload Payload);
+
     private sealed record ClassifiedEvent(
         [property: JsonPropertyName("label")] string Label,
         [property: JsonPropertyName("startTime")] double StartTime,
@@ -775,6 +846,11 @@ Transcript segments:
     private sealed record SceneVerificationPayload(
         [property: JsonPropertyName("candidates")]
         IReadOnlyList<VerifiedSceneCandidate> Candidates);
+
+    private sealed record SceneBatchResult(
+        int Index,
+        IReadOnlyList<SceneVerificationCandidate> Batch,
+        SceneVerificationPayload Payload);
 
     private sealed record VerifiedSceneCandidate(
         [property: JsonPropertyName("candidateKey")] string CandidateKey,

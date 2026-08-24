@@ -40,6 +40,11 @@ services:
       AudioChoice__OpenAI__TranscriptionProvider: faster-whisper
       AudioChoice__OpenAI__FasterWhisperEndpoint: http://127.0.0.1:8001/
       AudioChoice__OpenAI__FasterWhisperTimeoutSeconds: "600"
+      # Bounded parallel model work: independent transcript windows can run together,
+      # while Terra remains the gate before any Sol escalation.
+      AudioChoice__OpenAI__ContentAnalysisConcurrency: "3"
+      AudioChoice__OpenAI__SceneVerificationConcurrency: "3"
+      AudioChoice__OpenAI__SceneEscalationConcurrency: "2"
       # Review every transcript window so euphemistic sexual cues are not
       # excluded before Terra/Sol receive them.
       # Keep Whisper local, then send only high-recall candidate windows to OpenAI.

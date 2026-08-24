@@ -297,8 +297,11 @@ class AudioChoiceApi(private val json: Json) {
     ) {
         val connection = (URL(authorization.uploadURL).openConnection() as HttpURLConnection).apply {
             requestMethod = authorization.method
-            connectTimeout = 30_000
-            readTimeout = 90_000
+            connectTimeout = 60_000
+            // Large audiobooks can legitimately take many minutes on a mobile
+            // connection. The server authorization is short-lived, but the
+            // upload itself must not be capped at the old 90-second timeout.
+            readTimeout = 30 * 60 * 1000
             doOutput = true
             setFixedLengthStreamingMode(expectedSize)
             authorization.headers.forEach { (name, value) -> setRequestProperty(name, value) }
@@ -341,8 +344,10 @@ class AudioChoiceApi(private val json: Json) {
     private fun putBytes(url: String, headers: Map<String, String>, bytes: ByteArray, count: Int, contentType: String) {
         val connection = (URL(url).openConnection() as HttpURLConnection).apply {
             requestMethod = "PUT"
-            connectTimeout = 30_000
-            readTimeout = 90_000
+            connectTimeout = 60_000
+            // Each 8 MiB block is independently retried; allow slow mobile
+            // networks enough time to finish a block before retrying it.
+            readTimeout = 10 * 60 * 1000
             doOutput = true
             setFixedLengthStreamingMode(count)
             headers.filterKeys { !it.equals("x-ms-blob-type", ignoreCase = true) }
