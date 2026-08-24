@@ -61,7 +61,7 @@ public sealed class OpenAIContentAnalysisProvider(
                 if (window.Length == 0) continue;
                 AddEvent(events, "sexual_references",
                     window[0].StartTime, window[^1].EndTime, .35,
-                    "Lambda sexual-content candidate window", null,
+                    "Sexual references or suggestive dialogue detected", null,
                     window[0].StartTime, window[^1].EndTime,
                     $"lambda-candidate-{index}");
             }
@@ -77,16 +77,6 @@ public sealed class OpenAIContentAnalysisProvider(
                 progress => reportProgress?.Invoke(.75 + progress * .25),
                 cancellationToken);
             var lambdaResult = SceneEventPostProcessor.Process(lambdaVerified, segments).ToArray();
-            // The local candidate description is an internal routing detail and must
-            // never appear in the app's event details or filter results.
-            lambdaResult = lambdaResult
-                .Select(item => string.Equals(
-                    item.SafeDescription,
-                    "Lambda sexual-content candidate window",
-                    StringComparison.Ordinal)
-                    ? item with { SafeDescription = "Sexual content detected" }
-                    : item)
-                .ToArray();
             logger.LogInformation(
                 "Lambda-first content analysis completed with {EventCount} events.",
                 lambdaResult.Length);
@@ -307,12 +297,47 @@ public sealed class OpenAIContentAnalysisProvider(
         var endTime = Math.Clamp(end, startTime, batchEnd);
         var description = label.StartsWith("profanity_", StringComparison.Ordinal)
             ? "Profanity detected"
-            : SafeDescription(safeDescription);
+            : SafeDescriptionForEvent(label, safeDescription);
         events.Add(new ScanEvent(
             Guid.NewGuid(), startTime, endTime, mapping.CategoryID, mapping.GroupID,
             mapping.EventID, Math.Clamp(confidence, 0, 1),
             StableEventKey(mapping, startTime, endTime, description, stableSuffix), description,
             AggregateKey(profanityWord), CensorWord(profanityWord)));
+    }
+
+    private static string SafeDescriptionForEvent(string label, string? supplied)
+    {
+        if (!string.Equals(supplied, "Local Lambda content cue", StringComparison.Ordinal) &&
+            !string.Equals(supplied, "Lambda sexual-content candidate window", StringComparison.Ordinal))
+        {
+            return SafeDescription(supplied);
+        }
+
+        return label switch
+        {
+            "sexual_suggestive_dialogue" => "Suggestive dialogue or innuendo detected",
+            "sexual_references" => "Sexual references or suggestive dialogue detected",
+            "sexual_nudity" => "Nudity described",
+            "sexual_implied_activity" => "Implied sexual activity described",
+            "sexual_explicit_activity" => "Sexual activity described",
+            "sexual_complete_scene" => "Sustained consensual sexual activity following intimate escalation",
+            "violence_graphic" => "Graphic violence described",
+            "violence_torture" => "Torture described",
+            "violence_children" => "Violence involving children described",
+            "violence_animals" => "Violence involving animals described",
+            "substance_alcohol_use" => "Alcohol use described",
+            "substance_intoxication" => "Intoxication described",
+            "substance_drug_reference" => "Drug reference detected",
+            "substance_drug_use" => "Drug use described",
+            "substance_abuse_overdose" => "Substance abuse or overdose described",
+            "blasphemy_religious_profanity" => "Religious profanity detected",
+            "blasphemy_statement" => "Blasphemous statement detected",
+            "self_harm_reference" => "Self-harm reference detected",
+            "self_harm_suicidal_thoughts" => "Suicidal thoughts described",
+            "self_harm_suicide_attempt" => "Suicide attempt described",
+            "self_harm_depiction" => "Self-harm depicted",
+            _ => "Content event detected"
+        };
     }
 
     private async Task<AnalysisPayload> AnalyzeBatch(
