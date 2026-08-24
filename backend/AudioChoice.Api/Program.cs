@@ -317,6 +317,12 @@ if (openAIOptions.WorkerEnabled)
 }
 
 var app = builder.Build();
+app.Logger.LogInformation(
+    "Transcription provider {Provider}; faster-whisper endpoint {Endpoint}; chunk timeout {TimeoutSeconds}s; lane {Lane}",
+    openAIOptions.TranscriptionProvider,
+    openAIOptions.FasterWhisperEndpoint,
+    openAIOptions.FasterWhisperTimeoutSeconds,
+    openAIOptions.ProcessingLane);
 
 static string ScanLane(HttpContext context) =>
     string.Equals(
