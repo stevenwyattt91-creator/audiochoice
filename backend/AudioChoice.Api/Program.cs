@@ -1564,6 +1564,45 @@ app.MapPost("/v1/scans/requests", async (
         CloudScanStatus.UploadRequired));
 });
 
+// Re-run the current scanner against an already saved transcript. This is kept
+// separate from /v1/scans/requests so opening a book never unexpectedly starts
+// paid work, while an authenticated user can explicitly refresh filter results
+// after a scanner upgrade without importing the audiobook again.
+app.MapPost("/v1/scans/reanalysis", async (
+    CloudScanRequest request,
+    HttpContext context,
+    IScanCatalog catalog,
+    IScanJobQueue queue,
+    IPrivateTranscriptStore transcriptStore,
+    CancellationToken cancellationToken) =>
+{
+    var user = CurrentUser(context);
+    if (user is null) return Results.Unauthorized();
+
+    var transcript = await transcriptStore.Load(request.Fingerprint, cancellationToken);
+    if (transcript is null || transcript.IsComplete is false || transcript.Segments.Count == 0)
+    {
+        return Results.BadRequest(new
+        {
+            error = "No complete saved transcript exists for this audiobook."
+        });
+    }
+
+    var job = catalog.CreateReanalysisJob(user.ID, request.Fingerprint, ScanLane(context));
+    if (job is null)
+    {
+        return Results.BadRequest(new
+        {
+            error = "The saved transcript is not linked to this account."
+        });
+    }
+
+    queue.TryQueue(job.ID);
+    return Results.Json(
+        new CloudScanResponse(job.Status, job.ID),
+        statusCode: StatusCodes.Status202Accepted);
+});
+
 app.MapGet("/v1/explore", (HttpContext context, IScanCatalog catalog) =>
 {
     if (databaseOptions.Enabled && CurrentUser(context) is null) return Results.Unauthorized();
