@@ -762,7 +762,8 @@ app.MapPost("/v1/admin/scans/reanalysis", async (
         });
     }
 
-    var job = catalog.CreateReanalysisJob(request.OwnerUserID, request.Fingerprint);
+    var job = catalog.CreateReanalysisJob(
+        request.OwnerUserID, request.Fingerprint, ScanLane(context));
     if (job is null)
     {
         return Results.BadRequest(new
