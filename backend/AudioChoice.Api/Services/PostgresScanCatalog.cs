@@ -181,6 +181,20 @@ public sealed class PostgresScanCatalog(NpgsqlDataSource dataSource) : IScanCata
         var editionID = FindEditionID(connection, transaction, fingerprint);
         if (editionID is null) return null;
 
+        if (ownerUserID == Guid.Empty)
+        {
+            using var owner = new NpgsqlCommand("""
+                select s.user_id
+                from scan_jobs j
+                join scan_job_subscribers s on s.scan_job_id = j.id
+                where j.edition_id = $1
+                order by j.updated_at desc limit 1;
+                """, connection, transaction);
+            owner.Parameters.AddWithValue(editionID.Value);
+            ownerUserID = owner.ExecuteScalar() as Guid? ?? Guid.Empty;
+            if (ownerUserID == Guid.Empty) return null;
+        }
+
         var existing = FindActiveJobForEdition(connection, transaction, editionID.Value);
         if (existing is not null)
         {

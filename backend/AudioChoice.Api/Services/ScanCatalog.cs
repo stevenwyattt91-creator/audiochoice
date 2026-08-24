@@ -196,6 +196,17 @@ public sealed class InMemoryScanCatalog : IScanCatalog
         BookFingerprint fingerprint,
         string processingLane = ScanProcessingLanes.AzureOpenAI)
     {
+        var key = FingerprintKey(fingerprint);
+        if (ownerUserID == Guid.Empty)
+        {
+            ownerUserID = _jobs.Values
+                .Where(job => FingerprintKey(job.Fingerprint) == key)
+                .OrderByDescending(job => job.ID)
+                .Select(job => job.OwnerUserID)
+                .FirstOrDefault();
+            if (ownerUserID == Guid.Empty) return null;
+        }
+
         var existing = FindActiveJob(fingerprint);
         if (existing is not null)
         {
@@ -203,7 +214,6 @@ public sealed class InMemoryScanCatalog : IScanCatalog
             return existing with { OwnerUserID = ownerUserID };
         }
 
-        var key = FingerprintKey(fingerprint);
         var source = _jobs.Values
             .Where(job => FingerprintKey(job.Fingerprint) == key &&
                 CanAccessJob(job.ID, ownerUserID))
