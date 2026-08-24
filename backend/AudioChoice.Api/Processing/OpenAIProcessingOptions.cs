@@ -9,6 +9,7 @@ public sealed class OpenAIProcessingOptions
     public string TranscriptionProvider { get; init; } = "openai";
     /// <summary>Local endpoint used by the faster-whisper GPU service.</summary>
     public string FasterWhisperEndpoint { get; init; } = "http://127.0.0.1:8001/";
+    public int FasterWhisperTimeoutSeconds { get; init; } = 600;
     public int TranscriptionWorkers { get; init; } = 3;
     public int TranscriptionConcurrencyPerWorker { get; init; } = 2;
     public int TranscriptionMaximumRetries { get; init; } = 3;

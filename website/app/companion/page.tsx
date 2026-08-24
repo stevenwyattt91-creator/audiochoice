@@ -12,6 +12,7 @@ const steps = [
 
 const API_URL = (process.env.NEXT_PUBLIC_AUDIOCHOICE_API_URL ?? "https://audiochoice-stg-api.grayocean-b35d4bf9.eastus.azurecontainerapps.io").replace(/\/$/, "");
 const GOOGLE_CLIENT_ID = process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID || "105248861745-34kh2v9g9825kb1drs3jrgmijjum2p3o.apps.googleusercontent.com";
+const APPLE_SERVICE_ID = process.env.NEXT_PUBLIC_APPLE_SERVICE_ID || "";
 declare global { interface Window { google?: any } }
 
 function uploadWithProgress(url: string, method: string, headers: Record<string, string>, file: File, onProgress: (percent: number) => void) {
@@ -107,6 +108,21 @@ export default function CompanionPage() {
       finishSignIn(body);
     } catch (authFailure) { setAuthError(authFailure instanceof Error ? authFailure.message : "Google sign-in failed."); } finally { setAuthBusy(false); }
   };
+  const appleSignIn = async () => {
+    setAuthBusy(true); setAuthError("");
+    try {
+      if (!APPLE_SERVICE_ID) throw new Error("Apple sign-in is not configured yet.");
+      const apple = (window as any).AppleID;
+      if (!apple?.auth) throw new Error("Apple sign-in is still loading. Please try again.");
+      const response = await apple.auth.signIn();
+      const code = response?.authorization?.code;
+      if (!code) throw new Error("Apple sign-in did not return an authorization code.");
+      const apiResponse = await fetch(`${API_URL}/v1/auth/external`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ provider: "apple", authorizationCode: code, identityToken: response?.authorization?.id_token ?? "", displayName: null }) });
+      const body = await apiResponse.json().catch(() => ({}));
+      if (!apiResponse.ok) throw new Error("Apple sign-in could not be completed.");
+      finishSignIn(body);
+    } catch (authFailure) { setAuthError(authFailure instanceof Error ? authFailure.message : "Apple sign-in failed."); } finally { setAuthBusy(false); }
+  };
   const reset = () => { setFile(null); setAcknowledged(false); setProgress(0); setReceiverURL(""); setQrImage(""); setError(""); setStage("choose"); if (input.current) input.current.value = ""; };
   const activeStep = stage === "ready" || stage === "uploading" ? 4 : stage === "convert" ? 3 : stage === "acknowledge" ? 2 : 1;
 
@@ -123,14 +139,14 @@ export default function CompanionPage() {
           {stage === "ready" && <div className="transfer-ready"><span className="label">STEP 4 · TRANSFER TO PHONE</span><h3>Scan this QR code in AudioChoice</h3><p>Open the AudioChoice app on your phone, choose Import, then scan. The app will verify the one-time handoff and download the audiobook.</p><div className="qr-card"><img src={qrImage} alt="One-time AudioChoice transfer QR code" /><small>One-time transfer · expires after import</small></div><button className="secondary transfer-action" type="button" onClick={() => navigator.clipboard?.writeText(receiverURL)}>Copy transfer link</button></div>}
           {error && <p className="form-error" role="alert">{error}</p>}
         </article></section>
-      {showSignIn && <SignInDialog busy={authBusy} error={authError} onClose={() => { setShowSignIn(false); setAuthError(""); }} onGoogle={googleSignIn} onPassword={passwordSignIn} />}
+      {showSignIn && <SignInDialog busy={authBusy} error={authError} onClose={() => { setShowSignIn(false); setAuthError(""); }} onGoogle={googleSignIn} onApple={appleSignIn} onPassword={passwordSignIn} />}
       <section className="companion-privacy-strip"><div className="shell"><span>◇</span><div><b>Private by design</b><p>Only a temporary handoff is created. AudioChoice does not keep a shared audiobook library, and the handoff is removed after verified import.</p></div></div></section>
       <footer className="shell"><a className="brand" href="/"><img src="/audiochoice-logo.png" alt="" /><span>Audio<span>Choice</span></span></a><p className="footer-copy">© 2026 AudioChoice. Listen Your Way.</p><div><a href="/">Home</a><a href="mailto:support@audiochoiceapp.com">Support</a></div></footer>
     </main>
   );
 }
 
-function SignInDialog({ busy, error, onClose, onGoogle, onPassword }: { busy: boolean; error: string; onClose: () => void; onGoogle: (credential: string) => void; onPassword: (event: FormEvent<HTMLFormElement>) => void }) {
+function SignInDialog({ busy, error, onClose, onGoogle, onApple, onPassword }: { busy: boolean; error: string; onClose: () => void; onGoogle: (credential: string) => void; onApple: () => void; onPassword: (event: FormEvent<HTMLFormElement>) => void }) {
   const googleHost = useRef<HTMLDivElement>(null);
   useEffect(() => {
     let active = true;
@@ -138,5 +154,7 @@ function SignInDialog({ busy, error, onClose, onGoogle, onPassword }: { busy: bo
     if (window.google) draw(); else { const script = document.createElement("script"); script.src = "https://accounts.google.com/gsi/client"; script.async = true; script.onload = draw; document.head.appendChild(script); }
     return () => { active = false; };
   }, [onGoogle]);
-  return <div className="signin-overlay" role="dialog" aria-modal="true" aria-labelledby="signin-title"><section className="signin-dialog"><button className="signin-close" type="button" onClick={onClose} aria-label="Close sign in">×</button><img src="/audiochoice-logo.png" alt=""/><span className="portal-kicker">AUDIOCHOICE ACCOUNT</span><h2 id="signin-title">Sign in to transfer</h2><p>Sign in first so AudioChoice can create a private, one-time handoff to your phone.</p><div className={busy ? "google-login disabled" : "google-login"} ref={googleHost}/><div className="signin-divider"><span>or use email</span></div><form onSubmit={onPassword}><label>Email address<input name="email" type="email" autoComplete="email" required /></label><label>Password<input name="password" type="password" autoComplete="current-password" required /></label><button className="primary" type="submit" disabled={busy}>{busy ? "Signing in…" : "Sign in and continue"}<span>→</span></button>{error && <p className="form-error" role="alert">{error}</p>}</form><small>Use the same AudioChoice account you use in the app.</small></section></div>;
+  useEffect(() => { if (!APPLE_SERVICE_ID || document.querySelector("script[data-apple-auth]") ) return; const script = document.createElement("script"); script.src = "https://appleid.cdn-apple.com/appleauth/static/jsapi/appleid/1/en_US/appleid.auth.js"; script.async = true; script.dataset.appleAuth = "true"; document.head.appendChild(script); }, []);
+  useEffect(() => { if (APPLE_SERVICE_ID && (window as any).AppleID?.auth) (window as any).AppleID.auth.init({ clientId: APPLE_SERVICE_ID, scope: "name email", redirectURI: `${window.location.origin}/companion`, usePopup: true }); }, []);
+  return <div className="signin-overlay" role="dialog" aria-modal="true" aria-labelledby="signin-title"><section className="signin-dialog"><button className="signin-close" type="button" onClick={onClose} aria-label="Close sign in">×</button><img src="/audiochoice-logo.png" alt=""/><span className="portal-kicker">AUDIOCHOICE ACCOUNT</span><h2 id="signin-title">Sign in to transfer</h2><p>Sign in first so AudioChoice can create a private, one-time handoff to your phone.</p><button className="apple-login" type="button" onClick={onApple} disabled={busy}>&nbsp; Continue with Apple</button><div className={busy ? "google-login disabled" : "google-login"} ref={googleHost}/><div className="signin-divider"><span>or use email</span></div><form onSubmit={onPassword}><label>Email address<input name="email" type="email" autoComplete="email" required /></label><label>Password<input name="password" type="password" autoComplete="current-password" required /></label><button className="primary" type="submit" disabled={busy}>{busy ? "Signing in…" : "Sign in and continue"}<span>→</span></button>{error && <p className="form-error" role="alert">{error}</p>}</form><small>Use the same AudioChoice account you use in the app.</small></section></div>;
 }

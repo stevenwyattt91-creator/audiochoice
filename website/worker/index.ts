@@ -140,8 +140,9 @@ const worker = {
       const name = clean(body.name, 100);
       const ownershipSource = clean(body.ownershipSource, 120);
       const audiobooksPerMonth = clean(body.audiobooksPerMonth, 40);
+      const platform = clean(body.platform, 20);
       const consentAccepted = body.consent === "accepted";
-      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || !name || !ownershipSource || !audiobooksPerMonth || !consentAccepted) {
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || !name || !ownershipSource || !audiobooksPerMonth || !["iOS", "Android"].includes(platform) || !consentAccepted) {
         return Response.json({ error: "Complete every field with valid information" }, { status: 400 });
       }
 
@@ -185,17 +186,18 @@ const worker = {
         .bind(new Date(Date.now() - 172_800_000).toISOString())
         .run());
 
+      const groupName = platform === "iOS" ? "ios_beta" : "android_beta";
       await env.DB.prepare(`INSERT INTO beta_applicants (
         id, email, name, ownership_source, audiobooks_per_month, group_name, consented_at, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, 'android_beta', ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(email) DO UPDATE SET
         name = excluded.name,
         ownership_source = excluded.ownership_source,
         audiobooks_per_month = excluded.audiobooks_per_month,
-        group_name = 'android_beta',
+        group_name = excluded.group_name,
         consented_at = excluded.consented_at,
         updated_at = excluded.updated_at`)
-        .bind(crypto.randomUUID(), email, name, ownershipSource, audiobooksPerMonth, now, now, now)
+        .bind(crypto.randomUUID(), email, name, ownershipSource, audiobooksPerMonth, groupName, now, now, now)
         .run();
 
       const [adminNotified, applicantNotified] = await Promise.all([
@@ -203,15 +205,15 @@ const worker = {
           from: "AudioChoice Beta <updates@audiochoiceapp.com>",
           to: ["support@audiochoiceapp.com"],
           reply_to: email,
-          subject: `Android beta application — ${name}`,
-          text: `A new listener applied for the AudioChoice Android beta.\n\nName: ${name}\nEmail: ${email}\nAudiobook owned through: ${ownershipSource}\nAudiobooks per month: ${audiobooksPerMonth}\nGroup: Android Beta\nConsent recorded: ${now}\nSubmitted: ${now}`,
+          subject: `${platform} beta application — ${name}`,
+          text: `A new listener applied for the AudioChoice ${platform} beta.\n\nName: ${name}\nEmail: ${email}\nPlatform: ${platform}\nAudiobook owned through: ${ownershipSource}\nAudiobooks per month: ${audiobooksPerMonth}\nGroup: ${platform} Beta\nConsent recorded: ${now}\nSubmitted: ${now}`,
         }),
         sendEmail(env.RESEND_API_KEY, {
           from: "AudioChoice Beta <updates@audiochoiceapp.com>",
           to: [email],
           reply_to: "support@audiochoiceapp.com",
-          subject: "Thank you for your interest in the AudioChoice Android beta",
-          text: `Hi ${name},\n\nThank you for your interest in the AudioChoice Android beta. We received your application and appreciate your willingness to help us test the app and improve filter accuracy.\n\nPlease be on the lookout for another email from AudioChoice containing selection details and instructions to follow.\n\nYou will need your own legitimate copy of A Court of Thorns and Roses: Dramatized Adaptation from GraphicAudio to participate.\n\nQuestions? Reply to this email or contact support@audiochoiceapp.com.\n\nAudioChoice\nListen Your Way.`,
+          subject: `Thank you for your interest in the AudioChoice ${platform} beta`,
+          text: `Hi ${name},\n\nThank you for your interest in the AudioChoice ${platform} beta. We received your application and appreciate your willingness to help us test the app and improve filter accuracy.\n\nPlease be on the lookout for another email from AudioChoice containing selection details and instructions to follow.\n\nYou will need your own legitimate copy of A Court of Thorns and Roses: Dramatized Adaptation from GraphicAudio to participate.\n\nQuestions? Reply to this email or contact support@audiochoiceapp.com.\n\nAudioChoice\nListen Your Way.`,
         }),
       ]);
       if (!adminNotified) console.error("Android beta admin notification delivery failed");

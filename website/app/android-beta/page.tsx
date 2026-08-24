@@ -58,7 +58,7 @@ export default function AndroidBetaPage() {
 
       <header className="beta-hero shell">
         <div>
-          <span className="beta-kicker">LIMITED ANDROID BETA</span>
+          <span className="beta-kicker">LIMITED AUDIOCHOICE BETA</span>
           <h1>ACOTAR GraphicAudio<br /><em>fans wanted.</em></h1>
           <p>Help AudioChoice make audiobook filtering more accurate, reliable, and natural before launch.</p>
           <a className="primary" href="#join-beta">Join the beta <span>↓</span></a>
@@ -120,7 +120,7 @@ export default function AndroidBetaPage() {
       <section className="beta-form-section" id="join-beta">
         <div className="shell beta-form-grid">
           <div>
-            <span className="label">JOIN THE ANDROID BETA</span>
+            <span className="label">JOIN THE BETA</span>
             <h2>Help make every skip feel seamless.</h2>
             <p>Complete the application below. We&apos;ll review it and contact selected testers using the email provided.</p>
             <div className="ownership-note"><span>◇</span><p><b>Bring your own audiobook.</b><br />AudioChoice does not provide or distribute audiobook files. You must own a legitimate copy.</p></div>
@@ -138,6 +138,11 @@ export default function AndroidBetaPage() {
                   <span>Email address</span>
                   <input id="beta-email" name="email" type="email" autoComplete="email" required maxLength={254} />
                 </label>
+                <fieldset className="beta-field beta-platform-field">
+                  <legend>Which device will you test on?</legend>
+                  <label><input name="platform" type="radio" value="iOS" required /> iPhone / iPad</label>
+                  <label><input name="platform" type="radio" value="Android" /> Android</label>
+                </fieldset>
                 <label className="beta-field" htmlFor="ownership">
                   <span>Where do you own the audiobook?</span>
                   <select id="ownership" name="ownershipSource" required defaultValue="">
@@ -155,7 +160,7 @@ export default function AndroidBetaPage() {
                 <input className="honeypot" name="website" tabIndex={-1} autoComplete="off" aria-hidden="true" />
                 <label className="beta-consent">
                   <input name="consent" type="checkbox" value="accepted" required />
-                  <span>I agree to receive Android beta application and testing emails from AudioChoice.</span>
+                  <span>I agree to receive beta application and testing emails from AudioChoice.</span>
                 </label>
                 <button className="primary" type="submit" disabled={status === "sending"}>{status === "sending" ? "Submitting…" : "Join Beta"}<span>→</span></button>
                 {status === "error" && <p className="form-error" role="alert">{error}</p>}

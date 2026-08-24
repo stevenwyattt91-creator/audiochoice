@@ -294,7 +294,7 @@ if (openAIOptions.WorkerEnabled)
                     // A faster-whisper chunk can legitimately take several minutes on
                     // a busy GPU. The HttpClient default is 100 seconds, which cancels
                     // otherwise healthy chunks mid-transcription.
-                    Timeout = TimeSpan.FromMinutes(10)
+                    Timeout = TimeSpan.FromSeconds(Math.Max(30, openAIOptions.FasterWhisperTimeoutSeconds))
                 })
             : new OpenAITranscriptionProvider(
                 services.GetRequiredService<IHttpClientFactory>()

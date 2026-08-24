@@ -71,8 +71,7 @@ export default function Home() {
           <a href="mailto:support@audiochoiceapp.com">Contact</a>
         </div>
         <div className="nav-actions">
-          <a className="beta-nav" href="/android-beta">Join Android Beta</a>
-          <button className="nav-cta" type="button" onClick={openUpdates}>Get updates</button>
+          <a className="beta-nav" href="/android-beta">Join Beta</a>
         </div>
       </nav>
 
