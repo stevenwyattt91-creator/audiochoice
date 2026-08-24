@@ -61,10 +61,18 @@ function emailShell(content: string, preheader: string): string {
 
 const companionInstructions = `If you downloaded an AAX audiobook from Audible, visit https://audiochoiceapp.com/companion on your computer to transfer it to your phone. The same transfer page also works for M4B, M4A, and MP3 audiobook files already on your computer. If the audiobook files are already on your phone, use Import directly in the AudioChoice app.`;
 
-function betaWelcomeEmail(name: string, platform: string) {
+function betaWelcomeEmail(name: string, platform: string, testerEmail = "") {
+  const appLabel = platform === "iOS" ? "iPhone or iPad" : "Android phone";
+  const installStep = platform === "iOS"
+    ? "Accept the TestFlight invitation, install TestFlight from the App Store if needed, and install AudioChoice from the invitation."
+    : "Accept the Firebase App Distribution invitation, download AudioChoice, and allow Android to install the beta when prompted.";
   const text = `Hi ${name},
 
 Thank you for joining the AudioChoice ${platform} beta. We appreciate your help testing the app and improving filter accuracy.
+
+YOUR ${platform.toUpperCase()} BETA
+${installStep}
+Use ${testerEmail || "the invited email address"} for your beta invitation. Future updates will use the same email.
 
 ${companionInstructions}
 
@@ -76,7 +84,8 @@ AudioChoice
 Listen Your Way.`;
   const safeName = escapeHtml(name);
   const safeInstructions = escapeHtml(companionInstructions).replace(/(https:\/\/[^\s]+)/g, '<a href="$1" style="color:#9af04b;text-decoration:none;">$1</a>');
-  const html = emailShell(`<p style="margin:0 0 20px;">Hi ${safeName},</p><p style="margin:0 0 20px;">Thank you for joining the AudioChoice ${escapeHtml(platform)} beta. We appreciate your help testing the app and improving filter accuracy.</p><div style="margin:22px 0;padding:17px 19px;border-radius:13px;background:#142214;border:1px solid #304133;"><strong style="color:#f4f7f4;">Moving your audiobook to your phone</strong><p style="margin:9px 0 0;">${safeInstructions}</p></div><p style="margin:0 0 20px;">You will need your own legitimate copy of the audiobook used for this beta. Please keep the original file on your computer until the transfer or import has completed successfully.</p><p style="margin:0;">Questions? Reply to this email or contact <a href="mailto:support@audiochoiceapp.com" style="color:#9af04b;text-decoration:none;">support@audiochoiceapp.com</a>.</p>`, `AudioChoice beta instructions for ${name}`);
+  const safeEmail = escapeHtml(testerEmail || "the invited email address");
+  const html = emailShell(`<p style="margin:0 0 20px;">Hi ${safeName},</p><p style="margin:0 0 20px;">Thank you for joining the AudioChoice ${escapeHtml(platform)} beta. We appreciate your help testing the app and improving filter accuracy.</p><div style="margin:22px 0;padding:18px 20px;border-radius:14px;background:#142214;border:1px solid #304133;"><strong style="display:block;color:#f4f7f4;font-size:18px;margin-bottom:8px;">Your ${escapeHtml(platform)} beta</strong><p style="margin:0 0 8px;">${escapeHtml(installStep)}</p><p style="margin:0;color:#b9c8bb;font-size:14px;">Use <strong style="color:#fff;">${safeEmail}</strong> for the beta invitation and future updates.</p></div><div style="margin:22px 0;padding:18px 20px;border-radius:14px;background:#142214;border:1px solid #304133;"><strong style="display:block;color:#f4f7f4;font-size:18px;margin-bottom:8px;">Moving your audiobook to your phone</strong><p style="margin:0;">${safeInstructions}</p></div><p style="margin:0 0 20px;">You will need your own legitimate copy of the audiobook used for this beta. Please keep the original file on your computer until the transfer or import has completed successfully.</p><p style="margin:0;">Questions? Reply to this email or contact <a href="mailto:support@audiochoiceapp.com" style="color:#9af04b;text-decoration:none;">support@audiochoiceapp.com</a>.</p>`, `AudioChoice ${platform} beta instructions for ${name}`);
   return { text, html };
 }
 
@@ -242,7 +251,7 @@ const worker = {
         .bind(crypto.randomUUID(), email, name, ownershipSource, audiobooksPerMonth, groupName, now, now, now)
         .run();
 
-      const welcome = betaWelcomeEmail(name, platform);
+      const welcome = betaWelcomeEmail(name, platform, email);
       const [adminNotified, applicantNotified] = await Promise.all([
         sendEmail(env.RESEND_API_KEY, {
           from: "AudioChoice Beta <updates@audiochoiceapp.com>",
@@ -274,7 +283,7 @@ const worker = {
       if (parsed.error || !parsed.recipients) return Response.json({ error: parsed.error }, { status: 400 });
       const platform = body.platform === "iOS" ? "iOS" : "Android";
       const preview = body.preview === true;
-      const messages = parsed.recipients.map(recipient => ({ ...recipient, subject: `AudioChoice ${platform} beta instructions`, ...betaWelcomeEmail(recipient.firstName, platform) }));
+      const messages = parsed.recipients.map(recipient => ({ ...recipient, subject: `AudioChoice ${platform} beta instructions`, ...betaWelcomeEmail(recipient.firstName, platform, recipient.email) }));
       if (preview) return Response.json({ ok: true, preview: messages });
       if (!env.BETA_EMAIL_BCC || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(env.BETA_EMAIL_BCC)) return Response.json({ error: "Set BETA_EMAIL_BCC to your email before sending." }, { status: 503 });
       const results = await Promise.all(messages.map(async message => {

@@ -1,8 +1,12 @@
-Subject: Welcome to the AudioChoice Android Beta
+Subject: Welcome to the AudioChoice {{PLATFORM}} Beta
 
 Welcome, {{FIRST_NAME}}.
 
 Thank you for helping us make audiobook filtering more accurate, dependable, and personal.
+
+YOUR {{PLATFORM}} BETA
+Use {{TESTER_EMAIL}} for your beta invitation and future updates.
+{{INSTALL_INSTRUCTIONS}}
 
 INSTALL THE BETA
 1. After this welcome message, watch for a separate email from Firebase App Distribution. That second email contains your private installation invitation.

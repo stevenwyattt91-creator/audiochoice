@@ -5,11 +5,12 @@ import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
 
 const [, , firstName, testerEmail] = process.argv;
+const platform = process.argv.includes("--ios") ? "iOS" : "Android";
 const apiKey = process.env.RESEND_API_KEY;
 const previewOnly = process.argv.includes("--preview");
 
 if (!firstName || !testerEmail) {
-  console.error('Usage: node scripts/send-beta-welcome.mjs "First name" "tester@example.com"');
+  console.error('Usage: node scripts/send-beta-welcome.mjs "First name" "tester@example.com" [--ios]');
   process.exit(1);
 }
 
@@ -30,6 +31,10 @@ const templateDir = resolve(scriptDir, "../docs/email-templates");
 const replacements = {
   "{{FIRST_NAME}}": escapeHtml(firstName),
   "{{TESTER_EMAIL}}": escapeHtml(testerEmail),
+  "{{PLATFORM}}": platform,
+  "{{INSTALL_INSTRUCTIONS}}": platform === "iOS"
+    ? "Accept the TestFlight invitation and install AudioChoice on your iPhone or iPad."
+    : "Watch for a separate Firebase App Distribution invitation, then accept it and install AudioChoice on Android.",
 };
 
 const personalize = (template) => Object.entries(replacements)
@@ -62,7 +67,7 @@ const response = await fetch("https://api.resend.com/emails", {
     to: [testerEmail],
     bcc: ["steven.wyatt@audiochoiceapp.com"],
     reply_to: "support@audiochoiceapp.com",
-    subject: "Welcome to the AudioChoice Android Beta",
+    subject: `Welcome to the AudioChoice ${platform} Beta`,
     html: personalizedHtml,
     text: personalizedText,
   }),
