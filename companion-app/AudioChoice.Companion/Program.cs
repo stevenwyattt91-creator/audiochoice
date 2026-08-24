@@ -198,8 +198,8 @@ app.MapPost("/v1/transfers", async (HttpRequest request, CompanionSettings setti
     var form = await request.ReadFormAsync(cancellationToken);
     var file = form.Files.GetFile("audiobook");
     var extension = file is null ? string.Empty : Path.GetExtension(file.FileName).ToLowerInvariant();
-    if (file is null || file.Length == 0 || extension is not ".m4b" and not ".mp3")
-        return Results.BadRequest(new { error = "AudioChoice Companion transfers M4B and MP3 files. For AAX, record the acknowledgment and complete conversion first." });
+    if (file is null || file.Length == 0 || extension is not ".m4b" and not ".m4a" and not ".mp3")
+        return Results.BadRequest(new { error = "AudioChoice Companion transfers M4B, M4A, and MP3 files. For AAX, record the acknowledgment and complete conversion first." });
 
     var stagedPath = Path.Combine(Path.GetTempPath(), "AudioChoice", "companion-transfers", $"{Guid.NewGuid():N}{extension}");
     Directory.CreateDirectory(Path.GetDirectoryName(stagedPath)!);

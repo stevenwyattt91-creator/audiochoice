@@ -576,8 +576,8 @@ app.MapPost("/v1/companion/transfers", async (
     }
     var fileName = Path.GetFileName(request.FileName);
     var extension = Path.GetExtension(fileName).ToLowerInvariant();
-    if (extension is not ".m4b" and not ".mp3")
-        return Results.BadRequest(new { error = "Companion transfers accept M4B and MP3 files only." });
+    if (extension is not ".m4b" and not ".m4a" and not ".mp3")
+        return Results.BadRequest(new { error = "Companion transfers accept M4B, M4A, and MP3 files only." });
     var expiration = DateTimeOffset.UtcNow.AddHours(2);
     var receiverCode = Convert.ToHexString(RandomNumberGenerator.GetBytes(32));
     var transfer = transfers.Create(user.ID, fileName, request.ContentType, request.FileSize, sha256!, expiration, receiverCode);
