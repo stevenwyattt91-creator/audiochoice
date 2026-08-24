@@ -5,6 +5,8 @@ import handler from "vinext/server/app-router-entry";
 interface Env {
   ASSETS: Fetcher;
   RESEND_API_KEY?: string;
+  BETA_EMAIL_ADMIN_TOKEN?: string;
+  BETA_EMAIL_BCC?: string;
   COMPANION_MAC_DOWNLOAD_URL?: string;
   COMPANION_WINDOWS_DOWNLOAD_URL?: string;
   DB: D1Database;
@@ -55,6 +57,46 @@ function emailShell(content: string, preheader: string): string {
     </table>
   </td></tr></table>
 </body></html>`;
+}
+
+const companionInstructions = `If you downloaded an AAX audiobook from Audible, visit https://audiochoiceapp.com/companion on your computer to transfer it to your phone. The same transfer page also works for M4B, M4A, and MP3 audiobook files already on your computer. If the audiobook files are already on your phone, use Import directly in the AudioChoice app.`;
+
+function betaWelcomeEmail(name: string, platform: string) {
+  const text = `Hi ${name},
+
+Thank you for joining the AudioChoice ${platform} beta. We appreciate your help testing the app and improving filter accuracy.
+
+${companionInstructions}
+
+You will need your own legitimate copy of the audiobook used for this beta. Please keep the original file on your computer until the transfer or import has completed successfully.
+
+Questions? Reply to this email or contact support@audiochoiceapp.com.
+
+AudioChoice
+Listen Your Way.`;
+  const safeName = escapeHtml(name);
+  const safeInstructions = escapeHtml(companionInstructions).replace(/(https:\/\/[^\s]+)/g, '<a href="$1" style="color:#9af04b;text-decoration:none;">$1</a>');
+  const html = emailShell(`<p style="margin:0 0 20px;">Hi ${safeName},</p><p style="margin:0 0 20px;">Thank you for joining the AudioChoice ${escapeHtml(platform)} beta. We appreciate your help testing the app and improving filter accuracy.</p><div style="margin:22px 0;padding:17px 19px;border-radius:13px;background:#142214;border:1px solid #304133;"><strong style="color:#f4f7f4;">Moving your audiobook to your phone</strong><p style="margin:9px 0 0;">${safeInstructions}</p></div><p style="margin:0 0 20px;">You will need your own legitimate copy of the audiobook used for this beta. Please keep the original file on your computer until the transfer or import has completed successfully.</p><p style="margin:0;">Questions? Reply to this email or contact <a href="mailto:support@audiochoiceapp.com" style="color:#9af04b;text-decoration:none;">support@audiochoiceapp.com</a>.</p>`, `AudioChoice beta instructions for ${name}`);
+  return { text, html };
+}
+
+type BetaEmailRecipient = { firstName: string; email: string };
+
+function parseBetaRecipients(value: unknown): { recipients?: BetaEmailRecipient[]; error?: string } {
+  if (typeof value !== "string") return { error: "Paste one First Name,Email row per line." };
+  const rows = value.split(/\r?\n/).map(row => row.trim()).filter(Boolean);
+  const recipients: BetaEmailRecipient[] = [];
+  for (const row of rows) {
+    const fields = row.split(",").map(field => field.trim().replace(/^\"|\"$/g, ""));
+    if (fields.length < 2 || /^first\s*name$/i.test(fields[0]) || /^email$/i.test(fields[1])) continue;
+    const firstName = fields[0].slice(0, 80);
+    const email = fields.slice(1).join(",").toLowerCase();
+    if (!firstName || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || email.length > 254) return { error: `Check this row: ${row}` };
+    if (!recipients.some(item => item.email === email)) recipients.push({ firstName, email });
+  }
+  if (!recipients.length) return { error: "No recipients found. Use First Name,Email rows." };
+  if (recipients.length > 100) return { error: "Send at most 100 beta emails at a time." };
+  return { recipients };
 }
 
 interface ExecutionContext {
@@ -200,6 +242,7 @@ const worker = {
         .bind(crypto.randomUUID(), email, name, ownershipSource, audiobooksPerMonth, groupName, now, now, now)
         .run();
 
+      const welcome = betaWelcomeEmail(name, platform);
       const [adminNotified, applicantNotified] = await Promise.all([
         sendEmail(env.RESEND_API_KEY, {
           from: "AudioChoice Beta <updates@audiochoiceapp.com>",
@@ -213,12 +256,34 @@ const worker = {
           to: [email],
           reply_to: "support@audiochoiceapp.com",
           subject: `Thank you for your interest in the AudioChoice ${platform} beta`,
-          text: `Hi ${name},\n\nThank you for your interest in the AudioChoice ${platform} beta. We received your application and appreciate your willingness to help us test the app and improve filter accuracy.\n\nPlease be on the lookout for another email from AudioChoice containing selection details and instructions to follow.\n\nYou will need your own legitimate copy of A Court of Thorns and Roses: Dramatized Adaptation from GraphicAudio to participate.\n\nQuestions? Reply to this email or contact support@audiochoiceapp.com.\n\nAudioChoice\nListen Your Way.`,
+          text: welcome.text,
+          html: welcome.html,
         }),
       ]);
       if (!adminNotified) console.error("Android beta admin notification delivery failed");
       if (!applicantNotified) console.error("Android beta applicant confirmation delivery failed");
       return Response.json({ ok: true });
+    }
+
+    if (url.pathname === "/api/beta-welcome" && request.method === "POST") {
+      if (!env.RESEND_API_KEY || !env.BETA_EMAIL_ADMIN_TOKEN) return Response.json({ error: "The beta email tool is not configured yet." }, { status: 503 });
+      if (request.headers.get("authorization") !== `Bearer ${env.BETA_EMAIL_ADMIN_TOKEN}`) return Response.json({ error: "Not authorized." }, { status: 401 });
+      let body: Record<string, unknown>;
+      try { body = await request.json() as Record<string, unknown>; } catch { return Response.json({ error: "Invalid request" }, { status: 400 }); }
+      const parsed = parseBetaRecipients(body.recipients);
+      if (parsed.error || !parsed.recipients) return Response.json({ error: parsed.error }, { status: 400 });
+      const platform = body.platform === "iOS" ? "iOS" : "Android";
+      const preview = body.preview === true;
+      const messages = parsed.recipients.map(recipient => ({ ...recipient, subject: `AudioChoice ${platform} beta instructions`, ...betaWelcomeEmail(recipient.firstName, platform) }));
+      if (preview) return Response.json({ ok: true, preview: messages });
+      if (!env.BETA_EMAIL_BCC || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(env.BETA_EMAIL_BCC)) return Response.json({ error: "Set BETA_EMAIL_BCC to your email before sending." }, { status: 503 });
+      const results = await Promise.all(messages.map(async message => {
+        try {
+          const sent = await sendEmail(env.RESEND_API_KEY!, { from: "AudioChoice Beta <updates@audiochoiceapp.com>", to: [message.email], bcc: [env.BETA_EMAIL_BCC], reply_to: "support@audiochoiceapp.com", subject: message.subject, text: message.text, html: message.html });
+          return { firstName: message.firstName, email: message.email, sent };
+        } catch { return { firstName: message.firstName, email: message.email, sent: false }; }
+      }));
+      return Response.json({ ok: results.every(result => result.sent), results });
     }
 
     if (url.pathname === "/api/auditor-application" && request.method === "POST") {
