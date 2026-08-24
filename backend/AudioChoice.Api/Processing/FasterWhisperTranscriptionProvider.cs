@@ -10,7 +10,8 @@ namespace AudioChoice.Api.Processing;
 /// its timestamp/filter behavior stay unchanged.
 /// </summary>
 public sealed class FasterWhisperTranscriptionProvider(
-    HttpClient client) : ITranscriptionProvider
+    HttpClient client,
+    TimeSpan requestTimeout) : ITranscriptionProvider
 {
     public string ModelName => "faster-whisper-large-v3-turbo";
 
@@ -18,6 +19,13 @@ public sealed class FasterWhisperTranscriptionProvider(
         AudioChunk chunk,
         CancellationToken cancellationToken)
     {
+        // Do not rely on HttpClient's platform default (100 seconds). A busy GPU
+        // can legitimately need several minutes for a long or difficult chunk.
+        // Keep a bounded, explicit timeout while still honoring scan cancellation.
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeout.CancelAfter(requestTimeout);
+        var requestCancellation = timeout.Token;
+
         await using var audio = File.OpenRead(chunk.FilePath);
         using var content = new MultipartFormDataContent();
         using var audioContent = new StreamContent(audio);
@@ -26,17 +34,17 @@ public sealed class FasterWhisperTranscriptionProvider(
         content.Add(new StringContent("en"), "language");
         content.Add(new StringContent("true"), "word_timestamps");
 
-        using var response = await client.PostAsync("transcribe", content, cancellationToken);
+        using var response = await client.PostAsync("transcribe", content, requestCancellation);
         if (!response.IsSuccessStatusCode)
         {
-            var error = await response.Content.ReadAsStringAsync(cancellationToken);
+            var error = await response.Content.ReadAsStringAsync(requestCancellation);
             throw new HttpRequestException(
                 $"Local faster-whisper transcription failed with HTTP {(int)response.StatusCode}: {error}");
         }
 
-        await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
+        await using var stream = await response.Content.ReadAsStreamAsync(requestCancellation);
         var payload = await JsonSerializer.DeserializeAsync<WhisperResponse>(
-            stream, cancellationToken: cancellationToken)
+            stream, cancellationToken: requestCancellation)
             ?? throw new InvalidOperationException("The faster-whisper service returned no transcript.");
 
         return payload.Segments

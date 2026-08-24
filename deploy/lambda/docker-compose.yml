@@ -39,7 +39,9 @@ services:
       AudioChoice__OpenAI__ProcessingLane: ios-beta-lambda
       AudioChoice__OpenAI__TranscriptionProvider: faster-whisper
       AudioChoice__OpenAI__FasterWhisperEndpoint: http://127.0.0.1:8001/
-      AudioChoice__OpenAI__FasterWhisperTimeoutSeconds: "600"
+      # A single GPU chunk may take several minutes under load. The scanner now
+      # applies this explicitly and no longer uses HttpClient's 100-second default.
+      AudioChoice__OpenAI__FasterWhisperTimeoutSeconds: "900"
       AudioChoice__OpenAI__ScanWorkerConcurrency: "2"
       # Two end-to-end lanes share two total GPU transcription slots. Avoid
       # creating a deep per-lane HTTP backlog behind the Whisper semaphore.

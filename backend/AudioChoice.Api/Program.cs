@@ -292,11 +292,11 @@ if (openAIOptions.WorkerEnabled)
                 new HttpClient
                 {
                     BaseAddress = new Uri(openAIOptions.FasterWhisperEndpoint),
-                    // A faster-whisper chunk can legitimately take several minutes on
-                    // a busy GPU. The HttpClient default is 100 seconds, which cancels
-                    // otherwise healthy chunks mid-transcription.
-                    Timeout = TimeSpan.FromSeconds(Math.Max(30, openAIOptions.FasterWhisperTimeoutSeconds))
-                })
+                    // The provider applies the explicit timeout with a linked token.
+                    // Infinite here prevents HttpClient's hidden 100-second default.
+                    Timeout = Timeout.InfiniteTimeSpan
+                },
+                TimeSpan.FromSeconds(Math.Max(30, openAIOptions.FasterWhisperTimeoutSeconds)))
             : new OpenAITranscriptionProvider(
                 services.GetRequiredService<IHttpClientFactory>()
                     .CreateClient("OpenAIProcessing"),
