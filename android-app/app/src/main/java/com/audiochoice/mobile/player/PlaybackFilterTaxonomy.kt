@@ -42,8 +42,20 @@ object PlaybackFilterTaxonomy {
         add(6, listOf("Self-harm references", "Suicidal thoughts", "Suicide attempt", "Depiction of self-harm / suicide"), "Self-Harm & Suicide")
     }
 
-    fun available(events: List<ScanEvent>): List<PlaybackFilterParent> = events
-        .groupBy { it.groupID.lowercase() }
+    fun available(events: List<ScanEvent>): List<PlaybackFilterParent> {
+        // One aggregate can span several taxonomy subgroups. Show it once in
+        // the first chronological subgroup while playback retains every range.
+        val preferredGroupByKey = mutableMapOf<String, String>()
+        events.sortedBy { it.startTime }.forEach { event ->
+            event.aggregateKey?.takeIf { it.isNotBlank() }?.let { key ->
+                preferredGroupByKey.putIfAbsent(key, event.groupID)
+            }
+        }
+        val visibleEvents = events.filter { event ->
+            event.aggregateKey.isNullOrBlank() ||
+                preferredGroupByKey[event.aggregateKey] == event.groupID
+        }
+        return visibleEvents.groupBy { it.groupID.lowercase() }
         .mapNotNull { (groupID, groupEvents) ->
             val definition = definitions[groupID] ?: return@mapNotNull null
             val categoryID = groupEvents.first().categoryID.lowercase()
@@ -68,6 +80,7 @@ object PlaybackFilterTaxonomy {
             children.first().categoryID, label, children.sortedBy { it.label },
         ) }
         .sortedBy { it.label }
+    }
 
     /**
      * A control is what a listener can independently turn on or off. Repeated

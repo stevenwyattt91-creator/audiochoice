@@ -35,6 +35,8 @@ var alcoholMapping = ContentTaxonomy.Mappings["substance_alcohol_use"];
 var intoxicationMapping = ContentTaxonomy.Mappings["substance_intoxication"];
 var drugMapping = ContentTaxonomy.Mappings["substance_drug_use"];
 var graphicViolenceMapping = ContentTaxonomy.Mappings["violence_graphic"];
+var sexualReferenceMapping = ContentTaxonomy.Mappings["sexual_references"];
+var sexualNudityMapping = ContentTaxonomy.Mappings["sexual_nudity"];
 var condensedControls = UserFacingEventPostProcessor.Process([
     new ScanEvent(Guid.NewGuid(), 1, 2, alcoholMapping.CategoryID, alcoholMapping.GroupID,
         alcoholMapping.EventID, 1),
@@ -44,16 +46,23 @@ var condensedControls = UserFacingEventPostProcessor.Process([
         drugMapping.EventID, 1),
     new ScanEvent(Guid.NewGuid(), 10, 12, graphicViolenceMapping.CategoryID,
         graphicViolenceMapping.GroupID, graphicViolenceMapping.EventID, 1),
-    new ScanEvent(Guid.NewGuid(), 18, 20, graphicViolenceMapping.CategoryID,
-        graphicViolenceMapping.GroupID, graphicViolenceMapping.EventID, 1)
+    new ScanEvent(Guid.NewGuid(), 16, 20, graphicViolenceMapping.CategoryID,
+        graphicViolenceMapping.GroupID, graphicViolenceMapping.EventID, 1),
+    new ScanEvent(Guid.NewGuid(), 30, 31, sexualReferenceMapping.CategoryID,
+        sexualReferenceMapping.GroupID, sexualReferenceMapping.EventID, 1),
+    new ScanEvent(Guid.NewGuid(), 30, 32, sexualNudityMapping.CategoryID,
+        sexualNudityMapping.GroupID, sexualNudityMapping.EventID, 1)
 ]);
-Assert(condensedControls.Count == 5, "User-facing aggregation discarded raw event ranges.");
+Assert(condensedControls.Count == 7, "User-facing aggregation discarded raw event ranges.");
 Assert(condensedControls.Where(item => item.CategoryID == alcoholMapping.CategoryID)
     .Select(item => item.AggregateKey).Distinct().Count() == 2,
     "Alcohol and drug events were not reduced to two aggregate controls.");
 Assert(condensedControls.Where(item => item.CategoryID == graphicViolenceMapping.CategoryID)
     .Select(item => item.AggregateKey).Distinct().Count() == 1,
     "Nearby violence events were not grouped into one control.");
+Assert(condensedControls.Where(item => item.CategoryID == sexualReferenceMapping.CategoryID)
+    .Select(item => item.AggregateKey).Distinct().Count() == 1,
+    "Simultaneous sexual-content events were not grouped into one control.");
 
 catalog.SaveResult(fingerprint, result);
 Assert(catalog.FindResult(fingerprint) == result, "Fingerprint lookup failed.");

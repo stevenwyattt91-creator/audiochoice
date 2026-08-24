@@ -37,7 +37,7 @@ public sealed class OpenAIProcessingOptions
     public string AnalysisModel { get; init; } = "gpt-5.6-luna";
     public string SceneVerificationModel { get; init; } = "gpt-5.6-terra";
     public string SceneEscalationModel { get; init; } = "gpt-5.6-sol";
-    public string ScannerVersion { get; init; } = "3.3";
+    public string ScannerVersion { get; init; } = "3.4";
     /// <summary>Only jobs in this lane may be claimed by this worker instance.</summary>
     public string ProcessingLane { get; init; } = ScanProcessingLanes.AzureOpenAI;
     public int MaximumRetries { get; init; } = 3;

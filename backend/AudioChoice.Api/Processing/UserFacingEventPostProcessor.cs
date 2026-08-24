@@ -10,7 +10,7 @@ namespace AudioChoice.Api.Processing;
 /// </summary>
 public static class UserFacingEventPostProcessor
 {
-    private const double NearbyViolenceGapSeconds = 12;
+    private const double NearbyEventGapSeconds = 5;
 
     public static IReadOnlyList<ScanEvent> Process(IReadOnlyList<ScanEvent> events)
     {
@@ -42,11 +42,13 @@ public static class UserFacingEventPostProcessor
                     }
                     : item).ToArray();
 
-        var violenceCategory = ContentTaxonomy.Mappings["violence_graphic"].CategoryID;
+        var profanityCategory = ContentTaxonomy.Mappings["profanity_mild"].CategoryID;
+        var substanceCategory = ContentTaxonomy.Mappings["substance_alcohol_use"].CategoryID;
         var replacements = new Dictionary<Guid, ScanEvent>();
         foreach (var group in normalized
-                     .Where(item => item.CategoryID == violenceCategory)
-                     .GroupBy(item => item.GroupID))
+                     .Where(item => item.CategoryID != profanityCategory &&
+                                    item.CategoryID != substanceCategory)
+                     .GroupBy(item => item.CategoryID))
         {
             var ordered = group.OrderBy(item => item.StartTime).ToArray();
             var cluster = new List<ScanEvent>();
@@ -62,8 +64,8 @@ public static class UserFacingEventPostProcessor
 
                 var start = cluster.Min(item => item.StartTime);
                 var end = cluster.Max(item => item.EndTime);
-                var key = Hash($"control|violence|{group.Key:N}|{start:F1}|{end:F1}");
-                var display = ViolenceDisplay(group.Key);
+                var key = Hash($"control|nearby|{group.Key:N}|{start:F1}|{end:F1}");
+                var display = ClusterDisplay(group.Key);
                 foreach (var item in cluster)
                 {
                     replacements[item.Id] = item with
@@ -77,7 +79,7 @@ public static class UserFacingEventPostProcessor
 
             foreach (var item in ordered)
             {
-                if (cluster.Count > 0 && item.StartTime > clusterEnd + NearbyViolenceGapSeconds)
+                if (cluster.Count > 0 && item.StartTime > clusterEnd + NearbyEventGapSeconds)
                     Flush();
                 cluster.Add(item);
                 clusterEnd = Math.Max(clusterEnd, item.EndTime);
@@ -91,15 +93,17 @@ public static class UserFacingEventPostProcessor
             .ToArray();
     }
 
-    private static string ViolenceDisplay(Guid groupID)
+    private static string ClusterDisplay(Guid categoryID)
     {
-        if (groupID == ContentTaxonomy.Mappings["violence_torture"].GroupID)
-            return "Torture in a continuous passage";
-        if (groupID == ContentTaxonomy.Mappings["violence_children"].GroupID)
-            return "Violence involving children in a continuous passage";
-        if (groupID == ContentTaxonomy.Mappings["violence_animals"].GroupID)
-            return "Violence involving animals in a continuous passage";
-        return "Graphic violence in a continuous passage";
+        if (categoryID == ContentTaxonomy.Mappings["sexual_references"].CategoryID)
+            return "Related sexual content in a continuous passage";
+        if (categoryID == ContentTaxonomy.Mappings["violence_graphic"].CategoryID)
+            return "Related graphic violence in a continuous passage";
+        if (categoryID == ContentTaxonomy.Mappings["blasphemy_statement"].CategoryID)
+            return "Related blasphemous content in a continuous passage";
+        if (categoryID == ContentTaxonomy.Mappings["self_harm_reference"].CategoryID)
+            return "Related self-harm content in a continuous passage";
+        return "Related content in a continuous passage";
     }
 
     private static string Hash(string value) => Convert.ToHexString(
