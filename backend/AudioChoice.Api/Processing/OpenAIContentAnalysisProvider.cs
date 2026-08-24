@@ -77,6 +77,16 @@ public sealed class OpenAIContentAnalysisProvider(
                 progress => reportProgress?.Invoke(.75 + progress * .25),
                 cancellationToken);
             var lambdaResult = SceneEventPostProcessor.Process(lambdaVerified, segments).ToArray();
+            // The local candidate description is an internal routing detail and must
+            // never appear in the app's event details or filter results.
+            lambdaResult = lambdaResult
+                .Select(item => string.Equals(
+                    item.SafeDescription,
+                    "Lambda sexual-content candidate window",
+                    StringComparison.Ordinal)
+                    ? item with { SafeDescription = "Sexual content detected" }
+                    : item)
+                .ToArray();
             logger.LogInformation(
                 "Lambda-first content analysis completed with {EventCount} events.",
                 lambdaResult.Length);
