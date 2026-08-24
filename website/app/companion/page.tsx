@@ -12,7 +12,9 @@ const steps = [
 
 const API_URL = (process.env.NEXT_PUBLIC_AUDIOCHOICE_API_URL ?? "https://audiochoice-stg-api.grayocean-b35d4bf9.eastus.azurecontainerapps.io").replace(/\/$/, "");
 const GOOGLE_CLIENT_ID = process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID || "105248861745-34kh2v9g9825kb1drs3jrgmijjum2p3o.apps.googleusercontent.com";
-const APPLE_SERVICE_ID = process.env.NEXT_PUBLIC_APPLE_SERVICE_ID || "";
+// The Services ID is public configuration. Keep the fallback so Apple sign-in
+// remains enabled when the hosting platform has not injected build-time envs.
+const APPLE_SERVICE_ID = process.env.NEXT_PUBLIC_APPLE_SERVICE_ID || "com.audiochoice.website";
 declare global { interface Window { google?: any } }
 
 function uploadWithProgress(url: string, method: string, headers: Record<string, string>, file: File, onProgress: (percent: number) => void) {
