@@ -25,6 +25,12 @@ public sealed class OpenAIProcessingOptions
     /// completed its comparison run.
     /// </summary>
     public bool LocalCandidateFunnelEnabled { get; init; }
+    /// <summary>
+    /// Run the complete transcript through the Lambda-hosted high-recall cue scanner
+    /// and send only its sexual-content candidate windows to Terra. This avoids using
+    /// the general OpenAI model as the initial pass.
+    /// </summary>
+    public bool LambdaFirstPassEnabled { get; init; }
     public string ApiKey { get; init; } = string.Empty;
     public string BaseURL { get; init; } = "https://api.openai.com/v1/";
     public string TranscriptionModel { get; init; } = "whisper-1";

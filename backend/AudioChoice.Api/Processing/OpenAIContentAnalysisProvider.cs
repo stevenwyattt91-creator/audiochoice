@@ -42,6 +42,47 @@ public sealed class OpenAIContentAnalysisProvider(
             deterministic.Count,
             segments.Count);
 
+        if (options.LambdaFirstPassEnabled)
+        {
+            logger.LogInformation(
+                "Lambda initial scan progress: 0/{TotalSegments} transcript segments.",
+                segments.Count);
+            var localCandidates = DeterministicContentDetector.CandidateWindows(segments);
+            logger.LogInformation(
+                "Lambda initial scan completed: {ProcessedSegments}/{TotalSegments} segments; " +
+                "{CandidateCount} sexual-content candidate windows found.",
+                segments.Count, segments.Count, localCandidates.Count);
+
+            for (var index = 0; index < localCandidates.Count; index += 1)
+            {
+                var range = localCandidates[index];
+                var window = segments.Skip(range.StartIndex)
+                    .Take(range.EndExclusive - range.StartIndex).ToArray();
+                if (window.Length == 0) continue;
+                AddEvent(events, "sexual_references",
+                    window[0].StartTime, window[^1].EndTime, .35,
+                    "Lambda sexual-content candidate window", null,
+                    window[0].StartTime, window[^1].EndTime,
+                    $"lambda-candidate-{index}");
+            }
+
+            reportProgress?.Invoke(.75);
+            var lambdaEvents = events
+                .GroupBy(item => item.StableKey, StringComparer.Ordinal)
+                .Select(group => group.OrderByDescending(item => item.Confidence).First())
+                .OrderBy(item => item.StartTime)
+                .ToArray();
+            var lambdaVerified = await VerifyCompleteSexualScenes(
+                lambdaEvents, segments,
+                progress => reportProgress?.Invoke(.75 + progress * .25),
+                cancellationToken);
+            var lambdaResult = SceneEventPostProcessor.Process(lambdaVerified, segments).ToArray();
+            logger.LogInformation(
+                "Lambda-first content analysis completed with {EventCount} events.",
+                lambdaResult.Length);
+            return ApplyCompleteSceneSafetyGuard(lambdaResult, segments);
+        }
+
         var batchSize = Math.Max(1, options.MaximumSegmentsPerAnalysisRequest);
         // Scene boundaries often cross request boundaries. A 50% overlap gives the model
         // enough preceding and following narrative context, while per-batch checkpoints
@@ -501,8 +542,14 @@ public sealed class OpenAIContentAnalysisProvider(
         var completed = 0;
         var tasks = batches.Select((batch, index) => VerifySceneBatchWithCheckpoint(
             index, batch, model, gate,
-            () => reportProgress?.Invoke(
-                Interlocked.Increment(ref completed) / (double)Math.Max(1, batches.Count)),
+            () =>
+            {
+                var finished = Interlocked.Increment(ref completed);
+                logger.LogInformation(
+                    "Terra verification progress: {Completed}/{Total} candidate windows.",
+                    finished, batches.Count);
+                reportProgress?.Invoke(finished / (double)Math.Max(1, batches.Count));
+            },
             cancellationToken));
         return await Task.WhenAll(tasks);
     }
