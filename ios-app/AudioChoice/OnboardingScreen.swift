@@ -6,7 +6,7 @@ struct OnboardingScreen: View {
 
     private let pages = [
         OnboardingPage(icon: "headphones", title: "Listen Your Way", detail: "Import audiobooks you own and listen with a clean, focused player."),
-        OnboardingPage(icon: "checkmark.shield", title: "Choose What You Hear", detail: "AudioChoice can skip or mute supported content events using your active filter profile."),
+        OnboardingPage(icon: "checkmark.shield", title: "Choose What You Hear", detail: "AudioChoice automatically skips the supported content categories you enable."),
         OnboardingPage(icon: "lock.shield", title: "Designed for Privacy", detail: "Files stay in private app storage. The server checks fingerprints first and never returns transcripts to your phone.")
     ]
 

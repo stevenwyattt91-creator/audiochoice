@@ -57,8 +57,10 @@ struct BookCover: View {
                 Image(uiImage: image)
                     .resizable()
                     .scaledToFill()
+                    .clipped()
             }
         }
+        .clipped()
         .clipShape(RoundedRectangle(cornerRadius: compact ? 10 : 16))
         .overlay {
             RoundedRectangle(cornerRadius: compact ? 10 : 16)

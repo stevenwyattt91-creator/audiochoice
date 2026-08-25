@@ -35,6 +35,14 @@ final class AudioPlaybackManager: ObservableObject {
     func load(_ record: LibraryBookRecord) {
         guard currentBookID != record.id,
               let fileName = record.localFileName else { return }
+        persistPosition()
+        let previousRecord = currentRecord
+        let previousPosition = position
+        if let accountID = previousRecord?.accountLibraryID {
+            Task {
+                try? await CloudScanClient.configured().saveProgress(bookID: accountID, position: previousPosition)
+            }
+        }
         removeTimeObserver()
         self.record = record
         self.currentRecord = record
@@ -44,6 +52,7 @@ final class AudioPlaybackManager: ObservableObject {
         self.skippedEventCount = 0
         playbackError = nil
         currentBookID = record.id
+        duration = 0
         let url = AudiobookImportService.audioURL(fileName: fileName)
         guard FileManager.default.fileExists(atPath: url.path) else {
             playbackError = "The local audiobook file is missing. Re-import it to listen."
@@ -78,6 +87,8 @@ final class AudioPlaybackManager: ObservableObject {
         if isPlaying {
             player.pause()
             isPlaying = false
+            persistPosition()
+            Task { await syncCurrentProgressToAccount() }
         } else {
             do {
                 try AVAudioSession.sharedInstance().setCategory(.playback, mode: .spokenAudio)
@@ -92,7 +103,13 @@ final class AudioPlaybackManager: ObservableObject {
     }
 
     func seek(to seconds: Double) {
-        let target = min(max(seconds, 0), duration)
+        let target = duration > 0 ? min(max(seconds, 0), duration) : max(seconds, 0)
+        lastHandledEventID = nil
+        setPosition(target)
+        applyContentFilter()
+    }
+
+    private func setPosition(_ target: Double) {
         player?.seek(to: CMTime(seconds: target, preferredTimescale: 600))
         position = target
         persistPosition()
@@ -168,8 +185,8 @@ final class AudioPlaybackManager: ObservableObject {
         }
         let matching = events.first { event in
             guard event.startTime <= position, position < event.endTime,
-                  let category = IOSContentTaxonomy.category(for: event) else { return false }
-            return FilterPreferences.isEnabled(category)
+                  IOSContentTaxonomy.shouldSkip(event) else { return false }
+            return true
         }
         activeFilterEvent = matching
         guard let matching else {
@@ -177,16 +194,11 @@ final class AudioPlaybackManager: ObservableObject {
             lastHandledEventID = nil
             return
         }
-        switch FilterPreferences.behavior {
-        case .mute:
-            player?.isMuted = true
-        case .skip:
-            player?.isMuted = false
-            guard lastHandledEventID != matching.id else { return }
-            lastHandledEventID = matching.id
-            skippedEventCount += 1
-            seek(to: matching.endTime + 0.2)
-        }
+        player?.isMuted = false
+        guard lastHandledEventID != matching.id else { return }
+        lastHandledEventID = matching.id
+        skippedEventCount += 1
+        setPosition(min(matching.endTime + 0.2, duration))
     }
 
     private func configureRemoteCommands() {

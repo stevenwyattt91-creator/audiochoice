@@ -4,6 +4,7 @@ struct BookDetailScreen: View {
     var book: MobileBook
     @State private var isFavorite = false
     @State private var bookmarkCount = 0
+    @State private var showingBookmarks = false
 
     private var record: LibraryBookRecord? {
         AudiobookLibraryStore.load().first { $0.id == book.id }
@@ -33,22 +34,6 @@ struct BookDetailScreen: View {
                     metric("checkmark.shield", record?.scanResult == nil ? "Pending" : "Verified", "Scan")
                 }
 
-                if let record,
-                   let fileName = record.localFileName {
-                    NavigationLink {
-                        ScanProgressScreen(
-                            record: record,
-                            fileURL: AudiobookImportService.audioURL(fileName: fileName)
-                        )
-                    } label: {
-                        Label(
-                            record.scanResult == nil ? "Scan Audiobook" : "Check Scan Updates",
-                            systemImage: "arrow.triangle.2.circlepath"
-                        )
-                    }
-                    .buttonStyle(.bordered)
-                }
-
                 HStack {
                     NavigationLink {
                         PlayerScreen(book: book)
@@ -61,8 +46,8 @@ struct BookDetailScreen: View {
                     .foregroundStyle(.black)
 
                     if let record {
-                        NavigationLink {
-                            BookmarkListScreen(record: record)
+                        Button {
+                            showingBookmarks = true
                         } label: {
                             Label("Bookmarks", systemImage: "bookmark")
                                 .frame(maxWidth: .infinity)
@@ -78,23 +63,21 @@ struct BookDetailScreen: View {
                                 detailRow("Chapters", icon: "list.bullet", value: "\(book.chapters)")
                             }
                             Divider()
-                            NavigationLink { BookmarkListScreen(record: record) } label: {
+                            Button { showingBookmarks = true } label: {
                                 detailRow("Bookmarks", icon: "bookmark", value: "\(bookmarkCount)")
                             }
                         }
                         Divider()
-                        NavigationLink {
-                            if let record {
-                                FilterEventListScreen(record: record)
-                            } else {
-                                FilterProfileScreen()
+                        if let record {
+                            NavigationLink { FilterEventListScreen(record: record) } label: {
+                                detailRow(
+                                    "Filters",
+                                    icon: "ear.badge.checkmark",
+                                    value: record.scanResult.map { "\(IOSContentTaxonomy.controlCount($0.events)) Events" } ?? "Pending"
+                                )
                             }
-                        } label: {
-                            detailRow(
-                                "Filters",
-                                icon: "ear.badge.checkmark",
-                                value: record?.scanResult.map { "\($0.events.count) Events" } ?? "Not Scanned"
-                            )
+                        } else {
+                            detailRow("Filters", icon: "ear.badge.checkmark", value: "Unavailable")
                         }
                     }
                 }
@@ -111,6 +94,13 @@ struct BookDetailScreen: View {
         .onAppear {
             isFavorite = UserLibraryStore.isFavorite(book.id)
             bookmarkCount = UserLibraryStore.bookmarks(for: book.id).count
+        }
+        .sheet(isPresented: $showingBookmarks, onDismiss: {
+            bookmarkCount = UserLibraryStore.bookmarks(for: book.id).count
+        }) {
+            if let record {
+                BookmarkSheet(record: record, currentPosition: AudioPlaybackManager.savedPosition(for: record.id))
+            }
         }
     }
 
@@ -170,9 +160,7 @@ private struct LegacyPlayerScreen: View {
             if let event = playback.activeFilterEvent,
                let category = IOSContentTaxonomy.category(for: event) {
                 Label(
-                    FilterPreferences.behavior == .skip
-                        ? "Skipping \(category.title)"
-                        : "Muting \(category.title)",
+                    "Skipping \(category.title)",
                     systemImage: "checkmark.shield.fill"
                 )
                 .font(.caption.bold())
@@ -300,6 +288,7 @@ struct PlayerScreen: View {
     @ObservedObject private var playback = AudioPlaybackManager.shared
     @State private var sleepTask: Task<Void, Never>?
     @State private var bookmarkSaved = false
+    @State private var showingBookmarks = false
 
     private var record: LibraryBookRecord? {
         AudiobookLibraryStore.load().first { $0.id == book.id }
@@ -391,13 +380,11 @@ struct PlayerScreen: View {
                         NavigationLink { ChapterListScreen(record: record) } label: { tool("list.bullet", "Chapters") }
                     } else { tool("list.bullet", "Chapters") }
 
-                    NavigationLink { FilterProfileScreen() } label: { tool("shield", "Filters") }
+                    if let record {
+                        NavigationLink { FilterEventListScreen(record: record) } label: { tool("shield", "Filters") }
+                    } else { tool("shield", "Filters") }
 
-                    Button {
-                        UserLibraryStore.addBookmark(bookID: book.id, position: playback.position)
-                        bookmarkSaved = true
-                        Task { try? await Task.sleep(for: .seconds(1.5)); bookmarkSaved = false }
-                    } label: { tool(bookmarkSaved ? "bookmark.fill" : "bookmark", bookmarkSaved ? "Saved" : "Bookmarks") }
+                    Button { showingBookmarks = true } label: { tool("bookmark", "Bookmarks") }
                 }
                 .padding(.top, 18)
                 Spacer(minLength: 8)
@@ -410,6 +397,11 @@ struct PlayerScreen: View {
             if let record {
                 playback.load(record)
                 if let initialPosition { playback.seek(to: initialPosition) }
+            }
+        }
+        .sheet(isPresented: $showingBookmarks) {
+            if let record {
+                BookmarkSheet(record: record, currentPosition: playback.position)
             }
         }
     }

@@ -177,6 +177,11 @@ struct LibraryScreen: View {
 
     private func refresh() async {
         var loaded = AudiobookLibraryStore.load()
+        for index in loaded.indices where loaded[index].artworkFileName == nil {
+            if let recovered = try? await AudiobookImportService().recoverArtwork(for: loaded[index]) {
+                loaded[index] = recovered
+            }
+        }
         records = loaded
         guard let client = try? CloudScanClient.configured() else { return }
 

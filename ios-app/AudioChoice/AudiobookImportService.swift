@@ -1,5 +1,6 @@
 import AVFoundation
 import Foundation
+import UIKit
 
 enum AudiobookImportError: LocalizedError {
     case inaccessibleFile
@@ -110,6 +111,18 @@ struct AudiobookImportService {
             .appendingPathComponent(fileName)
     }
 
+    func recoverArtwork(for record: LibraryBookRecord) async throws -> LibraryBookRecord {
+        guard record.artworkFileName == nil, let localFileName = record.localFileName else { return record }
+        let audioURL = Self.audioURL(fileName: localFileName)
+        guard FileManager.default.fileExists(atPath: audioURL.path) else { return record }
+        let extracted = await metadata(for: audioURL, fallback: record.book.title)
+        guard let artworkName = try saveArtwork(extracted.artwork, id: record.id) else { return record }
+        var updated = record
+        updated.artworkFileName = artworkName
+        AudiobookLibraryStore.update(updated)
+        return updated
+    }
+
     private func metadata(for url: URL, fallback: String) async -> (title: String, author: String, duration: Double, artwork: Data?, chapters: [AudiobookChapter]) {
         let asset = AVURLAsset(url: url)
         let duration = (try? await asset.load(.duration).seconds) ?? 0
@@ -131,12 +144,75 @@ struct AudiobookImportService {
                 break
             }
         }
+        // Many M4A/M4B audiobook tools store the cover as a one-frame MJPEG
+        // attached-picture track instead of AVMetadataCommonKeyArtwork.
+        if artwork == nil { artwork = await attachedArtwork(from: asset) }
+        if artwork == nil { artwork = embeddedImageBytes(from: url) }
         let chapters = await chapters(for: asset, totalDuration: duration)
         return (title?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty ?? fallback,
                 author?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty ?? "Unknown Author",
                 duration.isFinite ? duration : 0,
                 artwork,
                 chapters)
+    }
+
+    private func attachedArtwork(from asset: AVAsset) async -> Data? {
+        guard let tracks = try? await asset.loadTracks(withMediaType: .video) else { return nil }
+        for track in tracks {
+            guard let reader = try? AVAssetReader(asset: asset) else { continue }
+            let output = AVAssetReaderTrackOutput(
+                track: track,
+                outputSettings: [kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA]
+            )
+            guard reader.canAdd(output) else { continue }
+            reader.add(output)
+            guard reader.startReading(),
+                  let sample = output.copyNextSampleBuffer(),
+                  let buffer = CMSampleBufferGetImageBuffer(sample) else { continue }
+            let image = CIImage(cvPixelBuffer: buffer)
+            guard let cgImage = CIContext().createCGImage(image, from: image.extent) else { continue }
+            return UIImage(cgImage: cgImage).jpegData(compressionQuality: 0.92)
+        }
+        return nil
+    }
+
+    private func embeddedImageBytes(from url: URL) -> Data? {
+        guard let handle = try? FileHandle(forReadingFrom: url) else { return nil }
+        defer { try? handle.close() }
+        let fileSize = (try? handle.seekToEnd()) ?? 0
+        let regions: [(UInt64, Int)] = [
+            (0, Int(min(fileSize, 8 * 1024 * 1024))),
+            (fileSize > 32 * 1024 * 1024 ? fileSize - 32 * 1024 * 1024 : 0,
+             Int(min(fileSize, 32 * 1024 * 1024)))
+        ]
+        for (offset, count) in regions {
+            try? handle.seek(toOffset: offset)
+            guard let data = try? handle.read(upToCount: count) else { continue }
+            if let jpeg = firstValidImage(
+                in: data,
+                start: Data([0xFF, 0xD8, 0xFF]),
+                end: Data([0xFF, 0xD9])
+            ) { return jpeg }
+            if let png = firstValidImage(
+                in: data,
+                start: Data([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]),
+                end: Data([0x49, 0x45, 0x4E, 0x44, 0xAE, 0x42, 0x60, 0x82])
+            ) { return png }
+        }
+        return nil
+    }
+
+    private func firstValidImage(in data: Data, start: Data, end: Data) -> Data? {
+        var lowerBound = data.startIndex
+        while lowerBound < data.endIndex,
+              let startRange = data.range(of: start, in: lowerBound..<data.endIndex) {
+            if let endRange = data.range(of: end, in: startRange.lowerBound..<data.endIndex) {
+                let candidate = data.subdata(in: startRange.lowerBound..<endRange.upperBound)
+                if UIImage(data: candidate)?.size.width ?? 0 > 0 { return candidate }
+            }
+            lowerBound = data.index(after: startRange.lowerBound)
+        }
+        return nil
     }
 
     private func chapters(for asset: AVAsset, totalDuration: Double) async -> [AudiobookChapter] {

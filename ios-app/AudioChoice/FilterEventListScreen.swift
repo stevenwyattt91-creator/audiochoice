@@ -4,9 +4,8 @@ struct FilterEventListScreen: View {
     let record: LibraryBookRecord
     @State private var reportedIDs: Set<UUID> = []
 
-    private var events: [ScanEvent] {
-        IOSContentTaxonomy.userFacingEvents(record.scanResult?.events ?? [])
-    }
+    private var events: [ScanEvent] { IOSContentTaxonomy.userFacingEvents(record.scanResult?.events ?? []) }
+    private var hierarchy: [FilterEventCategoryGroup] { IOSContentTaxonomy.hierarchy(for: record.scanResult?.events ?? []) }
 
     var body: some View {
         Group {
@@ -17,40 +16,28 @@ struct FilterEventListScreen: View {
                     description: Text("This scan did not find supported content events.")
                 )
             } else {
-                List(events) { event in
-                    VStack(alignment: .leading, spacing: 8) {
-                        HStack {
-                            if let category = IOSContentTaxonomy.category(for: event) {
-                                Label(category.title, systemImage: category.icon)
-                                    .foregroundStyle(ACTheme.accent)
-                            } else {
-                                Label("Unknown", systemImage: "questionmark.circle")
+                List {
+                    ForEach(hierarchy) { category in
+                        DisclosureGroup {
+                            ForEach(category.groups) { group in
+                                DisclosureGroup {
+                                    ForEach(group.events) { event in
+                                        eventRow(event)
+                                    }
+                                } label: {
+                                    HStack {
+                                        Text(group.title).font(.headline)
+                                        Spacer()
+                                        Text("\(group.events.count)").foregroundStyle(ACTheme.secondaryText)
+                                    }
+                                }
                             }
-                            Spacer()
-                            Text("\(Int(event.confidence * 100))%")
-                                .font(.caption)
-                                .foregroundStyle(ACTheme.secondaryText)
+                        } label: {
+                            Label(category.title, systemImage: category.icon)
+                                .font(.title3.bold())
+                                .foregroundStyle(ACTheme.accent)
                         }
-                        Text(IOSContentTaxonomy.detail(for: event)).font(.subheadline)
-                        Text("\(time(event.startTime)) – \(time(event.endTime))")
-                            .font(.caption.monospacedDigit())
-                            .foregroundStyle(ACTheme.secondaryText)
-                        HStack {
-                            NavigationLink {
-                                PlayerScreen(book: record.book, initialPosition: event.startTime)
-                            } label: {
-                                Label("Preview", systemImage: "play.circle")
-                            }
-                            Spacer()
-                            Button(reportedIDs.contains(event.id) ? "Reported" : "Report Incorrect") {
-                                FilterCorrectionStore.report(bookID: record.id, eventID: event.id)
-                                reportedIDs.insert(event.id)
-                            }
-                            .disabled(reportedIDs.contains(event.id))
-                        }
-                        .font(.caption)
                     }
-                    .padding(.vertical, 5)
                 }
                 .scrollContentBackground(.hidden)
             }
@@ -63,6 +50,32 @@ struct FilterEventListScreen: View {
                 FilterCorrectionStore.contains(bookID: record.id, eventID: $0.id)
             }.map(\.id))
         }
+    }
+
+    private func eventRow(_ event: ScanEvent) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(IOSContentTaxonomy.detail(for: event))
+                .font(.subheadline)
+                .fixedSize(horizontal: false, vertical: true)
+            if IOSContentTaxonomy.category(for: event) != .profanity {
+                Text("\(time(event.startTime)) – \(time(event.endTime))")
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(ACTheme.secondaryText)
+            }
+            HStack {
+                NavigationLink { PlayerScreen(book: record.book, initialPosition: event.startTime) } label: {
+                    Label("Go to event", systemImage: "play.circle")
+                }
+                Spacer()
+                Button(reportedIDs.contains(event.id) ? "Reported" : "Report") {
+                    FilterCorrectionStore.report(bookID: record.id, eventID: event.id)
+                    reportedIDs.insert(event.id)
+                }
+                .disabled(reportedIDs.contains(event.id))
+            }
+            .font(.caption)
+        }
+        .padding(.vertical, 6)
     }
 
     private func time(_ seconds: Double) -> String {

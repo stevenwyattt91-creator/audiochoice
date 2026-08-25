@@ -37,7 +37,7 @@ struct ExploreScannedBooksScreen: View {
         NavigationLink { ScannedBookDetailScreen(book: book, localRecords: localRecords) } label: {
             ACCard {
                 HStack(alignment: .top, spacing: 14) {
-                    RemoteBookCover(url: client?.coverURL(for: book), title: book.title)
+                    catalogCover(book)
                         .frame(width: 78, height: 114)
                         .clipped()
                         .layoutPriority(1)
@@ -70,6 +70,17 @@ struct ExploreScannedBooksScreen: View {
         localRecords.contains { $0.book.title.caseInsensitiveCompare(book.title) == .orderedSame }
     }
 
+    @ViewBuilder
+    private func catalogCover(_ book: ExploreCatalogBook) -> some View {
+        if let artwork = localRecords.first(where: {
+            $0.book.title.caseInsensitiveCompare(book.title) == .orderedSame
+        })?.artworkFileName {
+            BookCover(title: book.title, compact: true, artworkFileName: artwork)
+        } else {
+            RemoteBookCover(url: client?.coverURL(for: book), title: book.title)
+        }
+    }
+
     private func load() async {
         localRecords = AudiobookLibraryStore.load()
         isLoading = true; defer { isLoading = false }
@@ -91,7 +102,7 @@ struct ScannedBookDetailScreen: View {
     var body: some View {
         ScrollView {
             VStack(spacing: 24) {
-                RemoteBookCover(url: client?.coverURL(for: book), title: book.title).frame(width: 240, height: 350)
+                detailCover(book).frame(width: 240, height: 350)
                 VStack(spacing: 7) {
                     Text(book.title).font(.title.bold()).multilineTextAlignment(.center)
                     Text(book.author ?? "Audiobook").foregroundStyle(ACTheme.secondaryText)
@@ -128,6 +139,15 @@ struct ScannedBookDetailScreen: View {
         VStack(spacing: 8) { Text(value).font(.headline); Text(label).font(.caption).foregroundStyle(ACTheme.secondaryText) }
             .frame(maxWidth: .infinity).padding(.vertical, 18).background(ACTheme.panel).clipShape(RoundedRectangle(cornerRadius: 18))
     }
+
+    @ViewBuilder
+    private func detailCover(_ book: ExploreCatalogBook) -> some View {
+        if let artwork = localRecord?.artworkFileName {
+            BookCover(title: book.title, artworkFileName: artwork)
+        } else {
+            RemoteBookCover(url: client?.coverURL(for: book), title: book.title)
+        }
+    }
 }
 
 struct RemoteBookCover: View {
@@ -144,6 +164,7 @@ struct RemoteBookCover: View {
                 Image(systemName: "headphones").font(.largeTitle).foregroundStyle(ACTheme.accent)
             }
         }
+            .clipped()
             .clipShape(RoundedRectangle(cornerRadius: 18))
             .task(id: url) {
                 image = nil

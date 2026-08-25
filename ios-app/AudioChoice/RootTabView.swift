@@ -3,30 +3,38 @@ import SwiftUI
 struct RootTabView: View {
     @Environment(\.scenePhase) private var scenePhase
     @ObservedObject private var scanRecovery = ScanRecoveryManager.shared
+    @State private var selectedTab = 0
     var body: some View {
-        TabView {
+        TabView(selection: $selectedTab) {
             NavigationStack {
                 LibraryScreen()
             }
             .tabItem { Label("Library", systemImage: "books.vertical.fill") }
+            .tag(0)
 
             NavigationStack {
                 NowPlayingScreen()
             }
             .tabItem { Label("Player", systemImage: "waveform") }
+            .tag(1)
 
             NavigationStack {
                 ImportScreen()
             }
             .tabItem { Label("Import", systemImage: "square.and.arrow.down") }
+            .tag(2)
 
             NavigationStack {
                 ProfileScreen()
             }
             .tabItem { Label("Profile", systemImage: "person") }
+            .tag(3)
         }
         .tint(ACTheme.accent)
         .task { await scanRecovery.recoverPendingScans() }
+        .onReceive(NotificationCenter.default.publisher(for: .showAudioChoiceLibrary)) { _ in
+            selectedTab = 0
+        }
         .onChange(of: scenePhase) {
             if scenePhase == .active {
                 Task { await scanRecovery.recoverPendingScans() }
@@ -35,6 +43,10 @@ struct RootTabView: View {
             }
         }
     }
+}
+
+extension Notification.Name {
+    static let showAudioChoiceLibrary = Notification.Name("showAudioChoiceLibrary")
 }
 
 struct ProfileScreen: View {

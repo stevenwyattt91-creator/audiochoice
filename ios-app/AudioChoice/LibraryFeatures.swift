@@ -196,3 +196,81 @@ struct BookmarkListScreen: View {
         return String(format: "%d:%02d:%02d", seconds / 3600, (seconds % 3600) / 60, seconds % 60)
     }
 }
+
+struct BookmarkSheet: View {
+    let record: LibraryBookRecord
+    let currentPosition: Double
+    @Environment(\.dismiss) private var dismiss
+    @State private var bookmarks: [AudioBookmark] = []
+
+    var body: some View {
+        NavigationStack {
+            VStack(spacing: 0) {
+                if bookmarks.isEmpty {
+                    ContentUnavailableView(
+                        "No Bookmarks",
+                        systemImage: "bookmark",
+                        description: Text("Add a bookmark at your current listening position.")
+                    )
+                    .frame(maxHeight: .infinity)
+                } else {
+                    List(bookmarks) { bookmark in
+                        NavigationLink {
+                            PlayerScreen(book: record.book, initialPosition: bookmark.position)
+                        } label: {
+                            HStack {
+                                Image(systemName: "bookmark.fill").foregroundStyle(ACTheme.accent)
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text(time(bookmark.position)).monospacedDigit()
+                                    Text(bookmark.createdAt.formatted(date: .abbreviated, time: .shortened))
+                                        .font(.caption)
+                                        .foregroundStyle(ACTheme.secondaryText)
+                                }
+                                Spacer()
+                                Image(systemName: "play.circle").foregroundStyle(ACTheme.accent)
+                            }
+                        }
+                        .contextMenu {
+                            Button("Delete Bookmark", systemImage: "trash", role: .destructive) {
+                                delete(bookmark)
+                            }
+                        }
+                    }
+                    .scrollContentBackground(.hidden)
+                }
+
+                Button {
+                    UserLibraryStore.addBookmark(bookID: record.id, position: currentPosition)
+                    reload()
+                } label: {
+                    Label("Add Bookmark at \(time(currentPosition))", systemImage: "bookmark.badge.plus")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(ACTheme.accent)
+                .foregroundStyle(.black)
+                .padding()
+            }
+            .background(ACTheme.background)
+            .navigationTitle("Bookmarks")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar { Button("Done") { dismiss() } }
+            .onAppear(perform: reload)
+        }
+        .preferredColorScheme(.dark)
+    }
+
+    private func reload() {
+        bookmarks = UserLibraryStore.bookmarks(for: record.id)
+    }
+
+    private func delete(_ bookmark: AudioBookmark) {
+        UserLibraryStore.removeBookmark(bookmark)
+        reload()
+    }
+
+    private func time(_ value: Double) -> String {
+        let seconds = max(Int(value.isFinite ? value : 0), 0)
+        return String(format: "%d:%02d:%02d", seconds / 3600, (seconds % 3600) / 60, seconds % 60)
+    }
+}

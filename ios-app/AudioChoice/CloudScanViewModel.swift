@@ -31,6 +31,14 @@ final class CloudScanViewModel: ObservableObject {
             phase = .fingerprinting
             let fingerprint = try await AudiobookFingerprintService().fingerprint(fileURL: fileURL)
             let client = try CloudScanClient.configured()
+            if let pendingScanID = record.pendingScanID {
+                phase = record.scanState == CloudScanStatus.processing.rawValue ? .processing : .queued
+                let pending = try await client.job(scanID: pendingScanID)
+                result = try await resolveJob(pending, client: client, bookID: record.id)
+                if let result { AudiobookLibraryStore.attach(result: result, to: record.id) }
+                phase = .complete
+                return
+            }
             phase = .searching
             let lookup = try await client.requestScan(
                 CloudScanRequest(
@@ -54,11 +62,6 @@ final class CloudScanViewModel: ObservableObject {
             errorMessage = error.localizedDescription
             phase = .failed
         }
-    }
-
-    func retry(fileURL: URL, record: LibraryBookRecord) async {
-        phase = .idle
-        await start(fileURL: fileURL, record: record)
     }
 
     private func resolve(

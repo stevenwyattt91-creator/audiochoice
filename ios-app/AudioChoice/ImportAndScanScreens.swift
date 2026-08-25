@@ -323,7 +323,7 @@ struct ScanProgressScreen: View {
 
                 ACCard {
                     HStack(spacing: 14) {
-                        BookCover(title: book.title, compact: true)
+                        BookCover(title: book.title, compact: true, artworkFileName: record.artworkFileName)
                             .frame(width: 62, height: 86)
                         VStack(alignment: .leading) {
                             Text(book.title).font(.headline)
@@ -344,6 +344,16 @@ struct ScanProgressScreen: View {
                         )
                         .foregroundStyle(ACTheme.accent)
                     }
+
+                    Button {
+                        NotificationCenter.default.post(name: .showAudioChoiceLibrary, object: nil)
+                    } label: {
+                        Label("Go to Library", systemImage: "books.vertical.fill")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(ACTheme.accent)
+                    .foregroundStyle(.black)
                 }
 
                 if let error = model.errorMessage {
@@ -354,12 +364,9 @@ struct ScanProgressScreen: View {
                             Text(error)
                                 .font(.subheadline)
                                 .foregroundStyle(ACTheme.secondaryText)
-                            Button("Try Again") {
-                                Task { await model.retry(fileURL: fileURL, record: record) }
-                            }
-                            .buttonStyle(.borderedProminent)
-                            .tint(ACTheme.accent)
-                            .foregroundStyle(.black)
+                            Text("AudioChoice will reconnect automatically. If the server confirms a real problem, contact support from Profile.")
+                                .font(.caption)
+                                .foregroundStyle(ACTheme.secondaryText)
                         }
                     }
                 }
