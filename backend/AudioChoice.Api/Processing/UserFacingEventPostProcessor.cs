@@ -65,7 +65,7 @@ public static class UserFacingEventPostProcessor
                 var start = cluster.Min(item => item.StartTime);
                 var end = cluster.Max(item => item.EndTime);
                 var key = Hash($"control|nearby|{group.Key:N}|{start:F1}|{end:F1}");
-                var display = ClusterDisplay(group.Key);
+                var display = ClusterDisplay(group.Key, cluster);
                 foreach (var item in cluster)
                 {
                     replacements[item.Id] = item with
@@ -93,17 +93,44 @@ public static class UserFacingEventPostProcessor
             .ToArray();
     }
 
-    private static string ClusterDisplay(Guid categoryID)
+    private static string ClusterDisplay(Guid categoryID, IReadOnlyList<ScanEvent> cluster)
     {
         if (categoryID == ContentTaxonomy.Mappings["sexual_references"].CategoryID)
-            return "Related sexual content in a continuous passage";
+            return SexualClusterDisplay(cluster);
         if (categoryID == ContentTaxonomy.Mappings["violence_graphic"].CategoryID)
-            return "Related graphic violence in a continuous passage";
+            return "A continuous scene of serious violence is described";
         if (categoryID == ContentTaxonomy.Mappings["blasphemy_statement"].CategoryID)
-            return "Related blasphemous content in a continuous passage";
+            return "A continuous passage includes blasphemous content";
         if (categoryID == ContentTaxonomy.Mappings["self_harm_reference"].CategoryID)
-            return "Related self-harm content in a continuous passage";
-        return "Related content in a continuous passage";
+            return "A continuous passage includes self-harm content";
+        return "Several related content events occur in one passage";
+    }
+
+    private static string SexualClusterDisplay(IReadOnlyList<ScanEvent> cluster)
+    {
+        var groups = cluster.Select(item => item.GroupID).ToHashSet();
+        var nudity = ContentTaxonomy.Mappings["sexual_nudity"].GroupID;
+        var implied = ContentTaxonomy.Mappings["sexual_implied_activity"].GroupID;
+        var explicitActivity = ContentTaxonomy.Mappings["sexual_explicit_activity"].GroupID;
+        var completeScene = ContentTaxonomy.Mappings["sexual_complete_scene"].GroupID;
+        var references = ContentTaxonomy.Mappings["sexual_references"].GroupID;
+        var suggestiveDialogue = ContentTaxonomy.Mappings["sexual_suggestive_dialogue"].GroupID;
+
+        if (groups.Contains(nudity) && (groups.Contains(explicitActivity) || groups.Contains(completeScene)))
+            return "A character removes clothing during an intimate encounter";
+        if (groups.Contains(nudity))
+            return "A character removes clothing or is described without clothing";
+        if (groups.Contains(completeScene))
+            return "Characters are described in a sustained intimate encounter";
+        if (groups.Contains(explicitActivity))
+            return "Characters are described in an intimate encounter";
+        if (groups.Contains(implied))
+            return "An intimate encounter is implied";
+        if (groups.Contains(references) && groups.Contains(suggestiveDialogue))
+            return "Suggestive dialogue and sexual references occur";
+        if (groups.Contains(suggestiveDialogue))
+            return "Suggestive dialogue occurs";
+        return "A sexual reference is made";
     }
 
     private static string Hash(string value) => Convert.ToHexString(

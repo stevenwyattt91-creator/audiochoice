@@ -63,9 +63,13 @@ Assert(condensedControls.Where(item => item.CategoryID == graphicViolenceMapping
 Assert(condensedControls.Where(item => item.CategoryID == sexualReferenceMapping.CategoryID)
     .Select(item => item.AggregateKey).Distinct().Count() == 1,
     "Simultaneous sexual-content events were not grouped into one control.");
+Assert(condensedControls.First(item => item.AggregateKey is not null &&
+        item.CategoryID == sexualReferenceMapping.CategoryID).AggregateDisplay ==
+    "A character removes clothing or is described without clothing",
+    "Grouped sexual controls did not retain a useful, clean explanation.");
 Assert(OpenAIContentAnalysisProvider.SafeDescriptionForEvent(
         "sexual_explicit_activity", "A character squeezes a partner's breast.") ==
-    "Sexual activity described",
+    "Characters are described in an intimate encounter",
     "Graphic sexual detail reached the user-facing description.");
 Assert(OpenAIContentAnalysisProvider.SafeDescriptionForEvent(
         "violence_graphic", "A severed, bloodied head is displayed.") ==

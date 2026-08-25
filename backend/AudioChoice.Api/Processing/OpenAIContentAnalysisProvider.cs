@@ -312,19 +312,19 @@ public sealed class OpenAIContentAnalysisProvider(
             string.Equals(supplied, "Local Lambda content cue", StringComparison.Ordinal) ||
             string.Equals(supplied, "Lambda sexual-content candidate window", StringComparison.Ordinal);
         if (!string.IsNullOrWhiteSpace(supplied) && !isInternalDescription &&
-            !ContainsUncleanDetail(supplied))
+            !ContainsUncleanDetail(supplied) && !IsTooVagueForUser(supplied))
         {
             return SafeDescription(supplied);
         }
 
         return label switch
         {
-            "sexual_suggestive_dialogue" => "Suggestive dialogue or innuendo detected",
-            "sexual_references" => "Sexual references or suggestive dialogue detected",
-            "sexual_nudity" => "Nudity described",
-            "sexual_implied_activity" => "Implied sexual activity described",
-            "sexual_explicit_activity" => "Sexual activity described",
-            "sexual_complete_scene" => "Sustained consensual sexual activity following intimate escalation",
+            "sexual_suggestive_dialogue" => "Suggestive dialogue or innuendo occurs",
+            "sexual_references" => "A sexual reference is made",
+            "sexual_nudity" => "A character removes clothing or is described without clothing",
+            "sexual_implied_activity" => "An intimate encounter is implied",
+            "sexual_explicit_activity" => "Characters are described in an intimate encounter",
+            "sexual_complete_scene" => "Characters are described in a sustained intimate encounter",
             "violence_graphic" => "Graphic violence described",
             "violence_torture" => "Torture described",
             "violence_children" => "Violence involving children described",
@@ -357,6 +357,16 @@ public sealed class OpenAIContentAnalysisProvider(
             "hanging himself", "hanging herself"
         };
         return uncleanTerms.Any(term => value.Contains(term, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static bool IsTooVagueForUser(string value)
+    {
+        var normalized = value.Trim();
+        return normalized.Equals("Content event detected", StringComparison.OrdinalIgnoreCase) ||
+               normalized.Equals("Sexual activity described", StringComparison.OrdinalIgnoreCase) ||
+               normalized.Equals("Intimate positioning is described", StringComparison.OrdinalIgnoreCase) ||
+               normalized.StartsWith("Related sexual content", StringComparison.OrdinalIgnoreCase) ||
+               normalized.StartsWith("Related content", StringComparison.OrdinalIgnoreCase);
     }
 
     private async Task<AnalysisPayload> AnalyzeBatch(
@@ -851,9 +861,13 @@ substance_drug_use, substance_abuse_overdose, blasphemy_religious_profanity,
 blasphemy_statement, self_harm_reference, self_harm_suicidal_thoughts,
 self_harm_suicide_attempt, self_harm_depiction.
 For safeDescription, write a neutral, discreet, non-graphic summary of at most 80 characters.
-Never name intimate anatomy or describe touching, squeezing, positions, or mechanics. Prefer
-phrasing such as "Intimate touching is described", "Nudity is described", "A sexual reference
-is made", or "Sustained sexual activity follows intimate escalation".
+It must still tell a parent why they might choose to skip: name the high-level situation, not
+the mechanics. For example: "A character removes clothing and is described without clothing",
+"Characters are in bed together during an intimate encounter", "Suggestive dialogue includes
+an invitation to bed", or "A serious violent encounter causes an injury". Never name intimate
+anatomy or describe touching, squeezing, positions, or mechanics. Do not use vague filler such
+as "related sexual content", "continuous passage", "sexual activity described", or
+"intimate positioning is described".
 Never describe gore, wounds, removed body parts, or the method used for self-harm or suicide.
 Use clean wording such as "Graphic violence is described", "Torture is described",
 "Self-harm is depicted", or "Suicidal thoughts are described". The description itself must
