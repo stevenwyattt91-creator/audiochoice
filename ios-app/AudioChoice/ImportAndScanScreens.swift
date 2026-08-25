@@ -1,5 +1,12 @@
+import AVFoundation
 import SwiftUI
+import UIKit
 import UniformTypeIdentifiers
+
+private extension UTType {
+    static let audiobookAAX = UTType(filenameExtension: "aax") ?? .data
+    static let audiobookM4B = UTType(filenameExtension: "m4b") ?? .audio
+}
 
 struct ImportScreen: View {
     @State private var showingImporter = false
@@ -7,6 +14,9 @@ struct ImportScreen: View {
     @State private var importedRecords: [LibraryBookRecord] = []
     @State private var isImporting = false
     @State private var importError: String?
+    @State private var showingTransferScanner = false
+    @State private var isReceivingTransfer = false
+    @ObservedObject private var transferCoordinator = CompanionTransferCoordinator.shared
 
     var body: some View {
         ScrollView {
@@ -33,6 +43,13 @@ struct ImportScreen: View {
                     .foregroundStyle(.black)
                     .disabled(isImporting)
 
+                    Button("Scan transfer QR", systemImage: "qrcode.viewfinder") {
+                        showingTransferScanner = true
+                    }
+                    .buttonStyle(.bordered)
+                    .tint(ACTheme.accent)
+                    .disabled(isImporting || isReceivingTransfer)
+
                     if isImporting {
                         ProgressView("Saving to your library…")
                             .tint(ACTheme.accent)
@@ -56,9 +73,14 @@ struct ImportScreen: View {
                     HStack {
                         format("MP3")
                         format("M4B")
-                        format("AAX")
+                        format("AAX*")
                         format("M4A")
                     }
+                }
+
+                if isReceivingTransfer {
+                    ProgressView("Receiving private transfer…")
+                        .tint(ACTheme.accent)
                 }
 
                 ACCard {
@@ -103,7 +125,7 @@ struct ImportScreen: View {
         .navigationTitle("Import Audiobook")
         .fileImporter(
             isPresented: $showingImporter,
-            allowedContentTypes: [.audio],
+            allowedContentTypes: [.audio, .audiobookM4B, .audiobookAAX],
             allowsMultipleSelection: true
         ) { result in
             guard let sourceURLs = try? result.get(), !sourceURLs.isEmpty else { return }
@@ -123,6 +145,17 @@ struct ImportScreen: View {
                 isImporting = false
             }
         }
+        .sheet(isPresented: $showingTransferScanner) {
+            QRScannerView { url in
+                showingTransferScanner = false
+                transferCoordinator.receive(url)
+            }
+            .ignoresSafeArea()
+        }
+        .onChange(of: transferCoordinator.pendingURL) { _, url in
+            guard let url else { return }
+            Task { await receiveTransfer(url) }
+        }
     }
 
     private func format(_ name: String) -> some View {
@@ -133,6 +166,86 @@ struct ImportScreen: View {
             Text(name).font(.caption)
         }
         .frame(maxWidth: .infinity)
+    }
+
+    private func receiveTransfer(_ url: URL) async {
+        guard !isReceivingTransfer else { return }
+        isReceivingTransfer = true
+        defer {
+            isReceivingTransfer = false
+            transferCoordinator.clear()
+        }
+        do {
+            guard let id = UUID(uuidString: url.pathComponents.dropFirst().first ?? ""),
+                  let code = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?.first(where: { $0.name == "code" })?.value,
+                  !code.isEmpty else { throw CloudClientError.invalidResponse }
+            let client = try CloudScanClient.configured()
+            let claim = try await client.claimCompanionTransfer(id: id, code: code)
+            let temporary = FileManager.default.temporaryDirectory.appendingPathComponent(claim.fileName)
+            defer { try? FileManager.default.removeItem(at: temporary) }
+            try await client.downloadCompanionTransfer(claim, to: temporary)
+            let record = try await AudiobookImportService().importBook(from: temporary)
+            try await client.markCompanionTransferReceived(id: claim.transferID)
+            importedRecords.append(record)
+            selectedFileName = claim.fileName
+            importError = nil
+        } catch {
+            importError = error.localizedDescription
+        }
+    }
+}
+
+private struct QRScannerView: UIViewControllerRepresentable {
+    let onCode: (URL) -> Void
+    func makeUIViewController(context: Context) -> QRScannerController {
+        QRScannerController(onCode: onCode)
+    }
+    func updateUIViewController(_ controller: QRScannerController, context: Context) {}
+}
+
+private final class QRScannerController: UIViewController, AVCaptureMetadataOutputObjectsDelegate {
+    private let onCode: (URL) -> Void
+    private let session = AVCaptureSession()
+    private var preview: AVCaptureVideoPreviewLayer?
+    private var delivered = false
+
+    init(onCode: @escaping (URL) -> Void) {
+        self.onCode = onCode
+        super.init(nibName: nil, bundle: nil)
+    }
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        view.backgroundColor = .black
+        guard let device = AVCaptureDevice.default(for: .video),
+              let input = try? AVCaptureDeviceInput(device: device),
+              session.canAddInput(input) else { return }
+        session.addInput(input)
+        let output = AVCaptureMetadataOutput()
+        guard session.canAddOutput(output) else { return }
+        session.addOutput(output)
+        output.setMetadataObjectsDelegate(self, queue: .main)
+        output.metadataObjectTypes = [.qr]
+        let layer = AVCaptureVideoPreviewLayer(session: session)
+        layer.videoGravity = .resizeAspectFill
+        view.layer.addSublayer(layer)
+        preview = layer
+        session.startRunning()
+    }
+
+    override func viewDidLayoutSubviews() {
+        super.viewDidLayoutSubviews()
+        preview?.frame = view.bounds
+    }
+
+    func metadataOutput(_ output: AVCaptureMetadataOutput, didOutput metadataObjects: [AVMetadataObject], from connection: AVCaptureConnection) {
+        guard !delivered,
+              let value = (metadataObjects.first as? AVMetadataMachineReadableCodeObject)?.stringValue,
+              let url = URL(string: value) else { return }
+        delivered = true
+        session.stopRunning()
+        onCode(url)
     }
 }
 
@@ -159,10 +272,15 @@ struct ScanProgressScreen: View {
             step(0, icon: "doc.text.magnifyingglass", title: "Reading audiobook", activeTitle: "Reading…"),
             step(1, icon: "lock.doc", title: "Fingerprinting file", activeTitle: "Fingerprinting…"),
             step(2, icon: "books.vertical", title: "Searching scan library", activeTitle: "Searching…"),
-            step(3, icon: "arrow.up.circle", title: "Private upload", activeTitle: "Uploading…"),
-            step(4, icon: "waveform.badge.magnifyingglass", title: "Analyzing content", activeTitle: model.phase == .queued ? "Waiting securely…" : "Analyzing…"),
+            step(3, icon: "arrow.up.circle", title: "Private upload", activeTitle: "Uploading — \(model.uploadProgress)%"),
+            step(4, icon: "waveform.badge.magnifyingglass", title: "Analyzing content", activeTitle: analysisStatus),
             step(5, icon: "checkmark.shield", title: "Filter scan ready", activeTitle: "Finishing…")
         ]
+    }
+
+    private var analysisStatus: String {
+        let chunks = model.totalChunks > 0 ? " — \(model.completedChunks)/\(model.totalChunks) chunks" : ""
+        return "\(model.analysisStage) — \(model.analysisProgress)%\(chunks)"
     }
 
     var body: some View {
@@ -181,12 +299,22 @@ struct ScanProgressScreen: View {
                             Text(step.status)
                                 .font(.caption)
                                 .foregroundStyle(step.isActive ? ACTheme.accent : ACTheme.secondaryText)
+                            if step.isActive && model.phase == .uploading {
+                                ProgressView(value: Double(model.uploadProgress), total: 100)
+                                    .tint(ACTheme.accent)
+                                    .padding(.top, 4)
+                            } else if step.isActive && (model.phase == .queued || model.phase == .processing) {
+                                ProgressView(value: Double(model.analysisProgress), total: 100)
+                                    .tint(ACTheme.accent)
+                                    .padding(.top, 4)
+                            }
                         }
+                        .frame(maxWidth: .infinity, alignment: .leading)
                         Spacer()
                         if step.isComplete {
                             Image(systemName: "checkmark.circle.fill")
                                 .foregroundStyle(ACTheme.accent)
-                        } else if step.isActive {
+                        } else if step.isActive && model.phase != .uploading && model.phase != .processing {
                             ProgressView().tint(ACTheme.accent)
                         }
                     }

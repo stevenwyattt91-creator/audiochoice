@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 
 enum CloudClientError: LocalizedError {
@@ -32,22 +33,81 @@ enum CloudClientError: LocalizedError {
     }
 }
 
+/// The computer-to-phone handoff uses the same one-time transfer contract as Android.
+/// The transfer itself is authenticated and the server deletes it after receipt.
+struct CompanionTransferClaim: Decodable {
+    let transferID: UUID
+    let fileName: String
+    let contentType: String
+    let fileSize: Int64
+    let sha256: String
+    let downloadURL: URL
+    let expiresAt: Date
+}
+
+extension CloudScanClient {
+    func claimCompanionTransfer(id: UUID, code: String) async throws -> CompanionTransferClaim {
+        var url = endpoint("v1/companion/transfers/\(id.uuidString)/claim")
+        var components = URLComponents(url: url, resolvingAgainstBaseURL: false)
+        components?.queryItems = [URLQueryItem(name: "code", value: code)]
+        url = components?.url ?? url
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        addAPIHeaders(to: &request)
+        return try await response(for: request)
+    }
+
+    func markCompanionTransferReceived(id: UUID) async throws {
+        var request = URLRequest(url: endpoint("v1/companion/transfers/\(id.uuidString)/received"))
+        request.httpMethod = "POST"
+        addAPIHeaders(to: &request)
+        let (data, response) = try await session.data(for: request)
+        try validate(response: response, data: data)
+    }
+
+    func downloadCompanionTransfer(_ claim: CompanionTransferClaim, to destination: URL) async throws {
+        let (data, response) = try await session.data(from: claim.downloadURL)
+        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+            throw CloudClientError.server((response as? HTTPURLResponse)?.statusCode ?? 0, "The transfer download could not be opened.")
+        }
+        guard Int64(data.count) == claim.fileSize else { throw CloudClientError.invalidResponse }
+        let digest = SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+        guard digest.caseInsensitiveCompare(claim.sha256) == .orderedSame else {
+            throw CloudClientError.invalidResponse
+        }
+        try data.write(to: destination, options: .atomic)
+    }
+}
+
+@MainActor
+final class CompanionTransferCoordinator: ObservableObject {
+    static let shared = CompanionTransferCoordinator()
+    @Published private(set) var pendingURL: URL?
+    private init() {}
+
+    func receive(_ url: URL) {
+        guard ["audiochoice", "audiochoice-beta"].contains(url.scheme?.lowercased() ?? ""),
+              url.host?.lowercased() == "transfer" else { return }
+        pendingURL = url
+    }
+
+    func clear() { pendingURL = nil }
+}
+
 struct CloudScanClient {
     let baseURL: URL
     let accessToken: String
-    var session: URLSession = CloudScanClient.uploadSession
-
-    private static let uploadSession: URLSession = {
-        let configuration = URLSessionConfiguration.default
-        configuration.waitsForConnectivity = true
-        configuration.timeoutIntervalForRequest = 30 * 60
-        configuration.timeoutIntervalForResource = 2 * 60 * 60
-        return URLSession(configuration: configuration)
-    }()
+    var session: URLSession = .shared
 
     static func configured() throws -> CloudScanClient {
         let defaults = UserDefaults.standard
-        let address = defaults.string(forKey: "cloudBaseURL")?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let savedAddress = defaults.string(forKey: "cloudBaseURL")?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let bundledAddress = (Bundle.main.object(forInfoDictionaryKey: "AudioChoiceAPIBaseURL") as? String)?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        // Keep every account-backed feature on the same shipped API as login.
+        // A saved address is only a fallback for local development builds.
+        let address = bundledAddress.isEmpty ? savedAddress : bundledAddress
         let token = CloudCredentialStore.loadToken().trimmingCharacters(in: .whitespacesAndNewlines)
         guard let url = URL(string: address), !address.isEmpty, !token.isEmpty else {
             throw CloudClientError.invalidConfiguration
@@ -65,6 +125,14 @@ struct CloudScanClient {
 
     func submitJob(_ value: CloudScanJobSubmissionRequest) async throws -> CloudScanResponse {
         try await post(value, path: "v1/scans/jobs")
+    }
+
+    func completeUpload(uploadID: UUID) async throws {
+        var request = URLRequest(url: endpoint("v1/uploads/\(uploadID.uuidString)/complete"))
+        request.httpMethod = "POST"
+        addAPIHeaders(to: &request)
+        let (data, response) = try await session.data(for: request)
+        try validate(response: response, data: data)
     }
 
     func job(scanID: UUID) async throws -> CloudScanResponse {
@@ -97,14 +165,33 @@ struct CloudScanClient {
     }
 
     func coverURL(for book: ExploreCatalogBook) -> URL? {
-        guard let value = book.coverImageURL, !value.isEmpty else { return nil }
+        coverURL(for: book.coverImageURL)
+    }
+
+    func coverURL(for value: String?) -> URL? {
+        guard let value, !value.isEmpty else { return nil }
         if let absolute = URL(string: value), absolute.scheme != nil {
             return absolute
         }
         return endpoint(value)
     }
 
-    func upload(fileURL: URL, authorization: CloudUploadAuthorizationResponse) async throws {
+    func coverImageData(from url: URL) async throws -> Data {
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        addAPIHeaders(to: &request)
+        request.setValue("image/*", forHTTPHeaderField: "Accept")
+        let (data, response) = try await session.data(for: request)
+        try validate(response: response, data: data)
+        guard !data.isEmpty else { throw CloudClientError.invalidResponse }
+        return data
+    }
+
+    func upload(
+        fileURL: URL,
+        authorization: CloudUploadAuthorizationResponse,
+        onProgress: @escaping (Double) -> Void = { _ in }
+    ) async throws {
         guard authorization.expiresAt > Date() else {
             throw CloudClientError.uploadAuthorizationExpired
         }
@@ -113,8 +200,39 @@ struct CloudScanClient {
         for (name, value) in authorization.headers {
             request.setValue(value, forHTTPHeaderField: name)
         }
-        let (_, response) = try await session.upload(for: request, fromFile: fileURL)
-        try validate(response: response, data: nil)
+        let (data, response) = try await uploadFile(fileURL, with: request, onProgress: onProgress)
+        try validate(response: response, data: data)
+        onProgress(1)
+    }
+
+    
+    private func uploadFile(
+        _ fileURL: URL,
+        with request: URLRequest,
+        onProgress: @escaping (Double) -> Void
+    ) async throws -> (Data, URLResponse) {
+        var task: URLSessionUploadTask?
+        let polling = Task {
+            while !Task.isCancelled {
+                if let task {
+                    onProgress(task.progress.fractionCompleted)
+                    if task.state == .completed { return }
+                }
+                try? await Task.sleep(for: .milliseconds(200))
+            }
+        }
+        defer { polling.cancel() }
+        return try await withCheckedThrowingContinuation { continuation in
+            task = session.uploadTask(with: request, fromFile: fileURL) { data, response, error in
+                if let error { continuation.resume(throwing: error); return }
+                guard let response else {
+                    continuation.resume(throwing: CloudClientError.invalidResponse)
+                    return
+                }
+                continuation.resume(returning: (data ?? Data(), response))
+            }
+            task?.resume()
+        }
     }
 
     private func post<Input: Encodable, Output: Decodable>(_ value: Input, path: String) async throws -> Output {

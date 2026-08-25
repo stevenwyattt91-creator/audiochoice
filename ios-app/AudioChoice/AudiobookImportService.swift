@@ -5,12 +5,16 @@ enum AudiobookImportError: LocalizedError {
     case inaccessibleFile
     case copyFailed
     case insufficientStorage
+    case aaxRequiresAuthorizedConversion
+    case unsupportedAudio
 
     var errorDescription: String? {
         switch self {
         case .inaccessibleFile: "AudioChoice could not access that file. Try selecting it again."
         case .copyFailed: "AudioChoice could not save the audiobook on this iPhone. Check available storage."
         case .insufficientStorage: "This iPhone does not have enough free space to save that audiobook safely."
+        case .aaxRequiresAuthorizedConversion: "AAX files must be converted with an authorized converter before importing on iPhone. Select the resulting M4B file."
+        case .unsupportedAudio: "This audiobook file cannot be played by iPhone. Try an MP3, M4A, or non-protected M4B file."
         }
     }
 }
@@ -25,6 +29,13 @@ struct AudiobookImportService {
 
         guard FileManager.default.isReadableFile(atPath: sourceURL.path) else {
             throw AudiobookImportError.inaccessibleFile
+        }
+
+        // iOS accepts every normal audiobook file; it does not silently whitelist
+        // titles. AAX is a proprietary Audible container, so only an authorized
+        // conversion to M4B is supported here.
+        if sourceURL.pathExtension.caseInsensitiveCompare("aax") == .orderedSame {
+            throw AudiobookImportError.aaxRequiresAuthorizedConversion
         }
 
         let fingerprint = try await AudiobookFingerprintService().fingerprint(fileURL: sourceURL)
@@ -54,6 +65,9 @@ struct AudiobookImportService {
         }
 
         do {
+            guard (try? await AVURLAsset(url: destination).load(.isPlayable)) == true else {
+                throw AudiobookImportError.unsupportedAudio
+            }
             let metadata = await metadata(for: destination, fallback: sourceURL.deletingPathExtension().lastPathComponent)
             let artworkName = try saveArtwork(metadata.artwork, id: id)
             let record = LibraryBookRecord(
@@ -99,7 +113,9 @@ struct AudiobookImportService {
     private func metadata(for url: URL, fallback: String) async -> (title: String, author: String, duration: Double, artwork: Data?, chapters: [AudiobookChapter]) {
         let asset = AVURLAsset(url: url)
         let duration = (try? await asset.load(.duration).seconds) ?? 0
-        let items = (try? await asset.load(.commonMetadata)) ?? []
+        let commonItems = (try? await asset.load(.commonMetadata)) ?? []
+        let formatItems = (try? await asset.load(.metadata)) ?? []
+        let items = commonItems + formatItems
         var title: String?
         var author: String?
         var artwork: Data?

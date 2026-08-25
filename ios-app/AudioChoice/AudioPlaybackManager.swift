@@ -16,11 +16,13 @@ final class AudioPlaybackManager: ObservableObject {
     @Published var playbackRate: Float = 1
     @Published private(set) var activeFilterEvent: ScanEvent?
     @Published private(set) var skippedEventCount = 0
+    @Published private(set) var playbackError: String?
 
     private var player: AVPlayer?
     private var timeObserver: Any?
     private var record: LibraryBookRecord?
     private var lastHandledEventID: UUID?
+    private var itemStatusObservation: NSKeyValueObservation?
 
     private init() {
         configureRemoteCommands()
@@ -40,21 +42,39 @@ final class AudioPlaybackManager: ObservableObject {
         self.lastHandledEventID = nil
         self.activeFilterEvent = nil
         self.skippedEventCount = 0
+        playbackError = nil
         currentBookID = record.id
-        let item = AVPlayerItem(url: AudiobookImportService.audioURL(fileName: fileName))
+        let url = AudiobookImportService.audioURL(fileName: fileName)
+        guard FileManager.default.fileExists(atPath: url.path) else {
+            playbackError = "The local audiobook file is missing. Re-import it to listen."
+            return
+        }
+        let item = AVPlayerItem(url: url)
+        itemStatusObservation = item.observe(\.status, options: [.new]) { [weak self] item, _ in
+            guard item.status == .failed else { return }
+            Task { @MainActor in
+                self?.isPlaying = false
+                self?.playbackError = item.error?.localizedDescription
+                    ?? "This audiobook could not be played. It may be protected or use an unsupported audio format."
+            }
+        }
         player = AVPlayer(playerItem: item)
         position = UserDefaults.standard.double(forKey: positionKey(record.id))
         player?.seek(to: CMTime(seconds: position, preferredTimescale: 600))
         addTimeObserver()
         Task {
+            let playable = (try? await item.asset.load(.isPlayable)) == true
             duration = (try? await item.asset.load(.duration).seconds) ?? 0
+            if !playable {
+                playbackError = "This audiobook could not be decoded by iPhone. Try a non-protected MP3, M4A, or M4B file."
+            }
             updateChapter()
             updateNowPlaying()
         }
     }
 
     func togglePlayback() {
-        guard let player else { return }
+        guard playbackError == nil, let player else { return }
         if isPlaying {
             player.pause()
             isPlaying = false
@@ -118,6 +138,7 @@ final class AudioPlaybackManager: ObservableObject {
     private func removeTimeObserver() {
         if let timeObserver { player?.removeTimeObserver(timeObserver) }
         timeObserver = nil
+        itemStatusObservation = nil
         player?.pause()
         isPlaying = false
     }

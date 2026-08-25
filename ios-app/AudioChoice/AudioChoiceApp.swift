@@ -4,11 +4,17 @@ import SwiftUI
 @main
 struct AudioChoiceApp: App {
     @AppStorage("onboardingCompleted") private var onboardingCompleted = false
+    @StateObject private var authSession = AuthSession.shared
+    @StateObject private var companionTransfers = CompanionTransferCoordinator.shared
 
     var body: some Scene {
         WindowGroup {
             Group {
-                if onboardingCompleted {
+                if authSession.user == nil {
+                    NavigationStack {
+                        AccountScreen(isLaunchScreen: true)
+                    }
+                } else if onboardingCompleted {
                     RootTabView()
                 } else {
                     OnboardingScreen(completed: $onboardingCompleted)
@@ -16,7 +22,9 @@ struct AudioChoiceApp: App {
                 }
                 .preferredColorScheme(.dark)
                 .onOpenURL { url in
-                    GIDSignIn.sharedInstance.handle(url)
+                    if !GIDSignIn.sharedInstance.handle(url) {
+                        companionTransfers.receive(url)
+                    }
                 }
         }
     }

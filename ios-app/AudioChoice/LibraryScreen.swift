@@ -109,7 +109,7 @@ struct LibraryScreen: View {
             NavigationLink(value: record.book) {
                 ACCard {
                     VStack(alignment: .leading, spacing: 13) {
-                        BookCover(title: record.book.title, artworkFileName: record.artworkFileName).frame(height: 180)
+                        libraryCover(record, compact: false).frame(height: 180)
                         HStack {
                             VStack(alignment: .leading, spacing: 4) {
                                 Text(record.book.title).font(.title3.bold()).lineLimit(1)
@@ -131,7 +131,7 @@ struct LibraryScreen: View {
         NavigationLink(value: record.book) {
             ACCard {
                 HStack(spacing: 16) {
-                    BookCover(title: record.book.title, compact: true, artworkFileName: record.artworkFileName)
+                    libraryCover(record, compact: true)
                         .frame(width: 90, height: 126)
                     VStack(alignment: .leading, spacing: 7) {
                         Text(record.book.title).font(.headline).multilineTextAlignment(.leading)
@@ -157,8 +157,11 @@ struct LibraryScreen: View {
     private func unavailableBookCard(_ book: AccountLibraryBook) -> some View {
         ACCard {
             HStack(spacing: 16) {
-                Image(systemName: "headphones").font(.title2).foregroundStyle(ACTheme.accent)
-                    .frame(width: 90, height: 126).background(.black.opacity(0.18)).clipShape(RoundedRectangle(cornerRadius: 16))
+                RemoteBookCover(
+                    url: (try? CloudScanClient.configured())?.coverURL(for: book.coverImageURL),
+                    title: book.title
+                )
+                .frame(width: 90, height: 126)
                 VStack(alignment: .leading, spacing: 7) {
                     Text(book.title).font(.headline)
                     Text(book.author ?? "Audiobook").foregroundStyle(ACTheme.secondaryText)
@@ -176,6 +179,23 @@ struct LibraryScreen: View {
         var loaded = AudiobookLibraryStore.load()
         records = loaded
         guard let client = try? CloudScanClient.configured() else { return }
+
+        var remoteBooks = (try? await client.library()) ?? []
+        for index in loaded.indices {
+            guard let fingerprint = loaded[index].fingerprint,
+                  let remote = remoteBooks.first(where: {
+                      $0.fingerprint.sha256.caseInsensitiveCompare(fingerprint.sha256) == .orderedSame
+                  }) else { continue }
+            loaded[index].accountLibraryID = remote.id
+            if !remote.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                loaded[index].book.title = remote.title
+            }
+            if let author = remote.author?.trimmingCharacters(in: .whitespacesAndNewlines), !author.isEmpty {
+                loaded[index].book.author = author
+            }
+            AudiobookLibraryStore.update(loaded[index])
+        }
+
         for index in loaded.indices where loaded[index].accountLibraryID == nil {
             guard let fingerprint = loaded[index].fingerprint else { continue }
             let request = LibraryBookUpsertRequest(fingerprint: fingerprint, title: loaded[index].book.title, author: loaded[index].book.author, narrator: nil, coverImageURL: nil)
@@ -185,7 +205,28 @@ struct LibraryScreen: View {
             }
         }
         records = AudiobookLibraryStore.load()
-        accountBooks = (try? await client.library()) ?? []
+        remoteBooks = (try? await client.library()) ?? remoteBooks
+        accountBooks = remoteBooks
+    }
+
+    @ViewBuilder
+    private func libraryCover(_ record: LibraryBookRecord, compact: Bool) -> some View {
+        if record.artworkFileName != nil {
+            BookCover(title: record.book.title, compact: compact, artworkFileName: record.artworkFileName)
+        } else if let cloud = accountBook(for: record),
+                  let client = try? CloudScanClient.configured(),
+                  let url = client.coverURL(for: cloud.coverImageURL) {
+            RemoteBookCover(url: url, title: record.book.title)
+        } else {
+            BookCover(title: record.book.title, compact: compact)
+        }
+    }
+
+    private func accountBook(for record: LibraryBookRecord) -> AccountLibraryBook? {
+        if let id = record.accountLibraryID,
+           let match = accountBooks.first(where: { $0.id == id }) { return match }
+        guard let sha = record.fingerprint?.sha256 else { return nil }
+        return accountBooks.first { $0.fingerprint.sha256.caseInsensitiveCompare(sha) == .orderedSame }
     }
 
     private func timeText(_ seconds: Double) -> String {

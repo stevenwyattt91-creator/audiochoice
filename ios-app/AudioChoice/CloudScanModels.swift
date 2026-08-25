@@ -49,6 +49,29 @@ struct CloudScanResponse: Codable {
     let scanID: UUID?
     let result: ScanResult?
     let taxonomyVersion: String?
+    let progressPercent: Int
+    let progressStage: String?
+    let completedChunks: Int
+    let totalChunks: Int
+    let percentComplete: Int
+
+    private enum CodingKeys: String, CodingKey {
+        case status, scanID, result, taxonomyVersion, progressPercent, progressStage
+        case completedChunks, totalChunks, percentComplete
+    }
+
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        status = try values.decode(CloudScanStatus.self, forKey: .status)
+        scanID = try values.decodeIfPresent(UUID.self, forKey: .scanID)
+        result = try values.decodeIfPresent(ScanResult.self, forKey: .result)
+        taxonomyVersion = try values.decodeIfPresent(String.self, forKey: .taxonomyVersion)
+        progressPercent = try values.decodeIfPresent(Int.self, forKey: .progressPercent) ?? 0
+        progressStage = try values.decodeIfPresent(String.self, forKey: .progressStage)
+        completedChunks = try values.decodeIfPresent(Int.self, forKey: .completedChunks) ?? 0
+        totalChunks = try values.decodeIfPresent(Int.self, forKey: .totalChunks) ?? 0
+        percentComplete = try values.decodeIfPresent(Int.self, forKey: .percentComplete) ?? progressPercent
+    }
 }
 
 struct CloudUploadAuthorizationRequest: Codable {

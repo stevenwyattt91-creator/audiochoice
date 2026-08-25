@@ -93,9 +93,7 @@ struct BookDetailScreen: View {
                             detailRow(
                                 "Filters",
                                 icon: "ear.badge.checkmark",
-                                value: record?.scanResult.map {
-                                    "\(IOSContentTaxonomy.controlCount($0.events)) Events"
-                                } ?? "Not Scanned"
+                                value: record?.scanResult.map { "\($0.events.count) Events" } ?? "Not Scanned"
                             )
                         }
                     }
@@ -160,6 +158,13 @@ private struct LegacyPlayerScreen: View {
                 Text(playback.currentChapterTitle)
                     .font(.subheadline)
                     .foregroundStyle(ACTheme.accent)
+            }
+
+            if let error = playback.playbackError {
+                Label(error, systemImage: "exclamationmark.triangle.fill")
+                    .font(.footnote)
+                    .foregroundStyle(.orange)
+                    .multilineTextAlignment(.center)
             }
 
             if let event = playback.activeFilterEvent,
@@ -334,6 +339,14 @@ struct PlayerScreen: View {
                     .font(.subheadline.weight(.semibold))
                     .foregroundStyle(ACTheme.secondaryText)
                     .padding(.top, 16)
+
+                if let error = playback.playbackError {
+                    Label(error, systemImage: "exclamationmark.triangle.fill")
+                        .font(.footnote)
+                        .foregroundStyle(.orange)
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal)
+                }
 
                 VStack(spacing: 4) {
                     Slider(value: Binding(get: { playback.position }, set: playback.seek(to:)), in: 0...max(playback.duration, 1))

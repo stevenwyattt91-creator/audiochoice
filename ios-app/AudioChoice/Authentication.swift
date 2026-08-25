@@ -38,7 +38,13 @@ struct AuthenticationClient {
     private let baseURL: URL
 
     init() throws {
-        let address = UserDefaults.standard.string(forKey: "cloudBaseURL") ?? ""
+        let savedAddress = UserDefaults.standard.string(forKey: "cloudBaseURL")?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let bundledAddress = (Bundle.main.object(forInfoDictionaryKey: "AudioChoiceAPIBaseURL") as? String)?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        // Shipped builds use their bundled API endpoint. The saved value remains
+        // a fallback for local development builds that do not bundle one.
+        let address = bundledAddress.isEmpty ? savedAddress : bundledAddress
         guard let url = URL(string: address), !address.isEmpty else { throw AuthenticationError.missingServer }
         baseURL = url
     }
@@ -113,8 +119,13 @@ final class AuthSession: ObservableObject {
     private let userKey = "authenticatedUser"
 
     private init() {
-        if let data = UserDefaults.standard.data(forKey: userKey) {
+        let token = CloudCredentialStore.loadToken()
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        if !token.isEmpty,
+           let data = UserDefaults.standard.data(forKey: userKey) {
             user = try? JSONDecoder().decode(AuthUser.self, from: data)
+        } else {
+            UserDefaults.standard.removeObject(forKey: userKey)
         }
     }
 

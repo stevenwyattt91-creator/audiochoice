@@ -1,6 +1,6 @@
 # AudioChoice for iPhone and iPad
 
-Stage 14 introduces the first native SwiftUI version of AudioChoice. It follows
+The iOS target follows the Android beta's shared scan contract. It follows
 the approved dark interface and green accent direction in
 `docs/design/mobile-ui-reference.png`.
 
@@ -13,9 +13,10 @@ the approved dark interface and green accent direction in
    **Signing & Capabilities**.
 5. Press **Run**.
 
-The app currently uses sample audiobook data so every Stage 14 screen can be
-tested without a backend. Selecting **Import** opens Apple's native file picker;
-choosing a file demonstrates the scan flow without uploading it.
+The importer does not restrict users to a beta title allowlist. It accepts normal
+audio files and sends the same fingerprint-first request to the `ios-beta` server
+lane used by the Android beta. A matching scan is reused; only an unmatched file
+is uploaded for processing.
 
 ## Stage 14 screens
 
@@ -59,6 +60,10 @@ Book details expose timestamped event review, confidence, playback previews, and
 local correction queue. Custom-word filtering remains unavailable until the backend
 publishes privacy-safe word-level events; transcripts never leave the server.
 
+The iOS beta uses the backend's Lambda transcript lane. The backend's full filter
+pipeline handles sexual-content candidates through Terra and Sol; that processing
+does not run on the phone and is not duplicated in the iOS client.
+
 ## Stage 19 resilience
 
 The local backend persists fingerprints, scan results, uploads, and job state under
@@ -70,9 +75,21 @@ large files before copying, and exposes explicit scan-update checks from book de
 ## Stage 20 accounts
 
 The iOS account screen supports persistent email/password registration and login,
-native Sign in with Apple authorization, secure session storage in Keychain, and
-sign-out. Google UI and server verification boundaries are present but require the
-project’s Google iOS and server OAuth client IDs before activation.
+native Sign in with Apple authorization, secure session storage in Keychain, Google
+sign-in, and sign-out. Before building, replace these two Xcode build settings in
+both Debug and Release with the Google Cloud **iOS** OAuth client values:
+
+- `GOOGLE_IOS_CLIENT_ID`: the iOS OAuth client ID for `com.audiochoice.mobile`.
+- `GOOGLE_REVERSED_CLIENT_ID`: the reversed form of that same iOS client ID, used
+  as the callback URL scheme.
+
+The server/audience client ID is already configured in `AppInfo.plist` and must
+remain the Web application OAuth client used by the backend.
+
+The computer-to-phone handoff supports both `audiochoice://transfer/...` and
+`audiochoice-beta://transfer/...`, including scanning the QR code in the Import
+screen. AAX DRM recovery is intentionally not duplicated on iOS; use an authorized
+converter and import the resulting M4B. The iOS app never bypasses audiobook DRM.
 
 The development business bundle identifier is `com.audiochoice.mobile`. A free Personal
 Team may sign local development builds, but no personal name is used in the bundle

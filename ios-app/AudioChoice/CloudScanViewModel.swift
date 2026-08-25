@@ -9,10 +9,19 @@ final class CloudScanViewModel: ObservableObject {
     @Published private(set) var phase: Phase = .idle
     @Published private(set) var result: ScanResult?
     @Published private(set) var errorMessage: String?
+    @Published private(set) var uploadProgress = 0
+    @Published private(set) var analysisProgress = 0
+    @Published private(set) var completedChunks = 0
+    @Published private(set) var totalChunks = 0
+    @Published private(set) var analysisStage = "Preparing analysis"
 
     func start(fileURL: URL, record: LibraryBookRecord) async {
         guard phase == .idle || phase == .failed else { return }
         errorMessage = nil
+        uploadProgress = 0
+        analysisProgress = 0
+        completedChunks = 0
+        totalChunks = 0
         let hasAccess = fileURL.startAccessingSecurityScopedResource()
         defer { if hasAccess { fileURL.stopAccessingSecurityScopedResource() } }
 
@@ -73,7 +82,13 @@ final class CloudScanViewModel: ObservableObject {
                     fileSize: fingerprint.fileSize
                 )
             )
-            try await client.upload(fileURL: fileURL, authorization: authorization)
+            try await client.upload(fileURL: fileURL, authorization: authorization) { progress in
+                Task { @MainActor in
+                    self.uploadProgress = Int((progress * 100).rounded()).clamped(to: 0...100)
+                }
+            }
+            uploadProgress = 100
+            try await client.completeUpload(uploadID: authorization.uploadID)
             phase = .queued
             let submission = try await client.submitJob(
                 CloudScanJobSubmissionRequest(uploadID: authorization.uploadID, fingerprint: fingerprint)
@@ -87,6 +102,7 @@ final class CloudScanViewModel: ObservableObject {
     }
 
     private func resolveJob(_ initial: CloudScanResponse, client: CloudScanClient, bookID: UUID) async throws -> ScanResult {
+        updateProgress(from: initial)
         if initial.status == .completed || initial.status == .available {
             guard let result = initial.result else { throw CloudClientError.missingResult }
             return result
@@ -96,6 +112,7 @@ final class CloudScanViewModel: ObservableObject {
         for _ in 0..<900 {
             try await Task.sleep(for: .seconds(2))
             let response = try await client.job(scanID: scanID)
+            updateProgress(from: response)
             switch response.status {
             case .completed, .available:
                 guard let result = response.result else { throw CloudClientError.missingResult }
@@ -114,5 +131,24 @@ final class CloudScanViewModel: ObservableObject {
             }
         }
         throw CloudClientError.timedOut
+    }
+
+    private func updateProgress(from response: CloudScanResponse) {
+        analysisProgress = max(response.progressPercent, response.percentComplete).clamped(to: 0...100)
+        completedChunks = max(0, response.completedChunks)
+        totalChunks = max(0, response.totalChunks)
+        if let stage = response.progressStage, !stage.isEmpty {
+            analysisStage = stage.replacingOccurrences(of: "_", with: " ").capitalized
+        } else if response.status == .queued {
+            analysisStage = "Waiting securely"
+        } else {
+            analysisStage = "Transcribing and analyzing"
+        }
+    }
+}
+
+private extension Comparable {
+    func clamped(to limits: ClosedRange<Self>) -> Self {
+        min(max(self, limits.lowerBound), limits.upperBound)
     }
 }

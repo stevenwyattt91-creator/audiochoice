@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 struct ExploreScannedBooksScreen: View {
     @State private var books: [ExploreCatalogBook] = []
@@ -35,18 +36,32 @@ struct ExploreScannedBooksScreen: View {
     private func catalogCard(_ book: ExploreCatalogBook) -> some View {
         NavigationLink { ScannedBookDetailScreen(book: book, localRecords: localRecords) } label: {
             ACCard {
-                HStack(spacing: 16) {
-                    RemoteBookCover(url: client?.coverURL(for: book), title: book.title).frame(width: 92, height: 134)
+                HStack(alignment: .top, spacing: 14) {
+                    RemoteBookCover(url: client?.coverURL(for: book), title: book.title)
+                        .frame(width: 78, height: 114)
+                        .clipped()
+                        .layoutPriority(1)
                     VStack(alignment: .leading, spacing: 7) {
-                        Text(book.title).font(.headline).multilineTextAlignment(.leading)
-                        Text(book.author ?? "Audiobook").foregroundStyle(ACTheme.secondaryText)
+                        Text(book.title)
+                            .font(.headline)
+                            .multilineTextAlignment(.leading)
+                            .lineLimit(3)
+                            .fixedSize(horizontal: false, vertical: true)
+                        Text(book.author ?? "Audiobook")
+                            .font(.subheadline)
+                            .foregroundStyle(ACTheme.secondaryText)
+                            .lineLimit(2)
                         Text("\(durationText(book.duration)) • \(book.eventCount) filter controls")
-                            .font(.subheadline).foregroundStyle(ACTheme.accent)
+                            .font(.caption).foregroundStyle(ACTheme.accent)
+                            .fixedSize(horizontal: false, vertical: true)
                         Text(inLibrary(book) ? "In your library" : "Ready to explore")
                             .font(.caption).foregroundStyle(ACTheme.secondaryText)
                     }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .layoutPriority(2)
                     Spacer(minLength: 0)
                 }
+                .frame(minHeight: 114, alignment: .top)
             }
         }.buttonStyle(.plain)
     }
@@ -115,12 +130,27 @@ struct ScannedBookDetailScreen: View {
     }
 }
 
-private struct RemoteBookCover: View {
+struct RemoteBookCover: View {
     let url: URL?
     let title: String
+    @State private var image: UIImage?
+
     var body: some View {
-        AsyncImage(url: url) { image in image.resizable().scaledToFill() } placeholder: { ZStack { ACTheme.panel; Image(systemName: "headphones").font(.largeTitle).foregroundStyle(ACTheme.accent) } }
+        ZStack {
+            ACTheme.panel
+            if let image {
+                Image(uiImage: image).resizable().scaledToFill().clipped()
+            } else {
+                Image(systemName: "headphones").font(.largeTitle).foregroundStyle(ACTheme.accent)
+            }
+        }
             .clipShape(RoundedRectangle(cornerRadius: 18))
+            .task(id: url) {
+                image = nil
+                guard let url, let client = try? CloudScanClient.configured(),
+                      let data = try? await client.coverImageData(from: url) else { return }
+                image = UIImage(data: data)
+            }
     }
 }
 

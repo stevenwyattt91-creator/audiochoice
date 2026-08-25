@@ -5,6 +5,7 @@ import SwiftUI
 import UIKit
 
 struct AccountScreen: View {
+    var isLaunchScreen = false
     @ObservedObject private var session = AuthSession.shared
     @State private var email = ""
     @State private var password = ""
@@ -15,6 +16,26 @@ struct AccountScreen: View {
 
     var body: some View {
         Form {
+            if isLaunchScreen && session.user == nil {
+                Section {
+                    VStack(spacing: 8) {
+                        Image(systemName: "headphones")
+                            .font(.system(size: 54, weight: .light))
+                            .foregroundStyle(ACTheme.accent)
+                        HStack(spacing: 0) {
+                            Text("Audio")
+                            Text("Choice").foregroundStyle(ACTheme.accent)
+                        }
+                        .font(.largeTitle.bold())
+                        Text("Listen Your Way")
+                            .foregroundStyle(ACTheme.secondaryText)
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 20)
+                    .listRowBackground(Color.clear)
+                }
+            }
+
             if let user = session.user {
                 Section("Signed In") {
                     LabeledContent("Name", value: user.displayName)
@@ -72,8 +93,9 @@ struct AccountScreen: View {
                 Section { Text(errorMessage).foregroundStyle(.orange) }
             }
         }
-        .navigationTitle("Account")
+        .navigationTitle(isLaunchScreen ? "" : "Account")
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar(isLaunchScreen ? .hidden : .visible, for: .navigationBar)
         .acScreen()
     }
 
@@ -133,17 +155,29 @@ private struct GoogleSignInConfiguration {
               !clientID.hasPrefix("REPLACE_") else {
             throw AuthenticationError.googleNotConfigured
         }
-        let serverClientID = Bundle.main.object(forInfoDictionaryKey: "GoogleServerClientID") as? String
-        return GIDConfiguration(clientID: clientID, serverClientID: serverClientID)
+        guard let reversedClientID = Bundle.main.object(forInfoDictionaryKey: "GoogleReversedClientID") as? String,
+              !reversedClientID.isEmpty,
+              !reversedClientID.hasPrefix("REPLACE_") else {
+            throw AuthenticationError.googleNotConfigured
+        }
+        // The API validates Google's ID token directly and does not exchange a
+        // server authorization code. Using only the iOS client keeps the token's
+        // audience aligned with this app (the API accepts this iOS client ID).
+        return GIDConfiguration(clientID: clientID)
     }
 }
 
 private extension UIApplication {
     var activePresentationController: UIViewController? {
-        connectedScenes
+        let root = connectedScenes
             .compactMap { $0 as? UIWindowScene }
             .flatMap(\.windows)
             .first(where: { $0.isKeyWindow })?
             .rootViewController
+        var visible = root
+        while let presented = visible?.presentedViewController {
+            visible = presented
+        }
+        return visible
     }
 }
