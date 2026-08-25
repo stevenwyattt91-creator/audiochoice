@@ -75,7 +75,12 @@ struct AudiobookImportService {
                 id: id,
                 book: MobileBook(
                     id: id,
-                    title: metadata.title,
+                    title: AudiobookTitleFormatter.format(
+                        metadata.title,
+                        editionType: fingerprint.editionType,
+                        partNumber: fingerprint.partNumber,
+                        totalParts: fingerprint.totalParts
+                    ),
                     author: metadata.author,
                     progress: 0,
                     timeRemaining: metadata.duration > 0 ? Self.durationText(metadata.duration) : "",

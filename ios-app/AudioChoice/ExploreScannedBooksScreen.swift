@@ -42,7 +42,7 @@ struct ExploreScannedBooksScreen: View {
                         .clipped()
                         .layoutPriority(1)
                     VStack(alignment: .leading, spacing: 7) {
-                        Text(book.title)
+                        Text(AudiobookTitleFormatter.format(book.title, editionType: book.editionType))
                             .font(.headline)
                             .multilineTextAlignment(.leading)
                             .lineLimit(3)
@@ -67,14 +67,12 @@ struct ExploreScannedBooksScreen: View {
     }
 
     private func inLibrary(_ book: ExploreCatalogBook) -> Bool {
-        localRecords.contains { $0.book.title.caseInsensitiveCompare(book.title) == .orderedSame }
+        localRecord(for: book) != nil
     }
 
     @ViewBuilder
     private func catalogCover(_ book: ExploreCatalogBook) -> some View {
-        if let artwork = localRecords.first(where: {
-            $0.book.title.caseInsensitiveCompare(book.title) == .orderedSame
-        })?.artworkFileName {
+        if let artwork = localRecord(for: book)?.artworkFileName {
             BookCover(title: book.title, compact: true, artworkFileName: artwork)
         } else {
             RemoteBookCover(url: client?.coverURL(for: book), title: book.title)
@@ -86,9 +84,40 @@ struct ExploreScannedBooksScreen: View {
         isLoading = true; defer { isLoading = false }
         do {
             guard let client else { throw CloudClientError.invalidConfiguration }
-            books = try await client.exploreBooks()
+            var loadedBooks = try await client.exploreBooks()
+            var uploadedCover = false
+            for book in loadedBooks where book.coverImageURL == nil {
+                guard let artworkName = localRecord(for: book)?.artworkFileName,
+                      let data = preparedCoverData(artworkName: artworkName) else { continue }
+                if (try? await client.uploadExploreCover(data, catalogID: book.catalogID)) != nil {
+                    uploadedCover = true
+                }
+            }
+            if uploadedCover { loadedBooks = (try? await client.exploreBooks()) ?? loadedBooks }
+            books = loadedBooks
         }
         catch { errorMessage = error.localizedDescription }
+    }
+
+    private func localRecord(for book: ExploreCatalogBook) -> LibraryBookRecord? {
+        localRecords.first { record in
+            if let sha = record.fingerprint?.sha256,
+               sha.lowercased().hasPrefix(book.catalogID.lowercased()) { return true }
+            return AudiobookTitleFormatter.matches(record.book.title, book.title) &&
+                AudiobookTitleFormatter.comparisonKey(record.book.author) ==
+                AudiobookTitleFormatter.comparisonKey(book.author ?? record.book.author)
+        }
+    }
+
+    private func preparedCoverData(artworkName: String) -> Data? {
+        let url = AudiobookImportService.artworkURL(fileName: artworkName)
+        guard let image = UIImage(contentsOfFile: url.path) else { return nil }
+        let maximumDimension: CGFloat = 1400
+        let scale = min(1, maximumDimension / max(image.size.width, image.size.height))
+        let size = CGSize(width: image.size.width * scale, height: image.size.height * scale)
+        let renderer = UIGraphicsImageRenderer(size: size)
+        let resized = renderer.image { _ in image.draw(in: CGRect(origin: .zero, size: size)) }
+        return resized.jpegData(compressionQuality: 0.82)
     }
 }
 
@@ -97,14 +126,21 @@ struct ScannedBookDetailScreen: View {
     let localRecords: [LibraryBookRecord]
     @Environment(\.openURL) private var openURL
 
-    private var localRecord: LibraryBookRecord? { localRecords.first { $0.book.title.caseInsensitiveCompare(book.title) == .orderedSame } }
+    private var localRecord: LibraryBookRecord? {
+        localRecords.first {
+            if let sha = $0.fingerprint?.sha256,
+               sha.lowercased().hasPrefix(book.catalogID.lowercased()) { return true }
+            return AudiobookTitleFormatter.matches($0.book.title, book.title)
+        }
+    }
     private var client: CloudScanClient? { try? CloudScanClient.configured() }
     var body: some View {
         ScrollView {
             VStack(spacing: 24) {
                 detailCover(book).frame(width: 240, height: 350)
                 VStack(spacing: 7) {
-                    Text(book.title).font(.title.bold()).multilineTextAlignment(.center)
+                    Text(AudiobookTitleFormatter.format(book.title, editionType: book.editionType))
+                        .font(.title.bold()).multilineTextAlignment(.center)
                     Text(book.author ?? "Audiobook").foregroundStyle(ACTheme.secondaryText)
                     Text(book.editionType ?? "Scanned audiobook").foregroundStyle(ACTheme.accent)
                 }

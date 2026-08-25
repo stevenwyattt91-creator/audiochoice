@@ -187,6 +187,18 @@ struct CloudScanClient {
         return data
     }
 
+    func uploadExploreCover(_ data: Data, catalogID: String) async throws {
+        var request = URLRequest(url: endpoint("v1/explore/\(catalogID)/cover"))
+        request.httpMethod = "PUT"
+        request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
+        request.setValue("ios-beta", forHTTPHeaderField: "X-AudioChoice-Scan-Channel")
+        request.setValue("image/jpeg", forHTTPHeaderField: "Content-Type")
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        request.httpBody = data
+        let (responseData, response) = try await session.data(for: request)
+        try validate(response: response, data: responseData)
+    }
+
     func upload(
         fileURL: URL,
         authorization: CloudUploadAuthorizationResponse,

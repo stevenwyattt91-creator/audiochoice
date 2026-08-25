@@ -29,7 +29,7 @@ struct AudiobookFingerprintService {
                 fileSize: Int64(fileSize),
                 duration: duration?.isFinite == true ? duration : nil,
                 fileType: values.contentType?.preferredMIMEType ?? "application/octet-stream",
-                workTitle: fileURL.deletingPathExtension().lastPathComponent,
+                workTitle: AudiobookTitleFormatter.format(fileURL.deletingPathExtension().lastPathComponent),
                 author: nil,
                 seriesTitle: nil,
                 seriesNumber: nil,

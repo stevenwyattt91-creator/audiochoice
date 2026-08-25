@@ -130,19 +130,30 @@ struct LibraryScreen: View {
     private func libraryCard(_ record: LibraryBookRecord) -> some View {
         NavigationLink(value: record.book) {
             ACCard {
-                HStack(spacing: 16) {
+                HStack(alignment: .top, spacing: 20) {
                     libraryCover(record, compact: true)
-                        .frame(width: 90, height: 126)
+                        .frame(width: 82, height: 116)
+                        .clipped()
+                        .layoutPriority(1)
                     VStack(alignment: .leading, spacing: 7) {
-                        Text(record.book.title).font(.headline).multilineTextAlignment(.leading)
-                        Text(record.book.author).foregroundStyle(ACTheme.secondaryText)
+                        Text(AudiobookTitleFormatter.format(record.book.title))
+                            .font(.headline)
+                            .multilineTextAlignment(.leading)
+                            .lineLimit(3)
+                            .fixedSize(horizontal: false, vertical: true)
+                        Text(record.book.author)
+                            .foregroundStyle(ACTheme.secondaryText)
+                            .lineLimit(2)
                         if let duration = record.chapterMarkers?.map({ $0.startTime + $0.duration }).max(), duration > 0 {
                             Text(timeText(duration)).font(.subheadline).foregroundStyle(ACTheme.accent)
                         }
                     }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .layoutPriority(2)
                     Spacer(minLength: 0)
                     Image(systemName: "chevron.right").foregroundStyle(ACTheme.secondaryText)
                 }
+                .frame(minHeight: 116, alignment: .top)
             }
         }
         .buttonStyle(.plain)
@@ -177,6 +188,18 @@ struct LibraryScreen: View {
 
     private func refresh() async {
         var loaded = AudiobookLibraryStore.load()
+        for index in loaded.indices {
+            let normalized = AudiobookTitleFormatter.format(
+                loaded[index].book.title,
+                editionType: loaded[index].fingerprint?.editionType,
+                partNumber: loaded[index].fingerprint?.partNumber,
+                totalParts: loaded[index].fingerprint?.totalParts
+            )
+            if normalized != loaded[index].book.title {
+                loaded[index].book.title = normalized
+                AudiobookLibraryStore.update(loaded[index])
+            }
+        }
         for index in loaded.indices where loaded[index].artworkFileName == nil {
             if let recovered = try? await AudiobookImportService().recoverArtwork(for: loaded[index]) {
                 loaded[index] = recovered
@@ -193,7 +216,12 @@ struct LibraryScreen: View {
                   }) else { continue }
             loaded[index].accountLibraryID = remote.id
             if !remote.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                loaded[index].book.title = remote.title
+                loaded[index].book.title = AudiobookTitleFormatter.format(
+                    remote.title,
+                    editionType: remote.fingerprint.editionType,
+                    partNumber: remote.fingerprint.partNumber,
+                    totalParts: remote.fingerprint.totalParts
+                )
             }
             if let author = remote.author?.trimmingCharacters(in: .whitespacesAndNewlines), !author.isEmpty {
                 loaded[index].book.author = author
