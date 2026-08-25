@@ -14,6 +14,9 @@ final class CloudScanViewModel: ObservableObject {
     @Published private(set) var completedChunks = 0
     @Published private(set) var totalChunks = 0
     @Published private(set) var analysisStage = "Preparing analysis"
+    @Published private(set) var isReconnecting = false
+    @Published private(set) var reconnectAttempt = 0
+    @Published private(set) var connectionStatus: String?
 
     func start(fileURL: URL, record: LibraryBookRecord) async {
         guard phase == .idle || phase == .failed else { return }
@@ -22,6 +25,9 @@ final class CloudScanViewModel: ObservableObject {
         analysisProgress = 0
         completedChunks = 0
         totalChunks = 0
+        isReconnecting = false
+        reconnectAttempt = 0
+        connectionStatus = nil
         let hasAccess = fileURL.startAccessingSecurityScopedResource()
         defer { if hasAccess { fileURL.stopAccessingSecurityScopedResource() } }
 
@@ -30,38 +36,103 @@ final class CloudScanViewModel: ObservableObject {
             _ = try fileURL.resourceValues(forKeys: [.isReadableKey])
             phase = .fingerprinting
             let fingerprint = try await AudiobookFingerprintService().fingerprint(fileURL: fileURL)
-            let client = try CloudScanClient.configured()
-            if let pendingScanID = record.pendingScanID {
-                phase = record.scanState == CloudScanStatus.processing.rawValue ? .processing : .queued
-                let pending = try await client.job(scanID: pendingScanID)
-                result = try await resolveJob(pending, client: client, bookID: record.id)
-                if let result { AudiobookLibraryStore.attach(result: result, to: record.id) }
-                phase = .complete
-                return
+            while !Task.isCancelled {
+                do {
+                    let client = try CloudScanClient.configured()
+                    let latest = AudiobookLibraryStore.load().first(where: { $0.id == record.id }) ?? record
+                    if reconnectAttempt > 0 {
+                        connectionStatus = "Backend retry attempt \(reconnectAttempt)…"
+                    }
+                    if let pendingScanID = latest.pendingScanID {
+                        phase = latest.scanState == CloudScanStatus.processing.rawValue ? .processing : .queued
+                        let pending = try await client.job(scanID: pendingScanID)
+                        markReconnectedIfNeeded()
+                        result = try await resolveJob(pending, client: client, bookID: record.id)
+                    } else {
+                        phase = .searching
+                        let lookup = try await client.requestScan(
+                            CloudScanRequest(
+                                fingerprint: fingerprint,
+                                currentScannerVersion: latest.scanResult?.scannerVersion
+                            )
+                        )
+                        markReconnectedIfNeeded()
+                        result = try await resolve(
+                            lookup,
+                            fileURL: fileURL,
+                            fingerprint: fingerprint,
+                            client: client,
+                            bookID: record.id
+                        )
+                    }
+                    if let result { AudiobookLibraryStore.attach(result: result, to: record.id) }
+                    isReconnecting = false
+                    connectionStatus = reconnectAttempt > 0 ? "Reconnected — scan complete" : nil
+                    phase = .complete
+                    return
+                } catch is CancellationError {
+                    throw CancellationError()
+                } catch where isRecoverableNetworkError(error) {
+                    reconnectAttempt += 1
+                    isReconnecting = true
+                    phase = .failed
+                    errorMessage = "The network connection was lost. AudioChoice is retrying automatically."
+                    connectionStatus = "Waiting for a connection • retry \(reconnectAttempt)"
+                    let delay = min(15, 2 + reconnectAttempt * 2)
+                    try await Task.sleep(for: .seconds(delay))
+                    errorMessage = nil
+                } catch {
+                    discardIncompleteImportIfNeeded(record)
+                    errorMessage = error.localizedDescription
+                    phase = .failed
+                    return
+                }
             }
-            phase = .searching
-            let lookup = try await client.requestScan(
-                CloudScanRequest(
-                    fingerprint: fingerprint,
-                    currentScannerVersion: record.scanResult?.scannerVersion
-                )
-            )
-            result = try await resolve(
-                lookup,
-                fileURL: fileURL,
-                fingerprint: fingerprint,
-                client: client,
-                bookID: record.id
-            )
-            if let result { AudiobookLibraryStore.attach(result: result, to: record.id) }
-            phase = .complete
         } catch is CancellationError {
             phase = .idle
             Task { await ScanRecoveryManager.shared.recoverPendingScans() }
         } catch {
+            discardIncompleteImportIfNeeded(record)
             errorMessage = error.localizedDescription
             phase = .failed
         }
+    }
+
+    private func markReconnectedIfNeeded() {
+        guard reconnectAttempt > 0 else { return }
+        isReconnecting = false
+        connectionStatus = "Reconnected — resuming scan"
+    }
+
+    private func isRecoverableNetworkError(_ error: Error) -> Bool {
+        let value = error as NSError
+        if value.domain == NSURLErrorDomain {
+            return [
+                NSURLErrorTimedOut,
+                NSURLErrorCannotFindHost,
+                NSURLErrorCannotConnectToHost,
+                NSURLErrorNetworkConnectionLost,
+                NSURLErrorDNSLookupFailed,
+                NSURLErrorNotConnectedToInternet,
+                NSURLErrorInternationalRoamingOff,
+                NSURLErrorDataNotAllowed,
+                NSURLErrorCallIsActive
+            ].contains(value.code)
+        }
+        if let underlying = value.userInfo[NSUnderlyingErrorKey] as? Error {
+            return isRecoverableNetworkError(underlying)
+        }
+        return false
+    }
+
+    private func discardIncompleteImportIfNeeded(_ original: LibraryBookRecord) {
+        // A job that already reached the server remains recoverable after a temporary
+        // connection interruption. Everything else is an incomplete import and must
+        // not become a playable, unfiltered library book.
+        guard original.scanResult == nil else { return }
+        let latest = AudiobookLibraryStore.load().first(where: { $0.id == original.id }) ?? original
+        guard latest.pendingScanID == nil else { return }
+        AudiobookLibraryStore.remove(latest)
     }
 
     private func resolve(

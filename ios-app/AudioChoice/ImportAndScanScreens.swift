@@ -336,6 +336,17 @@ struct ScanProgressScreen: View {
                 }
                 .padding(.top, 24)
 
+                if let status = model.connectionStatus {
+                    ACCard {
+                        HStack(spacing: 12) {
+                            if model.isReconnecting { ProgressView().tint(ACTheme.accent) }
+                            else { Image(systemName: "checkmark.circle.fill").foregroundStyle(ACTheme.accent) }
+                            Text(status).font(.subheadline.weight(.semibold))
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                }
+
                 if let result = model.result {
                     ACCard {
                         Label(
@@ -359,12 +370,14 @@ struct ScanProgressScreen: View {
                 if let error = model.errorMessage {
                     ACCard {
                         VStack(alignment: .leading, spacing: 12) {
-                            Label("Scan paused", systemImage: "exclamationmark.triangle")
+                            Label(model.isReconnecting ? "Scan paused — reconnecting" : "Import failed", systemImage: "exclamationmark.triangle")
                                 .font(.headline)
                             Text(error)
                                 .font(.subheadline)
                                 .foregroundStyle(ACTheme.secondaryText)
-                            Text("AudioChoice will reconnect automatically. If the server confirms a real problem, contact support from Profile.")
+                            Text(model.isReconnecting
+                                 ? "AudioChoice will retry the backend automatically. Keep this screen open; progress will resume when the connection returns."
+                                 : "The incomplete audiobook was not added to your library. Select the file again to retry.")
                                 .font(.caption)
                                 .foregroundStyle(ACTheme.secondaryText)
                         }
