@@ -88,6 +88,25 @@ resource blobService 'Microsoft.Storage/storageAccounts/blobServices@2023-05-01'
   parent: storage
   name: 'default'
   properties: {
+    cors: {
+      corsRules: [
+        {
+          allowedOrigins: [
+            'https://audiochoiceapp.com'
+            'https://www.audiochoiceapp.com'
+          ]
+          allowedMethods: [
+            'GET'
+            'HEAD'
+            'OPTIONS'
+            'PUT'
+          ]
+          maxAgeInSeconds: 3600
+          exposedHeaders: ['*']
+          allowedHeaders: ['*']
+        }
+      ]
+    }
     deleteRetentionPolicy: {
       enabled: false
     }

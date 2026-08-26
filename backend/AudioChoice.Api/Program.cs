@@ -563,15 +563,12 @@ app.MapPost("/v1/admin/accounts/{userID:guid}/entitlements", (
 app.MapPost("/v1/companion/transfers", async (
     CompanionTransferCreateRequest request,
     HttpContext context,
-    IEntitlementStore entitlements,
     ICompanionTransferStore transfers,
     ICompanionTransferStorage storage,
     CancellationToken cancellationToken) =>
 {
     var user = CurrentUser(context);
     if (user is null) return Results.Unauthorized();
-    if (!entitlements.Access(user.ID).CanUseCompanion)
-        return Results.Forbid();
     if (!storage.IsAvailable)
         return Results.Problem("Companion transfers are not configured yet.", statusCode: StatusCodes.Status503ServiceUnavailable);
     var sha256 = request.Sha256?.Trim().ToUpperInvariant();
@@ -635,14 +632,12 @@ app.MapGet("/v1/companion/transfers/{transferID:guid}/claim", async (
     Guid transferID,
     string code,
     HttpContext context,
-    IEntitlementStore entitlements,
     ICompanionTransferStore transfers,
     ICompanionTransferStorage storage,
     CancellationToken cancellationToken) =>
 {
     var user = CurrentUser(context);
     if (user is null) return Results.Unauthorized();
-    if (!entitlements.Access(user.ID).CanUseCompanion) return Results.Forbid();
     var transfer = transfers.Find(transferID);
     if (transfer is null || transfer.OwnerUserID != user.ID || transfer.Status != "uploaded" || transfer.ExpiresAt <= DateTimeOffset.UtcNow)
         return Results.NotFound();
