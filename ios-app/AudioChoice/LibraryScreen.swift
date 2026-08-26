@@ -215,6 +215,11 @@ struct LibraryScreen: View {
                       $0.fingerprint.sha256.caseInsensitiveCompare(fingerprint.sha256) == .orderedSame
                   }) else { continue }
             loaded[index].accountLibraryID = remote.id
+            AudioPlaybackManager.applyRemotePosition(
+                remote.playbackPositionSeconds,
+                updatedAt: remote.updatedAt,
+                for: loaded[index].id
+            )
             if !remote.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 loaded[index].book.title = AudiobookTitleFormatter.format(
                     remote.title,
@@ -234,6 +239,11 @@ struct LibraryScreen: View {
             let request = LibraryBookUpsertRequest(fingerprint: fingerprint, title: loaded[index].book.title, author: loaded[index].book.author, narrator: nil, coverImageURL: nil)
             if let remote = try? await client.saveLibraryBook(request) {
                 loaded[index].accountLibraryID = remote.id
+                AudioPlaybackManager.applyRemotePosition(
+                    remote.playbackPositionSeconds,
+                    updatedAt: remote.updatedAt,
+                    for: loaded[index].id
+                )
                 AudiobookLibraryStore.update(loaded[index])
             }
         }

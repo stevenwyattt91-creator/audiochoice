@@ -4,6 +4,7 @@ struct RootTabView: View {
     @Environment(\.scenePhase) private var scenePhase
     @ObservedObject private var scanRecovery = ScanRecoveryManager.shared
     @State private var selectedTab = 0
+    @State private var importFlowID = UUID()
     var body: some View {
         TabView(selection: $selectedTab) {
             NavigationStack {
@@ -21,6 +22,7 @@ struct RootTabView: View {
             NavigationStack {
                 ImportScreen()
             }
+            .id(importFlowID)
             .tabItem { Label("Import", systemImage: "square.and.arrow.down") }
             .tag(2)
 
@@ -33,6 +35,7 @@ struct RootTabView: View {
         .tint(ACTheme.accent)
         .task { await scanRecovery.recoverPendingScans() }
         .onReceive(NotificationCenter.default.publisher(for: .showAudioChoiceLibrary)) { _ in
+            importFlowID = UUID()
             selectedTab = 0
         }
         .onChange(of: scenePhase) {

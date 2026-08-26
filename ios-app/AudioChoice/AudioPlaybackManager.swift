@@ -32,6 +32,22 @@ final class AudioPlaybackManager: ObservableObject {
         UserDefaults.standard.double(forKey: "playbackPosition.\(bookID.uuidString)")
     }
 
+    static func applyRemotePosition(_ position: Double, updatedAt: Date, for bookID: UUID) {
+        let defaults = UserDefaults.standard
+        let timestampKey = "playbackPositionUpdatedAt.\(bookID.uuidString)"
+        if defaults.object(forKey: timestampKey) == nil,
+           defaults.double(forKey: "playbackPosition.\(bookID.uuidString)") > 0 {
+            // Preserve positions saved by builds released before timestamps were
+            // recorded; the next playback update will establish ordering.
+            defaults.set(Date(), forKey: timestampKey)
+            return
+        }
+        let localUpdate = defaults.object(forKey: timestampKey) as? Date ?? .distantPast
+        guard updatedAt > localUpdate else { return }
+        defaults.set(max(position, 0), forKey: "playbackPosition.\(bookID.uuidString)")
+        defaults.set(updatedAt, forKey: timestampKey)
+    }
+
     func load(_ record: LibraryBookRecord) {
         guard currentBookID != record.id,
               let fileName = record.localFileName else { return }
@@ -163,6 +179,7 @@ final class AudioPlaybackManager: ObservableObject {
     private func persistPosition() {
         guard let id = currentBookID else { return }
         UserDefaults.standard.set(position, forKey: positionKey(id))
+        UserDefaults.standard.set(Date(), forKey: "playbackPositionUpdatedAt.\(id.uuidString)")
     }
 
     func syncCurrentProgressToAccount() async {

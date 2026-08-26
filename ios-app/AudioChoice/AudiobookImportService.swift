@@ -66,7 +66,13 @@ struct AudiobookImportService {
         }
 
         do {
-            guard (try? await AVURLAsset(url: destination).load(.isPlayable)) == true else {
+            let validationAsset = AVURLAsset(url: destination)
+            let audioTracks = (try? await validationAsset.loadTracks(withMediaType: .audio)) ?? []
+            let validatedDuration = (try? await validationAsset.load(.duration).seconds) ?? 0
+            // AVAsset.isPlayable can report false for otherwise valid long-form MP3s
+            // while their audio track is still readable by AVPlayer. Validate the
+            // media itself so converted audiobooks are not rejected prematurely.
+            guard !audioTracks.isEmpty, validatedDuration.isFinite, validatedDuration > 0 else {
                 throw AudiobookImportError.unsupportedAudio
             }
             let metadata = await metadata(for: destination, fallback: sourceURL.deletingPathExtension().lastPathComponent)
