@@ -46,7 +46,13 @@ struct AudiobookImportService {
         }
 
         let id = UUID()
-        let fileName = "\(id.uuidString).\(sourceURL.pathExtension.lowercased())"
+        // Some download and sharing tools preserve the audio bytes but apply the
+        // wrong filename extension (for example, an AAC/M4A file named .mp3).
+        // AVFoundation uses the extension when selecting a parser, so normalize
+        // only AudioChoice's private copy after inspecting the container header.
+        // The user's original file remains unchanged.
+        let importedExtension = Self.importedFileExtension(for: sourceURL)
+        let fileName = "\(id.uuidString).\(importedExtension)"
         let destination = Self.audioURL(fileName: fileName)
         try Self.ensureDirectories()
         let available = try? Self.applicationSupportDirectory.resourceValues(
@@ -120,6 +126,32 @@ struct AudiobookImportService {
     static func artworkURL(fileName: String) -> URL {
         applicationSupportDirectory.appendingPathComponent(artworkFolder, isDirectory: true)
             .appendingPathComponent(fileName)
+    }
+
+    static func importedFileExtension(for url: URL) -> String {
+        let suppliedExtension = url.pathExtension.lowercased()
+        guard let handle = try? FileHandle(forReadingFrom: url) else {
+            return suppliedExtension
+        }
+        defer { try? handle.close() }
+        guard let header = try? handle.read(upToCount: 16) else {
+            return suppliedExtension
+        }
+        let bytes = [UInt8](header)
+
+        // ISO Base Media files (M4A and M4B) begin with a sized `ftyp` box.
+        if bytes.count >= 8, String(bytes: bytes[4..<8], encoding: .ascii) == "ftyp" {
+            return ["m4a", "m4b"].contains(suppliedExtension) ? suppliedExtension : "m4a"
+        }
+
+        // MP3 files commonly begin with an ID3 tag or an MPEG audio frame sync.
+        let hasID3 = bytes.count >= 3 && bytes[0] == 0x49 && bytes[1] == 0x44 && bytes[2] == 0x33
+        let hasMPEGFrameSync = bytes.count >= 2 && bytes[0] == 0xFF && (bytes[1] & 0xE0) == 0xE0
+        if hasID3 || hasMPEGFrameSync {
+            return "mp3"
+        }
+
+        return suppliedExtension
     }
 
     func recoverArtwork(for record: LibraryBookRecord) async throws -> LibraryBookRecord {
