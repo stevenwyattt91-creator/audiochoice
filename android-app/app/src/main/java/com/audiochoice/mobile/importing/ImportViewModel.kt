@@ -10,7 +10,9 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.audiochoice.contracts.CloudScanResponse
 import com.audiochoice.contracts.CloudScanStatus
+import kotlin.math.roundToInt
 import com.audiochoice.mobile.data.AudioChoiceApi
+import com.audiochoice.mobile.data.EditionSignature
 import com.audiochoice.mobile.data.LibraryBook
 import com.audiochoice.mobile.data.LibraryBookUpsertRequest
 import com.audiochoice.mobile.data.ExploreCatalogBook
@@ -51,6 +53,11 @@ data class ImportUiState(
     val totalChunks: Int = 0,
     val showBetaRestriction: Boolean = false,
     val showOrganizationPrompt: Boolean = false,
+    /**
+     * True when the file carried no usable tags, so the title is a tidied guess
+     * from the filename rather than a known edition.
+     */
+    val titleFromFilename: Boolean = false,
     val organizingFile: Boolean = false,
     val organizationMessage: String? = null,
     val organizationComplete: Boolean = false,
@@ -120,24 +127,31 @@ class ImportViewModel(
             .newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "AudioChoice::CompanionTransfer")
             .apply { setReferenceCounted(false); acquire(6 * 60 * 60 * 1000L) }
         viewModelScope.launch {
-            runCatching {
-                update(ImportPhase.READING, 0)
-                mutableState.value = mutableState.value.copy(statusMessage = "Receiving audiobook from your companion…")
-                val transfer = api.claimCompanionTransfer(accessToken, transferID, code)
-                val destination = downloadCompanionAudio(transfer.downloadURL, transfer.fileName, transfer.fileSize, transfer.sha256)
-                api.completeCompanionTransfer(accessToken, transfer.transferID)
-                // The handoff is now a verified local audio file. Reset the temporary
-                // receive progress before deliberately entering the normal import
-                // state machine, which only begins from an idle state.
-                mutableState.value = ImportUiState()
-                import(Uri.fromFile(destination), resolver, accessToken)
-            }.onFailure { error ->
-                mutableState.value = mutableState.value.copy(
-                    phase = ImportPhase.FAILED,
-                    error = error.message ?: "AudioChoice could not receive that companion transfer.",
-                )
+            // try/finally rather than releasing on the success and failure paths:
+            // viewModelScope is cancelled when the Activity finishes, and a
+            // cancellation skipped the release entirely, pinning the CPU awake for
+            // the full six-hour timeout.
+            try {
+                runCatching {
+                    update(ImportPhase.READING, 0)
+                    mutableState.value = mutableState.value.copy(statusMessage = "Receiving audiobook from your companion…")
+                    val transfer = api.claimCompanionTransfer(accessToken, transferID, code)
+                    val destination = downloadCompanionAudio(transfer.downloadURL, transfer.fileName, transfer.fileSize, transfer.sha256)
+                    api.completeCompanionTransfer(accessToken, transfer.transferID)
+                    // The handoff is now a verified local audio file. Reset the temporary
+                    // receive progress before deliberately entering the normal import
+                    // state machine, which only begins from an idle state.
+                    mutableState.value = ImportUiState()
+                    import(Uri.fromFile(destination), resolver, accessToken)
+                }.onFailure { error ->
+                    mutableState.value = mutableState.value.copy(
+                        phase = ImportPhase.FAILED,
+                        error = error.message ?: "AudioChoice could not receive that companion transfer.",
+                    )
+                }
+            } finally {
+                if (wakeLock.isHeld) wakeLock.release()
             }
-            if (wakeLock.isHeld) wakeLock.release()
         }
         return true
     }
@@ -315,6 +329,11 @@ class ImportViewModel(
             .newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "AudioChoice::PrivateImport")
             .apply { setReferenceCounted(false); acquire(6 * 60 * 60 * 1000L) }
         viewModelScope.launch {
+            // try/finally is required here: releasing on the success and failure
+            // paths alone missed both coroutine cancellation and
+            // rejectUnsupportedBetaImport(), which returns through runCatching's
+            // success path before reaching the release call.
+            try {
             runCatching {
                 update(ImportPhase.READING, 0)
                 val inspected = inspector.inspect(uri)
@@ -386,17 +405,25 @@ class ImportViewModel(
                     localAudio.save(book.fingerprint.sha256, stableUri, audio.chapters, audio.coverBytes)
                 }
                 activeScanStore.complete(audio.fileName)
+                // The playback copy is registered by now, so any leftover
+                // download or conversion intermediate for this import is
+                // unreferenced and safe to reclaim.
+                localAudio.purgeOrphanedAudioFiles()
                 pendingAaxCoverBytes = null
                 pendingAaxBetaEdition = null
                 mutableState.value = mutableState.value.copy(
                     phase = ImportPhase.COMPLETE, completedSteps = 6, result = result, savedBook = book,
                     showOrganizationPrompt = BetaConfig.enabled,
+                    // A catalog match supplies a real edition title; otherwise the
+                    // title is only as good as the file's own tags.
+                    titleFromFilename = catalogEdition == null && !audio.isTitleFromMetadata,
                 )
-                if (wakeLock.isHeld) wakeLock.release()
             }.onFailure {
                 mutableState.value = mutableState.value.copy(
                     phase = ImportPhase.FAILED, error = it.message ?: "AudioChoice could not import that audiobook.",
                 )
+            }
+            } finally {
                 if (wakeLock.isHeld) wakeLock.release()
             }
         }
@@ -685,6 +712,10 @@ class ImportViewModel(
                 totalParts = if (betaPart != null) 2 else audio.fingerprint.totalParts,
             )
         } ?: audio.fingerprint
+        // The server only ever sees decoded audio, never the container tags, so this
+        // evidence and the source-file link both have to come from here.
+        val sourceFingerprint = EditionSignatures.sourceFingerprintFor(audio.fingerprint, fingerprint)
+        val editionSignature = EditionSignatures.from(audio.tags, audio.chapters)
         val catalogID = catalogBook?.catalogID ?: audio.fingerprint.sha256.take(24)
         var coverImageURL = catalogBook?.coverImageURL
         if (coverImageURL == null && audio.coverBytes != null) {
@@ -699,9 +730,14 @@ class ImportViewModel(
                 fingerprint = fingerprint,
                 title = exactAccountBook?.title ?: catalogBook?.title ?: audio.title,
                 author = exactAccountBook?.author ?: catalogBook?.author ?: fingerprint.author,
+                // The request and both server stores have always carried a
+                // narrator; nothing ever populated it. The container tags do.
+                narrator = exactAccountBook?.narrator ?: audio.tags.narrator,
                 coverImageURL = coverImageURL,
                 coverImageBase64 = audio.coverBytes?.let { android.util.Base64.encodeToString(it, android.util.Base64.NO_WRAP) },
                 coverImageContentType = audio.coverBytes?.let(::coverContentType),
+                sourceFingerprint = sourceFingerprint,
+                signature = editionSignature,
             ),
         )
         // Persist the embedded artwork against the canonical full fingerprint.
@@ -731,13 +767,19 @@ class ImportViewModel(
         val directory = File(appFilesDirectory, "playback_audio").apply { mkdirs() }
         val destination = File(directory, "${sha256.lowercase()}.$extension")
         val temporary = File(directory, "${sha256.lowercase()}.partial")
-        resolver.openInputStream(source).use { input ->
-            requireNotNull(input) { "The imported audiobook could not be reopened for playback." }
-            FileOutputStream(temporary, false).use { output -> input.copyTo(output, 1024 * 1024) }
+        // Without this the partial copy survived every failure path, leaving a
+        // full-size orphan behind for each interrupted import.
+        try {
+            resolver.openInputStream(source).use { input ->
+                requireNotNull(input) { "The imported audiobook could not be reopened for playback." }
+                FileOutputStream(temporary, false).use { output -> input.copyTo(output, 1024 * 1024) }
+            }
+            require(temporary.length() > 0) { "The playback copy of this audiobook was empty." }
+            if (destination.exists()) destination.delete()
+            require(temporary.renameTo(destination)) { "AudioChoice could not finish saving the playback copy." }
+        } finally {
+            if (temporary.exists()) temporary.delete()
         }
-        require(temporary.length() > 0) { "The playback copy of this audiobook was empty." }
-        if (destination.exists()) destination.delete()
-        require(temporary.renameTo(destination)) { "AudioChoice could not finish saving the playback copy." }
         Uri.fromFile(destination)
     }
 

@@ -10,6 +10,7 @@ import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.WorkerParameters
 import com.audiochoice.contracts.CloudScanStatus
+import com.audiochoice.mobile.data.ApiException
 import com.audiochoice.mobile.data.AudioChoiceApi
 import com.audiochoice.mobile.data.SessionStore
 import java.util.concurrent.TimeUnit
@@ -26,7 +27,12 @@ class ScanStatusWorker(
         val session = SessionStore(applicationContext, json).session.first() ?: return Result.retry()
         val response = runCatching {
             AudioChoiceApi(json).scanJob(session.accessToken, activeScan.scanID)
-        }.getOrElse { return Result.retry() }
+        }.getOrElse { error ->
+            // Retrying a rejected session with the same token can never succeed,
+            // so stop instead of polling forever on a linear 30s backoff.
+            if (error is ApiException && error.statusCode == 401) return Result.failure()
+            return Result.retry()
+        }
 
         return when (response.status) {
             CloudScanStatus.AVAILABLE, CloudScanStatus.COMPLETED -> {

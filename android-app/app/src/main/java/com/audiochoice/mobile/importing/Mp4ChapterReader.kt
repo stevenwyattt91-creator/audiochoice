@@ -90,3 +90,6 @@ class Mp4ChapterReader(private val resolver: ContentResolver) {
     private fun readBytes(channel: FileChannel, position: Long, size: Int): ByteArray? =
         read(channel, position, size)?.let { ByteArray(size).also(it::get) }
 }
+
+/** Containers whose chapter and `ilst` tag atoms AudioChoice can read directly. */
+internal val MP4_FAMILY_EXTENSIONS = setOf("m4b", "m4a", "mp4", "aax", "aaxc")
