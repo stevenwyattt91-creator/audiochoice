@@ -17,6 +17,14 @@ data class InspectedAudio(
     val contentType: String,
     val chapters: List<AudioChapter>,
     val coverBytes: ByteArray?,
+    /** Edition metadata read out of the container, for identification and display. */
+    val tags: AudioEditionTags = AudioEditionTags(),
+    /**
+     * False when the title had to be guessed from the filename, which means the
+     * edition is not actually known. Callers should present such a book as needing
+     * identification rather than as fact.
+     */
+    val isTitleFromMetadata: Boolean = false,
 )
 
 class AudioFileInspector(private val context: Context) {
@@ -69,8 +77,20 @@ class AudioFileInspector(private val context: Context) {
         retriever.release()
 
         val extension = name.substringAfterLast('.', "audio").lowercase()
-        val fileTitle = name.substringBeforeLast('.').replace('_', ' ').trim().ifBlank { "Imported audiobook" }
-        val title = embeddedTitle?.trim()?.takeIf { it.isNotBlank() } ?: fileTitle
+        val isMp4Family = extension in MP4_FAMILY_EXTENSIONS
+        // MediaMetadataRetriever cannot reach freeform tags, which is where the
+        // retail identifiers and the narrator live, so read the atoms directly.
+        val tags = if (isMp4Family) Mp4TagReader(resolver).read(uri) else AudioEditionTags()
+
+        // Anything inside the file outranks the filename. For a tagged M4B the
+        // first two sources are the same `©nam` value, so this changes nothing for
+        // files that were already identified correctly.
+        val metadataTitle = tags.title?.trim()?.takeIf { it.isNotBlank() }
+            ?: embeddedTitle?.trim()?.takeIf { it.isNotBlank() }
+        val title = metadataTitle
+            ?: EditionTitleCleaner.clean(name)
+            ?: "Imported audiobook"
+
         InspectedAudio(
             fingerprint = BookFingerprint(
                 sha256 = digest.digest().joinToString("") { "%02X".format(it) },
@@ -78,15 +98,20 @@ class AudioFileInspector(private val context: Context) {
                 duration = duration,
                 fileType = extension,
                 workTitle = title,
-                author = embeddedAuthor?.trim()?.takeIf { it.isNotBlank() },
-                seriesTitle = embeddedSeries?.trim()?.takeIf { it.isNotBlank() },
+                author = tags.author?.trim()?.takeIf { it.isNotBlank() }
+                    ?: embeddedAuthor?.trim()?.takeIf { it.isNotBlank() },
+                seriesTitle = tags.seriesTitle?.trim()?.takeIf { it.isNotBlank() }
+                    ?: embeddedSeries?.trim()?.takeIf { it.isNotBlank() },
+                seriesNumber = tags.seriesPart,
             ),
             fileName = name,
             title = title,
             contentType = resolver.getType(uri) ?: "audio/$extension",
-            chapters = if (extension in setOf("m4b", "m4a", "mp4", "aax"))
+            chapters = if (isMp4Family)
                 Mp4ChapterReader(resolver).read(uri, duration) else emptyList(),
             coverBytes = embeddedCover,
+            tags = tags,
+            isTitleFromMetadata = metadataTitle != null,
         )
     }
 }

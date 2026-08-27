@@ -17,3 +17,8 @@ GoogleService-Info.plist
 AuthKey_*.p8
 *.cer
 *.pem
+
+# Holds sdk.dir and the beta keystore password read by app/build.gradle.kts.
+local.properties
+*.jks
+*.keystore

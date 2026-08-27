@@ -13,6 +13,10 @@ import java.net.URL
 import java.net.URLEncoder
 import java.io.IOException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.channels.BufferOverflow
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.SharedFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
@@ -22,6 +26,25 @@ class ApiException(val statusCode: Int, message: String) : Exception(message)
 
 class AudioChoiceApi(private val json: Json) {
     private val baseUrl = BuildConfig.API_BASE_URL.trim().trimEnd('/')
+
+    private val mutableSessionExpired = MutableSharedFlow<Unit>(
+        extraBufferCapacity = 1,
+        onBufferOverflow = BufferOverflow.DROP_OLDEST,
+    )
+
+    /**
+     * Emits when an authenticated request is rejected with 401, meaning the
+     * stored session is no longer usable.
+     *
+     * Previously every 401 was reported as "The email or password was not
+     * accepted." regardless of endpoint, so an expired token surfaced as a
+     * password error on the Library screen while the app stayed nominally
+     * signed in and silently failed every subsequent call.
+     */
+    val sessionExpired: SharedFlow<Unit> = mutableSessionExpired.asSharedFlow()
+
+    /** Sign-in and sign-out endpoints, where a 401 is a credential problem. */
+    private fun isAuthenticationPath(path: String): Boolean = path.startsWith("/v1/auth/")
 
     suspend fun register(request: RegisterRequest): AuthResponse = post("/v1/auth/register", request)
     suspend fun login(request: LoginRequest): AuthResponse = post("/v1/auth/login", request)
@@ -149,6 +172,23 @@ class AudioChoiceApi(private val json: Json) {
 
     suspend fun deleteBook(accessToken: String, bookID: String) {
         request<Unit>("DELETE", "/v1/library/$bookID", null, accessToken)
+    }
+
+    suspend fun updateBookDetails(
+        accessToken: String,
+        bookID: String,
+        details: LibraryBookDetailsRequest,
+    ): LibraryBook = request(
+        "PUT", "/v1/library/$bookID/details", json.encodeToString(details), accessToken,
+    )
+
+    suspend fun reportEditionSignature(accessToken: String, report: EditionSignatureReportRequest) {
+        request<Unit>(
+            "POST",
+            "/v1/editions/signatures",
+            json.encodeToString(report),
+            accessToken,
+        )
     }
 
     suspend fun saveProgress(accessToken: String, bookID: String, positionSeconds: Double, isFinished: Boolean): LibraryBook =
@@ -318,15 +358,24 @@ class AudioChoiceApi(private val json: Json) {
         }
     }
 
-    private fun uploadBlockWithRetry(url: String, headers: Map<String, String>, bytes: ByteArray, count: Int) {
+    /**
+     * Retrying a single block is safe: re-uploading the same block ID replaces
+     * it rather than appending, so Blob block PUTs are idempotent.
+     */
+    private suspend fun uploadBlockWithRetry(url: String, headers: Map<String, String>, bytes: ByteArray, count: Int) {
         var lastFailure: Throwable? = null
         repeat(4) { attempt ->
             try {
                 putBytes(url, headers, bytes, count, "application/octet-stream")
                 return
+            } catch (cancellation: kotlinx.coroutines.CancellationException) {
+                // Must propagate, or cancelling an upload silently keeps retrying.
+                throw cancellation
             } catch (failure: Throwable) {
                 lastFailure = failure
-                if (attempt < 3) Thread.sleep(1_000L shl attempt)
+                // delay() is cancellable; the previous Thread.sleep parked an IO
+                // thread and ignored cancellation entirely.
+                if (attempt < 3) kotlinx.coroutines.delay(1_000L shl attempt)
             }
         }
         throw IOException("The audiobook upload was interrupted after several automatic retries.", lastFailure)
@@ -386,8 +435,14 @@ class AudioChoiceApi(private val json: Json) {
         check(baseUrl.startsWith("https://")) {
             "AudioChoice staging has not been connected to this build yet."
         }
+        // Only GET is safe to replay automatically. A POST/PUT/DELETE whose
+        // response read failed may already have been applied on the server -- a
+        // very common mobile failure mode -- and replaying it produced duplicate
+        // bookmarks, duplicate consent rows, and duplicate paid scan jobs. For
+        // those verbs the failure is surfaced so the caller can offer a retry.
+        val maximumAttempts = if (method == "GET") 3 else 1
         var lastConnectionError: IOException? = null
-        repeat(3) { attempt ->
+        repeat(maximumAttempts) { attempt ->
             val connection = (URL("$baseUrl$path").openConnection() as HttpURLConnection).apply {
                 requestMethod = method
                 connectTimeout = 45_000
@@ -407,18 +462,31 @@ class AudioChoiceApi(private val json: Json) {
                     ?.bufferedReader()?.use { it.readText() }.orEmpty()
                 if (status !in 200..299) {
                     val detail = runCatching { json.decodeFromString<ApiError>(responseText).error }.getOrNull()
-                    throw ApiException(status, detail ?: when (status) {
-                        401 -> "The email or password was not accepted."
-                        409 -> "That account is already linked."
-                        else -> "AudioChoice could not complete that request ($status)."
-                    })
+                    // A 401 on an authenticated, non-sign-in endpoint means the
+                    // session died rather than that a password was wrong.
+                    val expiredSession = status == 401 && token != null && !isAuthenticationPath(path)
+                    if (expiredSession) mutableSessionExpired.tryEmit(Unit)
+                    throw ApiException(
+                        status,
+                        if (expiredSession) {
+                            "Your AudioChoice session has expired. Please sign in again."
+                        } else {
+                            detail ?: when (status) {
+                                401 -> "The email or password was not accepted."
+                                409 -> "That account is already linked."
+                                else -> "AudioChoice could not complete that request ($status)."
+                            }
+                        },
+                    )
                 }
                 @Suppress("UNCHECKED_CAST")
                 return@withContext if (Response::class == Unit::class || responseText.isBlank()) Unit as Response
                 else json.decodeFromString<Response>(responseText)
             } catch (error: IOException) {
                 lastConnectionError = error
-                if (attempt < 2) kotlinx.coroutines.delay(((attempt + 1) * 1_500).toLong())
+                if (attempt < maximumAttempts - 1) {
+                    kotlinx.coroutines.delay(((attempt + 1) * 1_500).toLong())
+                }
             } finally {
                 connection.disconnect()
             }

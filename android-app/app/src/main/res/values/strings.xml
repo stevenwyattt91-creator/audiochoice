@@ -1,3 +1,4 @@
 <resources>
     <string name="app_name">AudioChoice</string>
+    <string name="playback_channel_name">Audiobook playback</string>
 </resources>

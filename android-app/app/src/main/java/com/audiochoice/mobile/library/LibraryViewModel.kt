@@ -5,6 +5,7 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.audiochoice.mobile.data.AudioChoiceApi
 import com.audiochoice.mobile.data.LibraryBook
+import com.audiochoice.mobile.data.LibraryBookDetailsRequest
 import com.audiochoice.mobile.data.LibraryBookUpsertRequest
 import com.audiochoice.mobile.data.ExploreCatalogBook
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -35,6 +36,45 @@ class LibraryViewModel(
                 if (book.id == bookID) book.copy(playbackPositionSeconds = positionSeconds) else book
             },
         )
+    }
+
+    /**
+     * Corrects a book's display details.
+     *
+     * Only the row a listener sees changes. The edition fingerprint is untouched, so
+     * identification keeps working from the file's own metadata rather than from
+     * typed-in text.
+     */
+    fun updateDetails(
+        accessToken: String,
+        book: LibraryBook,
+        title: String,
+        author: String?,
+        narrator: String?,
+        onComplete: (LibraryBook) -> Unit = {},
+    ) {
+        viewModelScope.launch {
+            runCatching {
+                api.updateBookDetails(
+                    accessToken,
+                    book.id,
+                    LibraryBookDetailsRequest(
+                        title = title.trim(),
+                        author = author?.trim()?.takeIf(String::isNotBlank),
+                        narrator = narrator?.trim()?.takeIf(String::isNotBlank),
+                    ),
+                )
+            }.onSuccess { saved ->
+                mutableState.value = mutableState.value.copy(
+                    books = mutableState.value.books.map { existing ->
+                        if (existing.id == saved.id) saved else existing
+                    },
+                )
+                onComplete(saved)
+            }.onFailure { error ->
+                mutableState.value = mutableState.value.copy(error = error.message)
+            }
+        }
     }
 
     fun delete(accessToken: String, book: LibraryBook, onComplete: () -> Unit = {}) {

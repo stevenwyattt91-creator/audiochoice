@@ -9,6 +9,7 @@ public interface IUserLibraryStore
     LibraryBook Upsert(Guid userID, LibraryBookUpsertRequest request);
     LibraryBook? UpdateProgress(Guid userID, Guid bookID, PlaybackProgressRequest request);
     LibraryBook? UpdateFavorite(Guid userID, Guid bookID, bool isFavorite);
+    LibraryBook? UpdateDetails(Guid userID, Guid bookID, LibraryBookDetailsRequest request);
     bool DeleteBook(Guid userID, Guid bookID);
     IReadOnlyList<LibraryBookmark>? ListBookmarks(Guid userID, Guid bookID);
     LibraryBookmark? AddBookmark(Guid userID, Guid bookID, BookmarkCreateRequest request);
@@ -90,6 +91,14 @@ public sealed class FileUserLibraryStore : IUserLibraryStore
         Update(userID, bookID, value => value with
         {
             IsFavorite = isFavorite,
+            UpdatedAt = DateTimeOffset.UtcNow
+        });
+    public LibraryBook? UpdateDetails(Guid userID, Guid bookID, LibraryBookDetailsRequest request) =>
+        Update(userID, bookID, value => value with
+        {
+            Title = request.Title,
+            Author = request.Author,
+            Narrator = request.Narrator,
             UpdatedAt = DateTimeOffset.UtcNow
         });
 

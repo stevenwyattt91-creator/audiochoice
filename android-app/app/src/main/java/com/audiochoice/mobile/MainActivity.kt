@@ -112,7 +112,7 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onStop() {
-        playerViewModel.saveProgress()
+        playerViewModel.saveProgressSync()
         super.onStop()
     }
 }

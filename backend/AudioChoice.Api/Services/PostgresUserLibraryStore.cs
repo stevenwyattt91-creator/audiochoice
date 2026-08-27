@@ -107,6 +107,22 @@ public sealed class PostgresUserLibraryStore(NpgsqlDataSource dataSource) : IUse
         return command.ExecuteNonQuery() == 0 ? null : FindBook(connection, null, userID, bookID: bookID);
     }
 
+    public LibraryBook? UpdateDetails(Guid userID, Guid bookID, LibraryBookDetailsRequest request)
+    {
+        using var connection = dataSource.OpenConnection();
+        using var command = new NpgsqlCommand("""
+            update user_library_books set
+                title = $1, author = $2, narrator = $3, updated_at = now()
+            where id = $4 and user_id = $5;
+            """, connection);
+        command.Parameters.AddWithValue(request.Title);
+        AddNullable(command, CleanOptional(request.Author));
+        AddNullable(command, CleanOptional(request.Narrator));
+        command.Parameters.AddWithValue(bookID);
+        command.Parameters.AddWithValue(userID);
+        return command.ExecuteNonQuery() == 0 ? null : FindBook(connection, null, userID, bookID: bookID);
+    }
+
     public bool DeleteBook(Guid userID, Guid bookID)
     {
         using var connection = dataSource.OpenConnection();

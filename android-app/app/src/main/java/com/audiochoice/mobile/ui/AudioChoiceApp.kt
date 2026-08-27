@@ -18,6 +18,9 @@ import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.draw.clip
 import androidx.compose.material.icons.Icons
@@ -28,24 +31,28 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.AnnotatedString
-import androidx.compose.ui.text.SpanStyle
-import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.withContext
 import com.audiochoice.mobile.auth.AuthViewModel
 import com.audiochoice.mobile.R
 import com.audiochoice.mobile.BuildConfig
@@ -59,7 +66,17 @@ import com.audiochoice.mobile.importing.ImportPhase
 import com.audiochoice.mobile.importing.ImportViewModel
 import com.audiochoice.mobile.library.LibraryViewModel
 import com.audiochoice.mobile.player.PlayerViewModel
+import com.audiochoice.mobile.player.FilterAvailability
 import com.audiochoice.mobile.player.PlayerUiState
+import com.audiochoice.mobile.player.enabledScanEvents
+import com.audiochoice.mobile.reader.ReaderMask
+import com.audiochoice.mobile.reader.ReaderSettings
+import com.audiochoice.mobile.reader.ReaderTheme
+import com.audiochoice.mobile.reader.indexOfCharacter
+import com.audiochoice.mobile.reader.merged
+import com.audiochoice.mobile.reader.readerCharacterForTime
+import com.audiochoice.mobile.reader.readerDisplayParagraphs
+import com.audiochoice.mobile.reader.readerTimeForCharacter
 import com.audiochoice.mobile.player.PlaybackFilterTaxonomy
 import com.audiochoice.mobile.security.ParentalControlsStore
 import com.audiochoice.mobile.support.SupportViewModel
@@ -237,10 +254,30 @@ private fun LibraryShell(
         mutableStateOf(!onboardingPreferences.getBoolean(onboardingKey, false))
     }
     var progressHydrated by rememberSaveable(user.id) { mutableStateOf(false) }
+    // The playback notification and lock-screen controls need POST_NOTIFICATIONS
+    // on API 33+. Playback still works if the listener declines, so a denial is
+    // deliberately not treated as an error.
+    val notificationPermission = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission(),
+    ) { }
+    LaunchedEffect(Unit) {
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU &&
+            androidx.core.content.ContextCompat.checkSelfPermission(
+                context,
+                android.Manifest.permission.POST_NOTIFICATIONS,
+            ) != android.content.pm.PackageManager.PERMISSION_GRANTED
+        ) {
+            notificationPermission.launch(android.Manifest.permission.POST_NOTIFICATIONS)
+        }
+    }
     LaunchedEffect(user.email) { importer.setOwnerTestingAccess(user.email) }
     LaunchedEffect(accessToken, user.id) { library.load(accessToken, user.id) }
-    LaunchedEffect(accessToken, libraryState.loaded, libraryState.books) {
-        if (!libraryState.loaded || progressHydrated) return@LaunchedEffect
+    LaunchedEffect(accessToken, libraryState.loaded, libraryState.loading, libraryState.books) {
+        // `loaded && loading` is the cached snapshot that LibraryViewModel
+        // publishes before the network call finishes; those books carry stale
+        // playback positions. Waiting for `loading` to clear means hydration
+        // reconciles against real server values, not against a cached 0.
+        if (!libraryState.loaded || libraryState.loading || progressHydrated) return@LaunchedEffect
         progressHydrated = true
         player.hydrateAccountProgress(
             books = libraryState.books,
@@ -248,6 +285,18 @@ private fun LibraryShell(
             onPositionAvailable = library::updatePlaybackPosition,
             onSynced = { library.load(accessToken, user.id, force = true) },
         )
+        // Restore the last-open book into the player so the Player tab is not
+        // empty after a process restart. The position is recovered by open()
+        // through resumePositionMs, which reads the local SharedPreferences
+        // checkpoint written with commit() in saveProgressSync().
+        if (player.state.value.book == null) {
+            val lastBookID = player.lastOpenBookID()
+            if (lastBookID != null) {
+                libraryState.books.firstOrNull { it.id == lastBookID }?.let { book ->
+                    player.open(book, accessToken)
+                }
+            }
+        }
     }
     LaunchedEffect(accessToken) {
         importer.resumeActiveScan(context.contentResolver, accessToken)
@@ -296,6 +345,13 @@ private fun LibraryShell(
                 onBack = { player.saveProgress(); detailBook = null },
                 onPlay = { fromBeginning -> player.openAndStart(book, accessToken, fromBeginning); selected = 1; detailBook = null },
                 onFilters = { showingBookFilters = true },
+                onEditDetails = { title, author, narrator ->
+                    // The sheet holds its own copy of the book, so it needs the saved
+                    // row back rather than waiting for a library reload.
+                    library.updateDetails(accessToken, book, title, author, narrator) { saved ->
+                        detailBook = saved
+                    }
+                },
                 onDelete = {
                     library.delete(accessToken, book) {
                         player.close()
@@ -357,7 +413,7 @@ private fun LibraryShell(
                             if (index != 3) profilePage = ProfilePage.MAIN
                         },
                         icon = { Icon(tabIcons[index], contentDescription = label) },
-                        label = { Text(label, fontSize = 10.sp) },
+                        label = { Text(label, fontSize = 11.sp) },
                         colors = NavigationBarItemDefaults.colors(
                             selectedIconColor = ChoiceGreen,
                             selectedTextColor = ChoiceGreen,
@@ -413,7 +469,13 @@ private fun LibraryShell(
                         loading = libraryState.loading,
                         query = searchQuery,
                         onImport = { selected = 2 },
-                        onPlay = { book -> player.open(book, accessToken); detailBook = book },
+                        onOpenBook = { book -> player.open(book, accessToken); detailBook = book },
+                        // Only the green Continue button skips the details sheet
+                        // and resumes in the player.
+                        onPlayNow = { book ->
+                            player.openAndStart(book, accessToken, fromBeginning = false)
+                            selected = 1
+                        },
                     )
                 } else ExploreScannedBooks(
                     catalog = libraryState.exploreBooks,
@@ -424,7 +486,10 @@ private fun LibraryShell(
                     onOpen = { book -> player.open(book, accessToken); detailBook = book },
                 )
             } else if (selected == 1) {
-                if (player.state.value.book == null) EmptyPlayer { selected = 0 }
+                // Uses the collected state, not player.state.value: reading the
+                // StateFlow directly in composition meant this branch did not
+                // recompose when a book finished loading.
+                if (playerState.book == null) EmptyPlayer { selected = 0 }
                 else PlayerScreen(player, filtersLocked, onBack = {
                     player.saveProgress()
                     detailBook = player.state.value.book
@@ -531,7 +596,10 @@ private fun LibraryHome(
     loading: Boolean,
     query: String,
     onImport: () -> Unit,
-    onPlay: (LibraryBook) -> Unit,
+    /** Opens the book details sheet. Every artwork and row tap lands here. */
+    onOpenBook: (LibraryBook) -> Unit,
+    /** Resumes straight into the player. Only the green Continue button does this. */
+    onPlayNow: (LibraryBook) -> Unit,
 ) {
     var sort by rememberSaveable { mutableStateOf(LibrarySort.RECENT) }
     var sortMenu by remember { mutableStateOf(false) }
@@ -567,7 +635,7 @@ private fun LibraryHome(
             Text("Continue Listening", fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
             Spacer(Modifier.height(10.dp))
             Card(
-                Modifier.fillMaxWidth().height(205.dp).clickable { onPlay(featured) },
+                Modifier.fillMaxWidth().height(205.dp).clickable { onOpenBook(featured) },
                 shape = RoundedCornerShape(15.dp),
                 colors = CardDefaults.cardColors(containerColor = ChoiceSurface),
             ) {
@@ -582,8 +650,8 @@ private fun LibraryHome(
                                 Text(featured.title, fontSize = 18.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
                                 Text(featured.author ?: "Imported audiobook", color = ChoiceMuted, fontSize = 12.sp)
                             }
-                            FilledIconButton(onClick = { onPlay(featured) }, colors = IconButtonDefaults.filledIconButtonColors(containerColor = ChoiceGreen)) {
-                                Icon(Icons.Outlined.PlayArrow, "Play", tint = Color.Black)
+                            FilledIconButton(onClick = { onPlayNow(featured) }, colors = IconButtonDefaults.filledIconButtonColors(containerColor = ChoiceGreen)) {
+                                Icon(Icons.Outlined.PlayArrow, "Resume listening", tint = Color.Black)
                             }
                         }
                         Spacer(Modifier.height(8.dp))
@@ -620,7 +688,7 @@ private fun LibraryHome(
             LibraryBookRow(
                 book,
                 coverPaths[book.fingerprint.sha256.lowercase()],
-                onPlay,
+                onOpenBook,
             )
         }
         Spacer(Modifier.height(24.dp))
@@ -988,6 +1056,9 @@ private fun ParentalControlsScreen(
     var changePinStep by rememberSaveable { mutableIntStateOf(0) }
     var verifiedCurrentPin by rememberSaveable { mutableStateOf("") }
     val validNewPin = pin.matches(Regex("\\d{4,6}")) && pin == confirmation
+    // PIN checks derive a 120,000-iteration PBKDF2 key, so they run in a
+    // coroutine rather than blocking the click handler.
+    val pinScope = rememberCoroutineScope()
 
     Column(Modifier.fillMaxSize()) {
         ScreenHeader("Parental Controls", onBack)
@@ -1010,7 +1081,14 @@ private fun ParentalControlsScreen(
                 PinField(pin, { pin = it.take(6).filter(Char::isDigit); error = null }, "Create a 4–6 digit PIN")
                 PinField(confirmation, { confirmation = it.take(6).filter(Char::isDigit); error = null }, "Confirm PIN")
                 Button(
-                    onClick = { store.configure(pin); onEnabledChanged(true); pin = ""; confirmation = "" },
+                    onClick = {
+                        pinScope.launch {
+                            store.configure(pin)
+                            onEnabledChanged(true)
+                            pin = ""
+                            confirmation = ""
+                        }
+                    },
                     enabled = validNewPin,
                     modifier = Modifier.fillMaxWidth().height(50.dp),
                 ) { Text("Set PIN and lock filters") }
@@ -1018,8 +1096,13 @@ private fun ParentalControlsScreen(
                 PinField(currentPin, { currentPin = it.take(6).filter(Char::isDigit); error = null }, "Enter parental PIN")
                 Button(
                     onClick = {
-                        val changed = if (enabled) store.disable(currentPin) else store.enable(currentPin)
-                        if (changed) { onEnabledChanged(!enabled); currentPin = "" } else error = "That PIN is incorrect."
+                        pinScope.launch {
+                            val changed = if (enabled) store.disable(currentPin) else store.enable(currentPin)
+                            if (changed) {
+                                onEnabledChanged(!enabled)
+                                currentPin = ""
+                            } else error = "That PIN is incorrect."
+                        }
                     },
                     enabled = currentPin.length in 4..6,
                     modifier = Modifier.fillMaxWidth().height(50.dp),
@@ -1059,12 +1142,14 @@ private fun ParentalControlsScreen(
                 Button(
                     enabled = currentPin.length in 4..6,
                     onClick = {
+                        pinScope.launch {
                         if (store.validate(currentPin)) {
                             verifiedCurrentPin = currentPin
                             currentPin = ""
                             error = null
                             changePinStep = 2
                         } else error = "That PIN is incorrect."
+                        }
                     },
                 ) { Text("Continue") }
             },
@@ -1089,17 +1174,19 @@ private fun ParentalControlsScreen(
                 Button(
                     enabled = validNewPin,
                     onClick = {
-                        if (store.changePin(verifiedCurrentPin, pin)) {
-                            onEnabledChanged(true)
-                            changePinStep = 0
-                            verifiedCurrentPin = ""
-                            pin = ""
-                            confirmation = ""
-                            error = null
-                        } else {
-                            changePinStep = 1
-                            verifiedCurrentPin = ""
-                            error = "Please confirm the current PIN again."
+                        pinScope.launch {
+                            if (store.changePin(verifiedCurrentPin, pin)) {
+                                onEnabledChanged(true)
+                                changePinStep = 0
+                                verifiedCurrentPin = ""
+                                pin = ""
+                                confirmation = ""
+                                error = null
+                            } else {
+                                changePinStep = 1
+                                verifiedCurrentPin = ""
+                                error = "Please confirm the current PIN again."
+                            }
                         }
                     },
                 ) { Text("Submit") }
@@ -1281,13 +1368,26 @@ private fun BookDetailsScreen(
     onPlay: (Boolean) -> Unit,
     onFilters: () -> Unit,
     onDelete: () -> Unit,
+    onEditDetails: (title: String, author: String?, narrator: String?) -> Unit,
 ) {
     val state by player.state.collectAsStateWithLifecycle()
     var chapterDialog by remember { mutableStateOf(false) }
     var bookmarkDialog by remember { mutableStateOf(false) }
     var moreMenu by remember { mutableStateOf(false) }
+    var editDetails by remember { mutableStateOf(false) }
     var confirmDelete by remember { mutableStateOf(false) }
+    var readingEditionSheet by remember { mutableStateOf(false) }
     val epubLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri -> uri?.let(player::attachEpub) }
+    if (editDetails) {
+        BookDetailsEditDialog(
+            book = book,
+            onDismiss = { editDetails = false },
+            onSave = { title, author, narrator ->
+                editDetails = false
+                onEditDetails(title, author, narrator)
+            },
+        )
+    }
     Column(
         Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding().verticalScroll(rememberScrollState()).padding(18.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
@@ -1297,6 +1397,11 @@ private fun BookDetailsScreen(
             Box {
                 IconButton(onClick = { moreMenu = true }) { Icon(Icons.Outlined.MoreVert, "More") }
                 DropdownMenu(expanded = moreMenu, onDismissRequest = { moreMenu = false }) {
+                    DropdownMenuItem(
+                        text = { Text("Edit Details") },
+                        leadingIcon = { Icon(Icons.Outlined.Edit, null) },
+                        onClick = { moreMenu = false; editDetails = true },
+                    )
                     DropdownMenuItem(
                         text = { Text("Delete from Library") },
                         leadingIcon = { Icon(Icons.Outlined.DeleteOutline, null) },
@@ -1309,10 +1414,17 @@ private fun BookDetailsScreen(
         Spacer(Modifier.height(14.dp))
         Text(book.title, fontSize = 24.sp, fontWeight = FontWeight.SemiBold, textAlign = TextAlign.Center)
         Text(book.author ?: "Imported audiobook", color = ChoiceMuted)
+        book.narrator?.trim()?.takeIf { it.isNotBlank() }?.let { narrator ->
+            Text("Narrated by $narrator", color = ChoiceMuted, fontSize = 13.sp)
+        }
         Spacer(Modifier.height(8.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             SuggestionChip(onClick = {}, label = { Text(book.fingerprint.fileType.uppercase()) })
-            SuggestionChip(onClick = {}, label = { Text("Full Cast") })
+            // Only state a production style the file itself claims. This chip read
+            // "Full Cast" for every audiobook, which was untrue of most of them.
+            book.fingerprint.editionType?.trim()?.takeIf { it.isNotBlank() }?.let { edition ->
+                SuggestionChip(onClick = {}, label = { Text(edition) })
+            }
         }
         Spacer(Modifier.height(18.dp))
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
@@ -1342,16 +1454,42 @@ private fun BookDetailsScreen(
         ) {
             DetailRow(Icons.Outlined.List, "Chapters", "${state.chapters.size}") { chapterDialog = true }
             HorizontalDivider(color = ChoiceOutline)
-            DetailRow(Icons.Outlined.Notes, "Notes", "0") {}
+            // Was a hardcoded "0" that did nothing when tapped. Notes are kept on
+            // bookmarks, so that is both the real count and the right destination.
+            val noteCount = state.bookmarks.count { !it.note.isNullOrBlank() }
+            DetailRow(Icons.Outlined.Notes, "Notes", "$noteCount") { bookmarkDialog = true }
             HorizontalDivider(color = ChoiceOutline)
             DetailRow(Icons.Outlined.BookmarkBorder, "Bookmarks", "${state.bookmarks.size}") { bookmarkDialog = true }
             HorizontalDivider(color = ChoiceOutline)
             val detectedCategoryCount = PlaybackFilterTaxonomy.available(state.scanEvents).size
             DetailRow(Icons.Outlined.Tune, "Filters", "$detectedCategoryCount detected", onFilters)
-            if (BuildConfig.EXPERIMENTAL_BUILD) {
+            if (BuildConfig.BETA_BUILD) {
                 HorizontalDivider(color = ChoiceOutline)
-                DetailRow(Icons.Outlined.MenuBook, "Reading edition", if (state.epubText == null) "Attach EPUB" else "EPUB attached") {
-                    epubLauncher.launch(arrayOf("application/epub+zip"))
+                DetailRow(
+                    Icons.Outlined.MenuBook,
+                    "Reading edition",
+                    if (state.epubText == null) "Attach EPUB" else "EPUB attached",
+                ) {
+                    // Some providers report an EPUB as octet-stream, which made the
+                    // file unselectable with a strict epub+zip filter.
+                    if (state.epubText == null) {
+                        epubLauncher.launch(
+                            arrayOf("application/epub+zip", "application/octet-stream", "*/*"),
+                        )
+                    } else {
+                        readingEditionSheet = true
+                    }
+                }
+                // readerSyncMessage was computed on every sync and never shown, so
+                // a reading edition that failed to match the audiobook looked
+                // identical to one that worked.
+                state.readerSyncMessage?.let { message ->
+                    Text(
+                        message,
+                        color = ChoiceMuted,
+                        fontSize = 11.sp,
+                        modifier = Modifier.padding(start = 48.dp, end = 15.dp, bottom = 12.dp),
+                    )
                 }
             }
         }
@@ -1383,6 +1521,39 @@ private fun BookDetailsScreen(
             confirmButton = { TextButton(onClick = { bookmarkDialog = false }) { Text("Done") } },
         )
     }
+    if (readingEditionSheet) {
+        AlertDialog(
+            onDismissRequest = { readingEditionSheet = false },
+            title = { Text("Reading edition") },
+            text = {
+                Column {
+                    Text(
+                        "This audiobook has an EPUB attached. Open the player and tap the book " +
+                            "icon to read along.",
+                        color = ChoiceMuted,
+                    )
+                    Spacer(Modifier.height(14.dp))
+                    TextButton(onClick = {
+                        readingEditionSheet = false
+                        player.syncReaderEditionNow()
+                    }) { Text("Re-sync with the audiobook") }
+                    TextButton(onClick = {
+                        readingEditionSheet = false
+                        epubLauncher.launch(
+                            arrayOf("application/epub+zip", "application/octet-stream", "*/*"),
+                        )
+                    }) { Text("Replace EPUB") }
+                    TextButton(onClick = {
+                        readingEditionSheet = false
+                        player.detachEpub()
+                    }) { Text("Remove EPUB", color = MaterialTheme.colorScheme.error) }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { readingEditionSheet = false }) { Text("Done") }
+            },
+        )
+    }
     if (confirmDelete) {
         AlertDialog(
             onDismissRequest = { confirmDelete = false },
@@ -1396,11 +1567,19 @@ private fun BookDetailsScreen(
 
 @Composable
 private fun DetailMetric(icon: ImageVector, value: String, label: String, onClick: (() -> Unit)? = null) {
-    val modifier = Modifier.width(72.dp).then(if (onClick == null) Modifier else Modifier.clickable(onClick = onClick))
+    val modifier = Modifier
+        .width(72.dp)
+        // Was roughly 45dp tall, under the 48dp minimum touch target.
+        .defaultMinSize(minHeight = 48.dp)
+        .then(if (onClick == null) Modifier else Modifier.clickable(onClick = onClick))
+        // Announce once as "Filters: 12 filter controls" rather than as an
+        // unlabelled icon plus two disconnected text fragments.
+        .semantics(mergeDescendants = true) { contentDescription = "$label: $value" }
     Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = modifier) {
         Icon(icon, null, tint = ChoiceGreen, modifier = Modifier.size(22.dp))
         Text(value, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
-        Text(label, color = ChoiceMuted, fontSize = 9.sp)
+        // 9sp is below a readable floor; 11sp still fits the 72dp column.
+        Text(label, color = ChoiceMuted, fontSize = 11.sp, maxLines = 1)
     }
 }
 
@@ -1412,20 +1591,53 @@ private fun MetadataRow(label: String, value: String) {
     }
 }
 
+/**
+ * Decodes a cover at roughly display resolution instead of full size.
+ *
+ * A 3000x3000 embedded cover decodes to about 36 MB as ARGB_8888, and this was
+ * previously decoded on the main thread during composition with nothing ever
+ * recycled -- the most likely source of an out-of-memory crash in the app.
+ */
+private fun decodeDownsampledCover(path: String, targetPixels: Int = 512): ImageBitmap? = runCatching {
+    val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+    BitmapFactory.decodeFile(path, bounds)
+    if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return@runCatching null
+    var sampleSize = 1
+    while (bounds.outWidth / (sampleSize * 2) >= targetPixels &&
+        bounds.outHeight / (sampleSize * 2) >= targetPixels
+    ) {
+        sampleSize *= 2
+    }
+    BitmapFactory.decodeFile(path, BitmapFactory.Options().apply { inSampleSize = sampleSize })
+        ?.asImageBitmap()
+}.getOrNull()
+
 @Composable
 private fun BookArtwork(coverPath: String?, modifier: Modifier = Modifier) {
-    val cover = remember(coverPath) {
-        coverPath?.let { path -> runCatching { BitmapFactory.decodeFile(path)?.asImageBitmap() }.getOrNull() }
+    // produceState keeps the disk read and decode off the composition thread.
+    val cover by produceState<ImageBitmap?>(initialValue = null, coverPath) {
+        value = coverPath?.let { path ->
+            withContext(Dispatchers.IO) { decodeDownsampledCover(path) }
+        }
     }
+    val artwork = cover
     Box(modifier.background(ChoiceSurface, RoundedCornerShape(16.dp)).clip(RoundedCornerShape(16.dp)), contentAlignment = Alignment.Center) {
-        if (cover != null) Image(cover, "Book artwork", Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+        if (artwork != null) Image(artwork, "Book artwork", Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
         else Image(painterResource(R.drawable.audiochoice_logo), "AudioChoice artwork", Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
     }
 }
 
 @Composable
 private fun DetailRow(icon: ImageVector, label: String, value: String, onClick: () -> Unit) {
-    Row(Modifier.fillMaxWidth().clickable(onClick = onClick).padding(15.dp), verticalAlignment = Alignment.CenterVertically) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .defaultMinSize(minHeight = 48.dp)
+            .padding(15.dp)
+            .semantics(mergeDescendants = true) { contentDescription = "$label: $value" },
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
         Icon(icon, null, tint = ChoiceGreen, modifier = Modifier.size(21.dp)); Spacer(Modifier.width(12.dp))
         Text(label, Modifier.weight(1f)); Text(value, color = if (label == "Filters") ChoiceGreen else ChoiceMuted, fontSize = 12.sp)
         Spacer(Modifier.width(6.dp)); Icon(Icons.Outlined.ChevronRight, null, tint = ChoiceMuted, modifier = Modifier.size(18.dp))
@@ -1445,15 +1657,33 @@ private fun BookFiltersScreen(player: PlayerViewModel, filtersLocked: Boolean, o
         Spacer(Modifier.height(12.dp))
         Card(colors = CardDefaults.cardColors(containerColor = ChoiceSurface), shape = RoundedCornerShape(14.dp)) {
             Text(
-                if (filtersLocked) "Parental Controls are on. Filter choices are visible but locked."
-                else "Only filters detected in this audiobook are shown. Everything starts on; changes apply only to this book.",
-                color = ChoiceMuted,
+                when {
+                    state.filterAvailability == FilterAvailability.UNAVAILABLE ->
+                        "This audiobook's filter data could not be loaded, so nothing is being filtered right now."
+                    state.filterAvailability == FilterAvailability.CACHED ->
+                        "Using the filter data saved on this device. Reconnect to check for an updated scan."
+                    filtersLocked -> "Parental Controls are on. Filter choices are visible but locked."
+                    else -> "Only filters detected in this audiobook are shown. Everything starts on; changes apply only to this book."
+                },
+                color = if (state.filterAvailability == FilterAvailability.UNAVAILABLE) {
+                    MaterialTheme.colorScheme.error
+                } else ChoiceMuted,
                 fontSize = 12.sp,
                 modifier = Modifier.padding(16.dp),
             )
             if (available.isEmpty()) {
                 HorizontalDivider(color = ChoiceOutline)
-                Text("No filterable content was detected in this audiobook.", color = ChoiceMuted, modifier = Modifier.padding(18.dp))
+                Text(
+                    when (state.filterAvailability) {
+                        FilterAvailability.LOADING -> "Loading this audiobook's filters…"
+                        FilterAvailability.UNAVAILABLE ->
+                            "No filter data is available for this audiobook yet. It may still be scanning, " +
+                                "or AudioChoice could not reach the scan service. Playback is not filtered until it loads."
+                        else -> "No filterable content was detected in this audiobook."
+                    },
+                    color = ChoiceMuted,
+                    modifier = Modifier.padding(18.dp),
+                )
             }
             FilterHierarchyContent(player, available, Modifier.weight(1f), filtersLocked)
         }
@@ -1491,6 +1721,13 @@ private fun FilterHierarchyContent(
                     checked = player.isCategoryEnabled(parent.id),
                     onCheckedChange = { player.setFilterCategory(parent.id, it) },
                     enabled = !filtersLocked,
+                    // A bare Switch announces only "on"/"off" with no indication
+                    // of which filter it belongs to.
+                    modifier = Modifier.semantics {
+                        contentDescription = "Filter ${parent.label}"
+                        stateDescription =
+                            if (player.isCategoryEnabled(parent.id)) "Filtering" else "Not filtering"
+                    },
                 )
             }
             if (expandedParent == parent.id) parent.children.forEach { child ->
@@ -1510,6 +1747,11 @@ private fun FilterHierarchyContent(
                         checked = player.isGroupEnabled(child.id),
                         onCheckedChange = { player.setFilterGroup(child.id, it) },
                         enabled = !filtersLocked,
+                        modifier = Modifier.semantics {
+                            contentDescription = "Filter ${child.label}"
+                            stateDescription =
+                                if (player.isGroupEnabled(child.id)) "Filtering" else "Not filtering"
+                        },
                     )
                 }
                 if (expandedChild == child.id) child.events.forEach { event ->
@@ -1530,6 +1772,12 @@ private fun FilterHierarchyContent(
                             checked = player.isFilterEventEnabled(event),
                             onCheckedChange = { player.setFilterEvent(event, it) },
                             enabled = !filtersLocked,
+                            modifier = Modifier.semantics {
+                                contentDescription = "Filter ${event.label}"
+                                stateDescription = if (player.isFilterEventEnabled(event)) {
+                                    "Filtering"
+                                } else "Not filtering"
+                            },
                         )
                     }
                 }
@@ -1549,9 +1797,14 @@ private fun localExploreDescription(title: String, author: String?): String? =
         "Carl and Princess Donut are forced into a planet-spanning dungeon crawl after Earth becomes a deadly televised game. Staying alive means surviving bizarre levels, building unlikely alliances, and keeping an audience entertained."
     } else null
 
-private fun com.audiochoice.mobile.player.PlayerUiState.resultVersion(): String =
-    if (scanEvents.isEmpty()) "Clean"
-    else "${PlaybackFilterTaxonomy.controlCount(scanEvents)} filter controls"
+private fun com.audiochoice.mobile.player.PlayerUiState.resultVersion(): String = when {
+    // Never report "Clean" when the scan simply could not be loaded -- that
+    // reads as "nothing to filter" while nothing is actually being filtered.
+    filterAvailability == FilterAvailability.LOADING -> "Checking…"
+    filterAvailability == FilterAvailability.UNAVAILABLE -> "Unavailable"
+    scanEvents.isEmpty() -> "Clean"
+    else -> "${PlaybackFilterTaxonomy.controlCount(scanEvents)} filter controls"
+}
 
 @Composable
 private fun PlayerScreen(player: PlayerViewModel, filtersLocked: Boolean, onBack: (() -> Unit)? = null) {
@@ -1571,6 +1824,17 @@ private fun PlayerScreen(player: PlayerViewModel, filtersLocked: Boolean, onBack
     LaunchedEffect(state.positionMs, currentChapter, isChapterScrubbing) {
         if (!isChapterScrubbing) chapterScrubPositionMs = state.positionMs.toFloat()
     }
+    // Reading mode is a full-screen surface rather than a panel inside the player,
+    // so it delegates entirely instead of threading conditionals through the
+    // player layout below.
+    if (BuildConfig.BETA_BUILD && readerMode && state.epubText != null) {
+        ReaderScreen(
+            player = player,
+            state = state,
+            onCloseReader = { readerMode = false },
+        )
+        return
+    }
     Column(
         Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding().padding(horizontal = 8.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
@@ -1583,7 +1847,7 @@ private fun PlayerScreen(player: PlayerViewModel, filtersLocked: Boolean, onBack
             IconButton(onClick = { onBack?.invoke() }) {
                 Icon(Icons.Outlined.KeyboardArrowDown, "Book details")
             }
-            if (BuildConfig.EXPERIMENTAL_BUILD) {
+            if (BuildConfig.BETA_BUILD) {
                 IconButton(
                     onClick = {
                         if (state.epubText != null) {
@@ -1592,7 +1856,13 @@ private fun PlayerScreen(player: PlayerViewModel, filtersLocked: Boolean, onBack
                     },
                     enabled = state.epubText != null,
                 ) {
-                    Icon(if (readerMode) Icons.Outlined.Photo else Icons.Outlined.MenuBook, if (readerMode) "Show cover" else "Read", tint = ChoiceGreen)
+                    // Open book invites opening the reader; closed book invites
+                    // returning to the player.
+                    Icon(
+                        if (readerMode) Icons.Outlined.Book else Icons.Outlined.MenuBook,
+                        if (readerMode) "Close reading edition" else "Open reading edition",
+                        tint = ChoiceGreen,
+                    )
                 }
             } else {
                 Icon(Icons.Outlined.GraphicEq, "AudioChoice", tint = ChoiceGreen)
@@ -1630,44 +1900,32 @@ private fun PlayerScreen(player: PlayerViewModel, filtersLocked: Boolean, onBack
             modifier = Modifier.fillMaxWidth(.86f).offset(y = (-14).dp),
         )
         Spacer(Modifier.height(10.dp))
-        if (BuildConfig.EXPERIMENTAL_BUILD && readerMode && state.epubText != null) {
-            val readerScroll = rememberScrollState()
-            val readerMasks = remember(
-                state.epubText,
-                state.scanEvents, state.readerTimingRanges,
-                state.disabledCategoryIDs, state.disabledGroupIDs,
-                state.disabledEventKeys, state.disabledAggregateKeys,
-            ) { readerMaskRanges(state, state.epubText!!) }
-            val readerPage = remember(state.epubText, readerMasks) {
-                readerPageText(state.epubText!!, readerMasks)
-            }
+        BookArtwork(state.coverPath, Modifier.fillMaxWidth(.86f).aspectRatio(1f))
+        Spacer(Modifier.height(20.dp))
+        // Filtering silently doing nothing is worse than an explicit warning:
+        // the listener would otherwise assume their filters were active.
+        if (state.filterAvailability == FilterAvailability.UNAVAILABLE) {
             Card(
-                modifier = Modifier.fillMaxWidth(.92f).height(430.dp),
-                colors = CardDefaults.cardColors(containerColor = Color(0xFFF8F4E8)),
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp),
+                colors = CardDefaults.cardColors(containerColor = ChoiceSurface),
             ) {
-                Column(Modifier.fillMaxSize()) {
-                    Text(
-                        when {
-                            readerMasks.isNotEmpty() -> "Reading edition · filtered passages hidden"
-                            else -> "Reading edition"
-                        },
-                        color = Color(0xFF706857),
-                        fontSize = 12.sp,
-                        modifier = Modifier.padding(start = 22.dp, top = 16.dp),
+                Row(Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        Icons.Outlined.Warning,
+                        null,
+                        tint = MaterialTheme.colorScheme.error,
+                        modifier = Modifier.size(20.dp),
                     )
+                    Spacer(Modifier.width(10.dp))
                     Text(
-                    readerPage,
-                    color = Color(0xFF201C16),
-                    fontSize = 19.sp,
-                    lineHeight = 30.sp,
-                    modifier = Modifier.padding(horizontal = 22.dp, vertical = 12.dp).verticalScroll(readerScroll),
+                        "Filters are not active. This audiobook's scan could not be loaded.",
+                        color = MaterialTheme.colorScheme.error,
+                        fontSize = 12.sp,
                     )
                 }
             }
-        } else {
-            BookArtwork(state.coverPath, Modifier.fillMaxWidth(.86f).aspectRatio(1f))
+            Spacer(Modifier.height(10.dp))
         }
-        Spacer(Modifier.height(20.dp))
         val chapterIndex = state.chapters.indexOf(currentChapter).takeIf { it >= 0 }
         if (state.localUri == null) {
             Card(colors = CardDefaults.cardColors(containerColor = ChoiceSurface)) {
@@ -1683,7 +1941,18 @@ private fun PlayerScreen(player: PlayerViewModel, filtersLocked: Boolean, onBack
             val displayedPositionMs = if (isChapterScrubbing) chapterScrubPositionMs.toLong() else state.positionMs
             CompositionLocalProvider(LocalMinimumInteractiveComponentSize provides 0.dp) {
                 Slider(
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp).height(18.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 12.dp)
+                    .height(18.dp)
+                    // Without this a screen reader announces a bare percentage,
+                    // which is meaningless for a multi-hour audiobook.
+                    .semantics {
+                        contentDescription = "Playback position"
+                        stateDescription =
+                            "${formatTime(displayedPositionMs.coerceIn(0L, durationMs))} " +
+                                "of ${formatTime(durationMs)}"
+                    },
                 value = (if (isChapterScrubbing) chapterScrubPositionMs else state.positionMs.toFloat())
                     .coerceIn(0f, durationMs.toFloat()),
                 onValueChange = {
@@ -1843,16 +2112,412 @@ private fun PlayerScreen(player: PlayerViewModel, filtersLocked: Boolean, onBack
  * a matched spoken segment we brighten the current word; playback speed needs no
  * separate calculation because ExoPlayer's position remains audio-time based.
  */
-private data class ReaderTextRange(val start: Int, val end: Int)
+/** Resolved reader colours. Kept in the UI layer so ReaderSettings stays Compose-free. */
+private data class ReaderPalette(val paper: Color, val ink: Color, val mutedInk: Color)
+
+private fun readerPalette(theme: ReaderTheme): ReaderPalette = when (theme) {
+    ReaderTheme.LIGHT -> ReaderPalette(Color(0xFFFFFFFF), Color(0xFF1A1A1A), Color(0xFF5F5F5F))
+    // The paper tone the reader originally shipped with.
+    ReaderTheme.SEPIA -> ReaderPalette(Color(0xFFF8F4E8), Color(0xFF201C16), Color(0xFF5E574A))
+    ReaderTheme.DARK -> ReaderPalette(Color(0xFF14171A), Color(0xFFE3E3E3), Color(0xFF9AA0A6))
+}
+
+private const val READER_BASE_FONT_SP = 19f
+private const val READER_BASE_LINE_SP = 30f
+private const val READER_BASE_MARGIN_DP = 22f
+
+/**
+ * Full-screen reading edition: continuous scroll, filtered passages removed, and
+ * the transport controls moved to the bottom of the screen so the text gets the
+ * whole body.
+ */
+@Composable
+private fun ReaderScreen(
+    player: PlayerViewModel,
+    state: PlayerUiState,
+    onCloseReader: () -> Unit,
+) {
+    val epubText = state.epubText ?: return
+    val settings = state.readerSettings
+    val palette = readerPalette(settings.theme)
+    var settingsSheet by remember { mutableStateOf(false) }
+    // Restore where the listener stopped. Keyed on the book so switching books
+    // does not carry one book's anchor into another.
+    val listState = rememberLazyListState(
+        initialFirstVisibleItemIndex = state.readerPosition.paragraphIndex,
+        initialFirstVisibleItemScrollOffset = state.readerPosition.scrollOffset,
+    )
+
+    // Recomputed only when the text or the enabled filter set actually changes,
+    // never per scroll frame.
+    val masks = remember(
+        epubText,
+        state.scanEvents,
+        state.readerTimingRanges,
+        state.disabledCategoryIDs,
+        state.disabledGroupIDs,
+        state.disabledEventKeys,
+        state.disabledAggregateKeys,
+    ) { readerMaskRanges(state, epubText) }
+    val displayParagraphs = remember(state.readerParagraphs, masks) {
+        readerDisplayParagraphs(state.readerParagraphs, masks)
+    }
+    val removedCount = remember(displayParagraphs) {
+        displayParagraphs.sumOf { it.removedPassages }
+    }
+
+    // Closing the reader with the system back gesture should feel like the icon.
+    BackHandler(onBack = onCloseReader)
+
+    // Persist the anchor as it changes rather than on every scroll frame.
+    LaunchedEffect(listState, state.book?.id) {
+        snapshotFlow { listState.firstVisibleItemIndex to listState.firstVisibleItemScrollOffset }
+            .collect { (index, offset) -> player.saveReaderPosition(index, offset) }
+    }
+
+    // Which paragraph the narration is currently in. Null across an alignment
+    // gap, and `narratedIndex` deliberately keeps its previous value in that case
+    // rather than snapping the highlight back to the start of the book.
+    var narratedIndex by remember(state.book?.id) { mutableIntStateOf(-1) }
+    if (settings.followAudio) {
+        val narratedCharacter = remember(state.positionMs, state.readerTimingRanges) {
+            readerCharacterForTime(state.readerTimingRanges, state.positionMs / 1000.0)
+        }
+        // Hoisted so the lookup list is not rebuilt on every position tick.
+        val sourceParagraphs = remember(displayParagraphs) {
+            displayParagraphs.map { it.paragraph }
+        }
+        LaunchedEffect(narratedCharacter, sourceParagraphs) {
+            val character = narratedCharacter ?: return@LaunchedEffect
+            val index = sourceParagraphs.indexOfCharacter(character)
+            if (index >= 0) narratedIndex = index
+        }
+        // Only scroll when the narrated paragraph is off screen, and never while
+        // the listener is scrolling themselves.
+        LaunchedEffect(narratedIndex, listState.isScrollInProgress) {
+            if (narratedIndex < 0 || listState.isScrollInProgress) return@LaunchedEffect
+            val visible = listState.layoutInfo.visibleItemsInfo
+            val onScreen = visible.any { it.index == narratedIndex }
+            if (!onScreen) {
+                runCatching { listState.animateScrollToItem(narratedIndex) }
+            }
+        }
+    }
+
+    Column(
+        Modifier
+            .fillMaxSize()
+            .background(palette.paper)
+            .statusBarsPadding()
+            .navigationBarsPadding(),
+    ) {
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            // The title sits on the left, but the close-book button is centred so
+            // it lands on the exact spot the player's open-book button occupies.
+            // Toggling between player and reader then leaves the icon still
+            // instead of making it jump across the bar. Equal weights on the two
+            // side slots are what put the middle button at the true centre, the
+            // same way the player's SpaceBetween row does with its 48dp buttons.
+            Column(Modifier.weight(1f)) {
+                Text(
+                    state.book?.title.orEmpty(),
+                    color = palette.ink,
+                    fontSize = 13.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Text(
+                    if (removedCount > 0) "Reading edition · $removedCount filtered passages removed"
+                    else "Reading edition",
+                    color = palette.mutedInk,
+                    fontSize = 11.sp,
+                    // The left slot is now half the bar, so cap the wrap instead
+                    // of letting a long count grow the header.
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            IconButton(onClick = onCloseReader) {
+                Icon(Icons.Outlined.Book, "Close reading edition", tint = ChoiceGreen)
+            }
+            Row(Modifier.weight(1f), horizontalArrangement = Arrangement.End) {
+                IconButton(onClick = { settingsSheet = true }) {
+                    Icon(Icons.Outlined.TextFields, "Reading settings", tint = ChoiceGreen)
+                }
+            }
+        }
+        HorizontalDivider(color = palette.mutedInk.copy(alpha = .2f))
+        if (displayParagraphs.isEmpty()) {
+            Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
+                Text(
+                    "This reading edition has no readable text.",
+                    color = palette.mutedInk,
+                    fontSize = 14.sp,
+                )
+            }
+        } else {
+            LazyColumn(
+                state = listState,
+                modifier = Modifier.weight(1f).fillMaxWidth(),
+                contentPadding = PaddingValues(
+                    horizontal = (READER_BASE_MARGIN_DP * settings.marginScale).dp,
+                    vertical = 16.dp,
+                ),
+            ) {
+                items(
+                    count = displayParagraphs.size,
+                    key = { index -> displayParagraphs[index].paragraph.startCharacter },
+                ) { index ->
+                    val display = displayParagraphs[index]
+                    val isNarrated = settings.followAudio && index == narratedIndex
+                    Text(
+                        display.displayText,
+                        color = palette.ink,
+                        fontSize = (READER_BASE_FONT_SP * settings.fontScale).sp,
+                        lineHeight = (READER_BASE_LINE_SP * settings.fontScale).sp,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .then(
+                                if (isNarrated) {
+                                    Modifier.background(
+                                        ChoiceGreen.copy(alpha = .16f),
+                                        RoundedCornerShape(6.dp),
+                                    )
+                                } else Modifier,
+                            )
+                            .then(
+                                if (settings.followAudio) {
+                                    Modifier
+                                        .clickable(
+                                            // Names the gesture, which is otherwise
+                                            // undiscoverable, and marks the passage
+                                            // currently being narrated.
+                                            onClickLabel = "Play the audiobook from here",
+                                        ) {
+                                            // Seek to wherever this paragraph begins in
+                                            // the audio, falling forward across gaps.
+                                            readerTimeForCharacter(
+                                                state.readerTimingRanges,
+                                                display.paragraph.startCharacter,
+                                            )?.let { seconds ->
+                                                player.seekTo((seconds * 1000).toLong())
+                                            }
+                                        }
+                                        .then(
+                                            if (isNarrated) {
+                                                Modifier.semantics {
+                                                    stateDescription = "Now being narrated"
+                                                }
+                                            } else Modifier,
+                                        )
+                                } else Modifier,
+                            )
+                            .padding(horizontal = 4.dp, vertical = 2.dp)
+                            .padding(bottom = 12.dp),
+                    )
+                }
+            }
+        }
+        HorizontalDivider(color = palette.mutedInk.copy(alpha = .2f))
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = 40.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween,
+        ) {
+            IconButton(onClick = { player.skip(-30) }) {
+                Icon(Icons.Outlined.Replay30, "Back 30 seconds", tint = palette.ink, modifier = Modifier.size(34.dp))
+            }
+            Button(
+                onClick = player::toggle,
+                modifier = Modifier.size(60.dp),
+                shape = RoundedCornerShape(50),
+                contentPadding = PaddingValues(0.dp),
+            ) {
+                Icon(
+                    if (state.isPlaying) Icons.Outlined.Pause else Icons.Outlined.PlayArrow,
+                    if (state.isPlaying) "Pause" else "Play",
+                    modifier = Modifier.size(30.dp),
+                )
+            }
+            IconButton(onClick = { player.skip(30) }) {
+                Icon(Icons.Outlined.Forward30, "Forward 30 seconds", tint = palette.ink, modifier = Modifier.size(34.dp))
+            }
+        }
+    }
+
+    if (settingsSheet) {
+        ReaderSettingsDialog(
+            settings = settings,
+            onSettingsChanged = player::updateReaderSettings,
+            onDismiss = { settingsSheet = false },
+        )
+    }
+}
+
+/**
+ * Lets a listener correct details AudioChoice had to guess.
+ *
+ * Worth having because a file with no tags leaves the title derived from its
+ * filename, and the import screen says so without offering any way to put it right.
+ */
+@Composable
+private fun BookDetailsEditDialog(
+    book: LibraryBook,
+    onDismiss: () -> Unit,
+    onSave: (title: String, author: String?, narrator: String?) -> Unit,
+) {
+    var title by rememberSaveable(book.id) { mutableStateOf(book.title) }
+    var author by rememberSaveable(book.id) { mutableStateOf(book.author.orEmpty()) }
+    var narrator by rememberSaveable(book.id) { mutableStateOf(book.narrator.orEmpty()) }
+    val titleIsValid = title.isNotBlank() && title.length <= MAXIMUM_BOOK_DETAIL_LENGTH
+    val everythingFits = author.length <= MAXIMUM_BOOK_DETAIL_LENGTH &&
+        narrator.length <= MAXIMUM_BOOK_DETAIL_LENGTH
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        icon = { Icon(Icons.Outlined.Edit, null, tint = ChoiceGreen) },
+        title = { Text("Edit details") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text(
+                    "Changes what you see in your library. It does not change how this " +
+                        "audiobook is matched to its filters or reading edition.",
+                    color = ChoiceMuted,
+                    fontSize = 13.sp,
+                )
+                OutlinedTextField(
+                    value = title,
+                    onValueChange = { title = it },
+                    label = { Text("Title") },
+                    singleLine = true,
+                    isError = !titleIsValid,
+                    supportingText = if (title.isBlank()) {
+                        { Text("A title is required.") }
+                    } else if (title.length > MAXIMUM_BOOK_DETAIL_LENGTH) {
+                        { Text("Titles are limited to $MAXIMUM_BOOK_DETAIL_LENGTH characters.") }
+                    } else {
+                        null
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                OutlinedTextField(
+                    value = author,
+                    onValueChange = { author = it },
+                    label = { Text("Author") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                OutlinedTextField(
+                    value = narrator,
+                    onValueChange = { narrator = it },
+                    label = { Text("Narrator") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(
+                enabled = titleIsValid && everythingFits,
+                onClick = { onSave(title, author, narrator) },
+            ) { Text("Save") }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+    )
+}
+
+/** Matches the varchar(300) columns these values are stored in. */
+private const val MAXIMUM_BOOK_DETAIL_LENGTH = 300
+
+@Composable
+private fun ReaderSettingsDialog(
+    settings: ReaderSettings,
+    onSettingsChanged: (ReaderSettings) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Reading settings") },
+        text = {
+            Column(Modifier.verticalScroll(rememberScrollState())) {
+                Text("Text size", fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+                Spacer(Modifier.height(6.dp))
+                ReaderOptionRow(
+                    options = ReaderSettings.FONT_SCALES,
+                    selected = settings.fontScale,
+                    label = ReaderSettings::fontScaleLabel,
+                    onSelect = { onSettingsChanged(settings.copy(fontScale = it)) },
+                )
+                Spacer(Modifier.height(16.dp))
+                Text("Margins", fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+                Spacer(Modifier.height(6.dp))
+                ReaderOptionRow(
+                    options = ReaderSettings.MARGIN_SCALES,
+                    selected = settings.marginScale,
+                    label = ReaderSettings::marginScaleLabel,
+                    onSelect = { onSettingsChanged(settings.copy(marginScale = it)) },
+                )
+                Spacer(Modifier.height(16.dp))
+                Text("Theme", fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+                Spacer(Modifier.height(6.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    ReaderTheme.entries.forEach { theme ->
+                        FilterChip(
+                            selected = settings.theme == theme,
+                            onClick = { onSettingsChanged(settings.copy(theme = theme)) },
+                            label = { Text(theme.name.lowercase().replaceFirstChar(Char::uppercase)) },
+                        )
+                    }
+                }
+                Spacer(Modifier.height(20.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text("Follow the audiobook", fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+                        Text(
+                            "Highlights and scrolls to the passage being narrated, and lets you " +
+                                "tap a paragraph to jump the audio there.",
+                            color = ChoiceMuted,
+                            fontSize = 11.sp,
+                        )
+                    }
+                    Spacer(Modifier.width(10.dp))
+                    Switch(
+                        checked = settings.followAudio,
+                        onCheckedChange = { onSettingsChanged(settings.copy(followAudio = it)) },
+                    )
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = onDismiss) { Text("Done") } },
+    )
+}
+
+@Composable
+private fun ReaderOptionRow(
+    options: List<Float>,
+    selected: Float,
+    label: (Float) -> String,
+    onSelect: (Float) -> Unit,
+) {
+    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        options.forEach { option ->
+            FilterChip(
+                selected = selected == option,
+                onClick = { onSelect(option) },
+                label = { Text(label(option), fontSize = 12.sp) },
+            )
+        }
+    }
+}
 
 /** Mirrors the same "enabled" filter condition used by PlayerViewModel's skip planner. */
-private fun readerMaskRanges(state: PlayerUiState, text: String): List<ReaderTextRange> = buildList {
-    val enabledEvents = state.scanEvents.filter { event ->
-        event.categoryID.lowercase() !in state.disabledCategoryIDs &&
-            event.groupID.lowercase() !in state.disabledGroupIDs &&
-            event.stableKey.ifBlank { event.id } !in state.disabledEventKeys &&
-            (event.aggregateKey == null || event.aggregateKey !in state.disabledAggregateKeys)
-    }
+private fun readerMaskRanges(state: PlayerUiState, text: String): List<ReaderMask> = buildList {
+    // Shares PlaybackFilterPredicate with the audio skip planner so text and
+    // audio can never disagree about what is filtered.
+    val enabledEvents = state.enabledScanEvents()
     enabledEvents.asSequence()
         .forEach { event ->
             val overlaps = state.readerTimingRanges.filter { timing ->
@@ -1872,7 +2537,7 @@ private fun readerMaskRanges(state: PlayerUiState, text: String): List<ReaderTex
                 val rawEnd = timing.startCharacter + (length * ((overlapEnd - timing.startTime) / duration)).toInt()
                 val start = minOf(rawStart, rawEnd)
                 val end = maxOf(rawStart, rawEnd).coerceAtLeast(start + 1)
-                if (end > start) add(ReaderTextRange(start, end))
+                if (end > start) add(ReaderMask(start, end))
             }
         }
     // Word-based filters, especially profanity, can be hidden directly from the
@@ -1888,31 +2553,10 @@ private fun readerMaskRanges(state: PlayerUiState, text: String): List<ReaderTex
                 if (character == '*') "[\\p{L}]" else Regex.escape(character.toString())
             }
             Regex("(?i)\\b$wordPattern\\b").findAll(text).forEach { match ->
-                add(ReaderTextRange(match.range.first, match.range.last + 1))
+                add(ReaderMask(match.range.first, match.range.last + 1))
             }
         }
 }.merged()
-
-private fun List<ReaderTextRange>.merged(): List<ReaderTextRange> =
-    sortedBy { it.start }.fold(mutableListOf()) { result, next ->
-        val previous = result.lastOrNull()
-        if (previous != null && next.start <= previous.end) {
-            result[result.lastIndex] = ReaderTextRange(previous.start, maxOf(previous.end, next.end))
-        } else result += next
-        result
-    }
-
-private fun readerPageText(text: String, hiddenRanges: List<ReaderTextRange>): AnnotatedString =
-    buildAnnotatedString {
-        append(text)
-        hiddenRanges.forEach { range ->
-            addStyle(
-                SpanStyle(background = Color.Black, color = Color.Black),
-                range.start.coerceIn(0, text.length),
-                range.end.coerceIn(0, text.length),
-            )
-        }
-    }
 
 @Composable
 private fun PlayerToolButton(value: String, label: String, onClick: () -> Unit) {
@@ -2214,6 +2858,17 @@ private fun ImportScreen(importer: ImportViewModel, accessToken: String, showLib
         if (state.phase == ImportPhase.COMPLETE) {
             val count = state.result?.result?.events?.let(PlaybackFilterTaxonomy::controlCount) ?: 0
             Text("Ready with $count filter controls", color = ChoiceGreen, fontSize = 17.sp, modifier = Modifier.padding(top = 18.dp))
+            if (state.titleFromFilename) {
+                // Saying so is the honest option. The file carried no edition tags,
+                // so this title came from the filename and may well be wrong.
+                Text(
+                    "This file carried no edition details, so its title was taken from the " +
+                        "filename and may not be exact.",
+                    color = ChoiceMuted,
+                    fontSize = 13.sp,
+                    modifier = Modifier.padding(top = 10.dp),
+                )
+            }
             state.organizationMessage?.let {
                 Text(it, color = ChoiceMuted, fontSize = 13.sp, modifier = Modifier.padding(top = 10.dp))
             }

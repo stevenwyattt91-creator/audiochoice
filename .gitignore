@@ -17,3 +17,12 @@ GoogleService-Info.plist
 AuthKey_*.p8
 *.cer
 *.pem
+
+# Machine-specific SDK paths, and the beta signing password that app/build.gradle.kts
+# reads from here. The file's own header says it must never be committed, and it was
+# previously tracked with a developer's absolute SDK path, so it is ignored explicitly.
+local.properties
+
+# Signing keystores must never enter the repository.
+*.jks
+*.keystore

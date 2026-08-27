@@ -7,7 +7,15 @@ import java.util.zip.ZipInputStream
 
 /** Reads the EPUB package spine, not ZIP-entry order, which is often not book order. */
 object EpubTextReader {
-    fun read(resolver: ContentResolver, uri: Uri): String = runCatching {
+    /**
+     * Unzips and decodes the whole book, so this must never run on the main
+     * thread: it was previously called directly from a Dispatchers.Main coroutine
+     * and froze the UI on every book open that had an EPUB attached.
+     */
+    suspend fun read(resolver: ContentResolver, uri: Uri): String =
+        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { readBlocking(resolver, uri) }
+
+    private fun readBlocking(resolver: ContentResolver, uri: Uri): String = runCatching {
         resolver.openInputStream(uri)?.use { input ->
             val entries = linkedMapOf<String, String>()
             ZipInputStream(input).use { zip ->

@@ -251,6 +251,15 @@ else
 {
     builder.Services.AddSingleton<IPrivateTranscriptStore, FilePrivateTranscriptStore>();
 }
+// Reconnects a library row to artifacts stored under a different file fingerprint,
+// which is what converting or re-tagging an audiobook produces.
+// Constructed explicitly because the type also exposes a path-based constructor for
+// tests, and container-selected constructors should not depend on that overload set.
+builder.Services.AddSingleton<IEditionAliasStore>(services =>
+    new FileEditionAliasStore(services.GetRequiredService<AudioChoiceDataPaths>()));
+builder.Services.AddSingleton<IEditionSignatureStore>(services =>
+    new FileEditionSignatureStore(services.GetRequiredService<AudioChoiceDataPaths>()));
+builder.Services.AddSingleton<IEditionResolver, EditionResolver>();
 builder.Services.AddSingleton(
     builder.Configuration
         .GetSection("AudioChoice:Ffmpeg")
@@ -1253,12 +1262,85 @@ app.MapPut("/v1/import/cover", (
 app.MapPut("/v1/library", (
     LibraryBookUpsertRequest request,
     HttpContext context,
+    IUserLibraryStore library,
+    IEditionAliasStore editionAliases,
+    IEditionSignatureStore editionSignatures) =>
+{
+    var user = CurrentUser(context);
+    if (user is null) return Results.Unauthorized();
+
+    // Record the divergence while the client still knows about it. Without this the
+    // link can only be rediscovered by comparing metadata, which needs a runtime and
+    // a title to agree.
+    if (request.SourceFingerprint is not null)
+    {
+        editionAliases.Link(request.Fingerprint, request.SourceFingerprint);
+    }
+
+    // The signature describes the recording, so it holds for both fingerprints.
+    if (request.Signature is not null)
+    {
+        editionSignatures.Record(request.Fingerprint, request.Signature);
+        if (request.SourceFingerprint is not null)
+        {
+            editionSignatures.Record(request.SourceFingerprint, request.Signature);
+        }
+    }
+
+    return Results.Ok(library.Upsert(user.ID, request));
+});
+
+app.MapPut("/v1/library/{bookID:guid}/details", (
+    Guid bookID,
+    LibraryBookDetailsRequest request,
+    HttpContext context,
     IUserLibraryStore library) =>
 {
     var user = CurrentUser(context);
-    return user is null
-        ? Results.Unauthorized()
-        : Results.Ok(library.Upsert(user.ID, request));
+    if (user is null) return Results.Unauthorized();
+
+    // The stored columns are varchar(300), so oversized input has to be refused here
+    // rather than becoming a database error.
+    var title = request.Title?.Trim();
+    if (string.IsNullOrWhiteSpace(title))
+        return Results.BadRequest(new { error = "A title is required." });
+    if (title.Length > 300 ||
+        request.Author?.Trim().Length > 300 ||
+        request.Narrator?.Trim().Length > 300)
+    {
+        return Results.BadRequest(new { error = "Titles, authors and narrators are limited to 300 characters." });
+    }
+
+    var book = library.UpdateDetails(user.ID, bookID, new LibraryBookDetailsRequest(
+        title, request.Author?.Trim(), request.Narrator?.Trim()));
+    return book is null ? Results.NotFound() : Results.Ok(book);
+});
+
+app.MapPost("/v1/editions/signatures", (
+    EditionSignatureReportRequest request,
+    HttpContext context,
+    IUserLibraryStore library,
+    IEditionAliasStore editionAliases,
+    IEditionSignatureStore editionSignatures) =>
+{
+    var user = CurrentUser(context);
+    if (user is null) return Results.Unauthorized();
+
+    // Restricted to editions the caller actually holds. A signature can decide which
+    // filter results another listener is served, so this must not be an open write
+    // against arbitrary editions.
+    var owned = library.List(user.ID).Any(book =>
+        InMemoryScanCatalog.FingerprintKey(book.Fingerprint) ==
+        InMemoryScanCatalog.FingerprintKey(request.Fingerprint));
+    if (!owned) return Results.NotFound(new { error = "That audiobook is not in your library." });
+
+    editionSignatures.Record(request.Fingerprint, request.Signature);
+    if (request.SourceFingerprint is not null)
+    {
+        editionAliases.Link(request.Fingerprint, request.SourceFingerprint);
+        editionSignatures.Record(request.SourceFingerprint, request.Signature);
+    }
+    return Results.NoContent();
 });
 
 app.MapDelete("/v1/library/{bookID:guid}", (
@@ -1289,7 +1371,7 @@ app.MapPost("/v1/reader/alignments", async (
     ReaderAlignmentRequest request,
     HttpContext context,
     IUserLibraryStore library,
-    IPrivateTranscriptStore transcripts,
+    IEditionResolver editions,
     ILogger<Program> logger,
     CancellationToken cancellationToken) =>
 {
@@ -1301,7 +1383,9 @@ app.MapPost("/v1/reader/alignments", async (
     var book = library.List(user.ID).FirstOrDefault(value => value.ID == request.LibraryBookID);
     if (book is null) return Results.NotFound(new { error = "That audiobook is not in your library." });
 
-    var transcript = await transcripts.Load(book.Fingerprint, cancellationToken);
+    // Resolved rather than loaded directly: a converted or re-tagged file leaves the
+    // transcript under the fingerprint that was uploaded, not the one on this row.
+    var transcript = await editions.LoadTranscript(book.Fingerprint, cancellationToken);
     if (transcript is null || transcript.Segments.Count == 0)
         return Results.NotFound(new { error = "No private timing data is available for this audiobook yet." });
 
@@ -1517,9 +1601,13 @@ app.MapPost("/v1/scans/requests", async (
     IScanCatalog catalog,
     IScanJobQueue queue,
     IPrivateTranscriptStore transcriptStore,
+    IEditionResolver editions,
     CancellationToken cancellationToken) =>
 {
-    var result = catalog.FindResult(request.Fingerprint);
+    // Resolved rather than looked up directly, so a converted or re-tagged copy of an
+    // already-scanned edition reuses its filters instead of paying to scan again.
+    // FindResult only accepts proof, never metadata similarity.
+    var result = editions.FindResult(request.Fingerprint);
     if (result is not null)
     {
         // Playback and imports must always receive the most recently saved filter

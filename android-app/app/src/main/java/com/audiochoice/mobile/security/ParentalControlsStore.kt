@@ -6,6 +6,8 @@ import java.security.MessageDigest
 import java.security.SecureRandom
 import javax.crypto.SecretKeyFactory
 import javax.crypto.spec.PBEKeySpec
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 class ParentalControlsStore(context: Context, userID: String) {
     private val preferences = context.getSharedPreferences("audiochoice_parental_controls", Context.MODE_PRIVATE)
@@ -14,7 +16,12 @@ class ParentalControlsStore(context: Context, userID: String) {
     val enabled: Boolean get() = preferences.getBoolean(prefix + "enabled", false)
     val configured: Boolean get() = preferences.contains(prefix + "hash")
 
-    fun configure(pin: String) {
+    // Every entry point below derives a 120,000-iteration PBKDF2 key, which takes
+    // hundreds of milliseconds to a second. These were called straight from
+    // Compose click handlers and froze the UI on every PIN entry, so they are
+    // suspend and hop to a background dispatcher.
+
+    suspend fun configure(pin: String) = withContext(Dispatchers.Default) {
         require(pin.matches(Regex("\\d{4,6}")))
         val salt = ByteArray(24).also(SecureRandom()::nextBytes)
         preferences.edit()
@@ -24,30 +31,30 @@ class ParentalControlsStore(context: Context, userID: String) {
             .apply()
     }
 
-    fun disable(pin: String): Boolean = if (verify(pin)) {
+    suspend fun disable(pin: String): Boolean = if (verify(pin)) {
         preferences.edit().putBoolean(prefix + "enabled", false).apply()
         true
     } else false
 
-    fun enable(pin: String): Boolean = if (verify(pin)) {
+    suspend fun enable(pin: String): Boolean = if (verify(pin)) {
         preferences.edit().putBoolean(prefix + "enabled", true).apply()
         true
     } else false
 
-    fun changePin(currentPin: String, newPin: String): Boolean {
+    suspend fun changePin(currentPin: String, newPin: String): Boolean {
         if (!verify(currentPin)) return false
         configure(newPin)
         return true
     }
 
-    fun validate(pin: String): Boolean = verify(pin)
+    suspend fun validate(pin: String): Boolean = verify(pin)
 
-    private fun verify(pin: String): Boolean {
+    private suspend fun verify(pin: String): Boolean = withContext(Dispatchers.Default) {
         val salt = preferences.getString(prefix + "salt", null)?.let {
             runCatching { Base64.decode(it, Base64.NO_WRAP) }.getOrNull()
-        } ?: return false
-        val expected = preferences.getString(prefix + "hash", null) ?: return false
-        return MessageDigest.isEqual(expected.toByteArray(), hash(pin, salt).toByteArray())
+        } ?: return@withContext false
+        val expected = preferences.getString(prefix + "hash", null) ?: return@withContext false
+        MessageDigest.isEqual(expected.toByteArray(), hash(pin, salt).toByteArray())
     }
 
     private fun hash(pin: String, salt: ByteArray): String {

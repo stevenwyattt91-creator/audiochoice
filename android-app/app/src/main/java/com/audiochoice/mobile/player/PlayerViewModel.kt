@@ -1,20 +1,32 @@
 package com.audiochoice.mobile.player
 
+import android.annotation.SuppressLint
+import android.content.ComponentName
 import android.content.Context
 import android.net.Uri
 import android.content.SharedPreferences
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import androidx.media3.common.MediaItem
+import androidx.media3.common.MediaMetadata
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
-import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.session.MediaController
+import androidx.media3.session.SessionToken
 import com.audiochoice.mobile.BuildConfig
 import com.audiochoice.mobile.beta.BetaConfig
-import com.audiochoice.mobile.beta.BetaPlaybackControls
+import kotlin.math.roundToInt
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import com.audiochoice.mobile.importing.EditionSignatures
+import com.audiochoice.mobile.importing.Mp4TagReader
+import com.audiochoice.mobile.data.ApiException
 import com.audiochoice.mobile.data.AudioChoiceApi
 import com.audiochoice.mobile.data.AudioChapter
+import com.audiochoice.mobile.data.EditionSignature
+import com.audiochoice.mobile.data.EditionSignatureReportRequest
 import com.audiochoice.mobile.data.LibraryBook
 import com.audiochoice.mobile.data.LibraryBookmark
 import com.audiochoice.mobile.data.BookFilterSettingsUpsertRequest
@@ -22,18 +34,47 @@ import com.audiochoice.mobile.data.LocalAudioStore
 import com.audiochoice.mobile.data.OfflineBookPlayback
 import com.audiochoice.mobile.data.PendingBookmark
 import com.audiochoice.mobile.data.ReaderTimingRange
+import com.audiochoice.mobile.playback.AudioChoicePlaybackService
 import com.audiochoice.mobile.reader.EpubTextReader
+import com.audiochoice.mobile.reader.ReaderParagraph
+import com.audiochoice.mobile.reader.ReaderParagraphParser
+import com.audiochoice.mobile.reader.ReaderPosition
+import com.audiochoice.mobile.reader.ReaderSettings
 import com.audiochoice.contracts.ScanEvent
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.filterNotNull
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import java.util.UUID
+
+/**
+ * Whether the filter profile driving playback can be trusted right now.
+ *
+ * An empty event list is ambiguous on its own: it means either "this audiobook
+ * is genuinely clean" or "the scan could not be loaded". Conflating the two let
+ * the player report "Clean" while skipping nothing, so a listener could hear
+ * unfiltered content believing their filters were active.
+ */
+enum class FilterAvailability {
+    /** The scan lookup has not finished yet. */
+    LOADING,
+
+    /** Fetched from the server during this session. */
+    LIVE,
+
+    /** Server unreachable, but a previously saved scan for this book was used. */
+    CACHED,
+
+    /** No scan available from the server or on this device. Nothing is filtered. */
+    UNAVAILABLE,
+}
 
 data class PlayerUiState(
     val book: LibraryBook? = null,
@@ -48,6 +89,7 @@ data class PlayerUiState(
     val coverPath: String? = null,
     val scanEvents: List<ScanEvent> = emptyList(),
     val scannerVersion: String? = null,
+    val filterAvailability: FilterAvailability = FilterAvailability.LOADING,
     val disabledCategoryIDs: Set<String> = emptySet(),
     val disabledGroupIDs: Set<String> = emptySet(),
     val disabledEventKeys: Set<String> = emptySet(),
@@ -55,23 +97,34 @@ data class PlayerUiState(
     val bookmarkSaved: Boolean = false,
     val error: String? = null,
     val epubText: String? = null,
+    /** Parsed once per book rather than on every recomposition. */
+    val readerParagraphs: List<ReaderParagraph> = emptyList(),
     val readerTimingRanges: List<ReaderTimingRange> = emptyList(),
     val readerSyncMessage: String? = null,
+    val readerSettings: ReaderSettings = ReaderSettings(),
+    /** Where to restore the reader to for the current book. */
+    val readerPosition: ReaderPosition = ReaderPosition(),
     val isReady: Boolean = false,
 )
 
 class PlayerViewModel(
+    // Factory always supplies applicationContext, so this outlives the Activity
+    // by design and cannot leak it.
+    @SuppressLint("StaticFieldLeak")
     private val context: Context,
     private val api: AudioChoiceApi,
     private val localAudio: LocalAudioStore,
 ) : ViewModel() {
-    private val player = ExoPlayer.Builder(context)
-        .setSeekBackIncrementMs(30_000)
-        .setSeekForwardIncrementMs(30_000)
-        .build()
-    private val betaPlaybackControls = if (BuildConfig.BETA_BUILD) {
-        BetaPlaybackControls(context, player)
-    } else null
+    // The ExoPlayer itself lives in AudioChoicePlaybackService so playback can
+    // survive backgrounding. This ViewModel drives it through a MediaController,
+    // which implements the same Player interface. The connection is asynchronous,
+    // so every transport call is null-safe and reads fall back to the last known
+    // values captured by the polling loop.
+    private var controller: MediaController? = null
+    private val connectedController = MutableStateFlow<MediaController?>(null)
+    private var controllerFuture: com.google.common.util.concurrent.ListenableFuture<MediaController>? = null
+    private var lastKnownPositionMs = 0L
+    private var lastKnownDurationMs = 0L
     private val mutableState = MutableStateFlow(PlayerUiState())
     val state: StateFlow<PlayerUiState> = mutableState.asStateFlow()
     private var token: String? = null
@@ -87,75 +140,155 @@ class PlayerViewModel(
     private val savedPositions = mutableMapOf<String, Double>()
     // Keep a device-local checkpoint so switching books or closing the app never
     // loses the last position when the network request is delayed or unavailable.
-    private val localProgress: SharedPreferences = context.getSharedPreferences("audiochoice_playback", Context.MODE_PRIVATE)
+    private val localProgress: SharedPreferences = context.getSharedPreferences(
+        PlaybackProgressKeys.PREFERENCES_NAME,
+        Context.MODE_PRIVATE,
+    )
+
+    /**
+     * Returns the ID of the last book that was playing before the process was
+     * killed, or null if nothing was open. Used by the UI to auto-restore the
+     * player screen after an Activity recreation.
+     */
+    fun lastOpenBookID(): String? = localProgress.getString(LAST_BOOK_ID_KEY, null)
+
+    /**
+     * Current playback position. Falls back to the last value the polling loop
+     * observed so a momentarily disconnected controller cannot report 0 and
+     * cause a progress checkpoint to overwrite a real position with the start
+     * of the book.
+     */
+    /**
+     * A transport whose reported position can be believed, or null.
+     *
+     * This distinction is the whole ballgame for progress. A MediaController
+     * whose service has gone away is **still a non-null object**, and it reports
+     * position 0. Reading it directly therefore turned "the player was released"
+     * into "the listener is at the start of the book", and the checkpoint written
+     * on the way out recorded 0 over a perfectly good position.
+     *
+     * That is not hypothetical: pausing and swiping the app away makes the
+     * service see `!playWhenReady`, call stopSelf() and release the player, all
+     * potentially before Activity.onStop() runs its save.
+     */
+    private val liveTransport: MediaController?
+        get() = controller?.takeIf { it.isConnected && it.playbackState != Player.STATE_IDLE }
+
+    /** Null when nothing trustworthy can report a position right now. */
+    private val trustedPositionMs: Long?
+        get() = liveTransport?.currentPosition?.coerceAtLeast(0L)
+
+    private val currentPositionMs: Long
+        get() = trustedPositionMs ?: lastKnownPositionMs
+
+    /** Raw duration, which is [androidx.media3.common.C.TIME_UNSET] until known. */
+    private val rawDurationMs: Long
+        get() = liveTransport?.duration ?: lastKnownDurationMs
+
+    private val isPlayingNow: Boolean
+        get() = controller?.isPlaying == true
+
+    private val playerListener = object : Player.Listener {
+        override fun onIsPlayingChanged(isPlaying: Boolean) {
+            mutableState.value = mutableState.value.copy(isPlaying = isPlaying)
+            if (isPlaying) {
+                hasStartedPlayback = true
+                enforceEnabledFilters(currentPositionMs, allowLookAhead = true)
+            } else if (hasStartedPlayback) {
+                // Pausing, an interruption, or the app moving to the
+                // background must retain the exact last listening point.
+                saveProgress()
+            }
+        }
+
+        override fun onPlaybackStateChanged(playbackState: Int) {
+            mutableState.value = mutableState.value.copy(
+                isReady = playbackState == Player.STATE_READY,
+                durationMs = rawDurationMs.coerceAtLeast(0),
+            )
+        }
+
+        override fun onPlayerError(error: PlaybackException) {
+            mutableState.value = mutableState.value.copy(
+                isPlaying = false,
+                isReady = false,
+                error = "This audiobook could not be played (${error.errorCodeName}). Re-import it so AudioChoice can save a stable local copy.",
+            )
+        }
+
+        override fun onPositionDiscontinuity(
+            oldPosition: Player.PositionInfo,
+            newPosition: Player.PositionInfo,
+            reason: Int,
+        ) {
+            // Every seek is a fresh filter evaluation. This includes slider
+            // scrubs, chapter/bookmark jumps, 30-second skips and rewinds.
+            pendingFilterSeekTargetMs = null
+            enforceEnabledFilters(newPosition.positionMs, allowLookAhead = isPlayingNow)
+        }
+    }
 
     init {
-        player.addListener(object : Player.Listener {
-            override fun onIsPlayingChanged(isPlaying: Boolean) {
-                mutableState.value = mutableState.value.copy(isPlaying = isPlaying)
-                if (isPlaying) {
-                    hasStartedPlayback = true
-                    enforceEnabledFilters(player.currentPosition, allowLookAhead = true)
-                } else if (hasStartedPlayback) {
-                    // Pausing, an interruption, or the app moving to the
-                    // background must retain the exact last listening point.
-                    saveProgress()
-                }
-            }
-
-            override fun onPlaybackStateChanged(playbackState: Int) {
+        val sessionToken = SessionToken(
+            context,
+            ComponentName(context, AudioChoicePlaybackService::class.java),
+        )
+        val pending = MediaController.Builder(context, sessionToken).buildAsync()
+        controllerFuture = pending
+        pending.addListener({
+            val connected = runCatching { pending.get() }.getOrNull()
+            if (connected == null) {
                 mutableState.value = mutableState.value.copy(
-                    isReady = playbackState == Player.STATE_READY,
-                    durationMs = player.duration.coerceAtLeast(0),
+                    error = "AudioChoice could not start playback on this device.",
                 )
+                return@addListener
             }
+            controller = connected
+            connected.addListener(playerListener)
+            // Adopt whatever the service is already playing. After an Activity
+            // recreation the book can still be running in the background.
+            mutableState.value = mutableState.value.copy(
+                isPlaying = connected.isPlaying,
+                isReady = connected.playbackState == Player.STATE_READY,
+            )
+            connectedController.value = connected
+        }, ContextCompat.getMainExecutor(context))
 
-            override fun onPlayerError(error: PlaybackException) {
-                mutableState.value = mutableState.value.copy(
-                    isPlaying = false,
-                    isReady = false,
-                    error = "This audiobook could not be played (${error.errorCodeName}). Re-import it so AudioChoice can save a stable local copy.",
-                )
-            }
-
-            override fun onPositionDiscontinuity(
-                oldPosition: Player.PositionInfo,
-                newPosition: Player.PositionInfo,
-                reason: Int,
-            ) {
-                // Every seek is a fresh filter evaluation. This includes slider
-                // scrubs, chapter/bookmark jumps, 30-second skips and rewinds.
-                pendingFilterSeekTargetMs = null
-                enforceEnabledFilters(newPosition.positionMs, allowLookAhead = player.isPlaying)
-            }
-        })
         viewModelScope.launch {
+            // Nothing to poll until the service connection exists.
+            connectedController.filterNotNull().first()
             while (isActive) {
+                // Only ever cache a believable reading. The old unguarded reads
+                // poisoned this cache with the 0 that a released controller
+                // reports, which is what the save path then persisted.
+                trustedPositionMs?.let { lastKnownPositionMs = it }
+                liveTransport?.duration?.takeIf { it > 0 }?.let { lastKnownDurationMs = it }
                 if (mutableState.value.book != null) {
+                    val position = currentPositionMs
                     mutableState.value = mutableState.value.copy(
-                        positionMs = player.currentPosition.coerceAtLeast(0),
-                        durationMs = player.duration.coerceAtLeast(0),
+                        positionMs = position,
+                        durationMs = rawDurationMs.coerceAtLeast(0),
                     )
-                    val second = player.currentPosition / 1000
-                    enforceEnabledFilters(player.currentPosition, allowLookAhead = player.isPlaying)
+                    val second = position / 1000
+                    enforceEnabledFilters(position, allowLookAhead = isPlayingNow)
                     sleepAtPositionMs?.let { target ->
-                        if (player.isPlaying && player.currentPosition >= target) {
-                            player.pause()
+                        if (isPlayingNow && position >= target) {
+                            controller?.pause()
                             sleepAtPositionMs = null
                             mutableState.value = mutableState.value.copy(sleepSecondsRemaining = null)
                             saveProgress()
                         } else {
                             mutableState.value = mutableState.value.copy(
-                                sleepSecondsRemaining = ((target - player.currentPosition).coerceAtLeast(0) / 1000).toInt(),
+                                sleepSecondsRemaining = ((target - position).coerceAtLeast(0) / 1000).toInt(),
                             )
                         }
                     }
-                    if (player.isPlaying && second > 0 && second / 15 != lastSavedSecond / 15) saveProgress()
+                    if (isPlayingNow && second > 0 && second / 15 != lastSavedSecond / 15) saveProgress()
                     lastSavedSecond = second
                 }
                 // Frequent checks plus a small look-ahead prevent brief events
                 // from playing between coarse UI position updates.
-                delay(if (player.isPlaying) 100 else 250)
+                delay(if (isPlayingNow) 100 else 250)
             }
         }
     }
@@ -167,16 +300,27 @@ class PlayerViewModel(
             checkpointProgress(
                 book = previousBook,
                 accessToken = previousToken,
-                positionMs = player.currentPosition.coerceAtLeast(0),
+                positionMs = currentPositionMs,
             )
         }
 
-        // Detach the previous item immediately. This prevents a fast tap on Play
-        // from starting the last audiobook while the new book's filters load.
-        hasStartedPlayback = false
-        player.pause()
-        player.stop()
-        player.clearMediaItems()
+        // The playback service may already be holding this exact book, typically
+        // after an Activity recreation while audio kept playing in the
+        // background. Adopt that running playback instead of tearing it down,
+        // which would stop the listener's audio the moment they reopen the app.
+        val alreadyLoaded = controller?.let { active ->
+            active.mediaItemCount > 0 && active.currentMediaItem?.mediaId == book.id
+        } == true
+
+        if (!alreadyLoaded) {
+            // Detach the previous item immediately. This prevents a fast tap on Play
+            // from starting the last audiobook while the new book's filters load.
+            hasStartedPlayback = false
+            controller?.pause()
+            controller?.stop()
+            controller?.clearMediaItems()
+        }
+        localProgress.edit().putString(LAST_BOOK_ID_KEY, book.id).apply()
         openJob?.cancel()
         openJob = viewModelScope.launch {
             token = accessToken
@@ -195,6 +339,10 @@ class PlayerViewModel(
                 recovered?.chapters.orEmpty()
             }
             val epub = localAudio.epub(book.fingerprint.sha256)
+            // Prefer the cached extraction. Re-unzipping a novel on every open was
+            // a multi-hundred-millisecond main-thread freeze plus a large
+            // transient heap spike.
+            val cachedEpubText = if (epub == null) null else localAudio.epubText(book.fingerprint.sha256)
             val readerTimingRanges = localAudio.epubAlignment(book.fingerprint.sha256)
             val embeddedCoverPath = uri?.let { localAudio.ensureCover(book.fingerprint.sha256, it) }
             val coverPath = embeddedCoverPath ?: book.coverImageURL?.let { coverURL ->
@@ -219,21 +367,27 @@ class PlayerViewModel(
                     api.downloadExploreCover(accessToken, coverURL),
                 )
             }.getOrNull()
-            betaPlaybackControls?.updateMetadata(book.title, book.author, coverPath)
+            val resolvedEpubText = cachedEpubText
+                ?: epub?.let { EpubTextReader.read(context.contentResolver, it) }
+                    ?.takeIf(String::isNotBlank)
+                    ?.also { localAudio.saveEpubText(book.fingerprint.sha256, it) }
             mutableState.value = PlayerUiState(
                 book = book,
                 localUri = uri,
                 chapters = chapters,
                 coverPath = coverPath,
-                epubText = epub?.let { EpubTextReader.read(context.contentResolver, it) }?.takeIf(String::isNotBlank),
+                epubText = resolvedEpubText,
+                readerParagraphs = paragraphsFor(resolvedEpubText),
                 readerTimingRanges = readerTimingRanges,
+                readerSettings = localAudio.readerSettings(),
+                readerPosition = localAudio.readerPosition(book.fingerprint.sha256),
             )
             // Earlier Experimental builds could attach an EPUB before the
             // reader-sync endpoint existed. Retry automatically on opening the
             // book so users never have to remove and reattach their file.
             val epubText = mutableState.value.epubText
             val alignmentMatchesEpub = epubText?.let { localAudio.epubAlignmentMatches(book.fingerprint.sha256, it) } == true
-            if (BuildConfig.EXPERIMENTAL_BUILD && epubText != null && (!alignmentMatchesEpub || readerTimingRanges.isEmpty())) {
+            if (BuildConfig.BETA_BUILD && epubText != null && (!alignmentMatchesEpub || readerTimingRanges.isEmpty())) {
                 syncReaderEdition(book, epubText, accessToken)
             }
             // A beta M4B may have been locally converted, so its file hash can differ
@@ -257,6 +411,14 @@ class PlayerViewModel(
             val cachedPlayback = localAudio.offlinePlayback(book.fingerprint.sha256)
             val scan = scanRequest.await()
             val events = (scan?.result?.events ?: cachedPlayback.events).filterNot(::isExcludedViolenceEvent)
+            // A scan that was previously saved always carries a scanner version,
+            // so this distinguishes "cached clean book" from "no scan at all".
+            val hasCachedScan = cachedPlayback.scannerVersion != null
+            val filterAvailability = when {
+                scan?.result != null -> FilterAvailability.LIVE
+                hasCachedScan -> FilterAvailability.CACHED
+                else -> FilterAvailability.UNAVAILABLE
+            }
             val remoteBookmarks = bookmarksRequest.await()
             val bookmarks = remoteBookmarks ?: cachedPlayback.bookmarks
             val cloudSettings = settingsRequest.await()
@@ -284,6 +446,7 @@ class PlayerViewModel(
             mutableState.value = mutableState.value.copy(
                 scanEvents = events,
                 scannerVersion = scan?.result?.scannerVersion ?: cachedPlayback.scannerVersion,
+                filterAvailability = filterAvailability,
                 bookmarks = bookmarks,
                 disabledCategoryIDs = disabledCategories.toSet(),
                 disabledGroupIDs = disabledGroups.toSet(),
@@ -299,17 +462,76 @@ class PlayerViewModel(
             if (uri == null) {
                 return@launch
             }
-            player.setMediaItem(MediaItem.fromUri(uri))
-            player.prepare()
+            reportEditionSignature(book, uri, chapters, accessToken)
+            // Wait for the playback service before touching the transport. The
+            // connection is normally already up, but a cold start can open a
+            // book before it completes.
+            val active = connectedController.filterNotNull().first()
+            if (mutableState.value.book?.id != book.id) return@launch
+            if (alreadyLoaded) {
+                // Audio is still running from the background session. Re-publish
+                // the live transport state, which the fresh PlayerUiState above
+                // reset, and leave the position untouched.
+                if (active.isPlaying) hasStartedPlayback = true
+                mutableState.value = mutableState.value.copy(
+                    isPlaying = active.isPlaying,
+                    isReady = active.playbackState == Player.STATE_READY,
+                    positionMs = currentPositionMs,
+                    durationMs = rawDurationMs.coerceAtLeast(0),
+                )
+                return@launch
+            }
+            active.setMediaItem(mediaItemFor(book, uri, coverPath))
+            active.prepare()
             val resumeMs = resumePositionMs(book)
-            player.seekTo(resumeMs)
+            active.seekTo(resumeMs)
             // Filter state is loaded before the player becomes ready. Resuming,
             // scrubbing, chapter jumps and skip buttons therefore cannot begin
             // playback from inside an enabled filter window.
             enforceEnabledFilters(resumeMs, allowLookAhead = false)
             mutableState.value = mutableState.value.copy(
-                positionMs = player.currentPosition.coerceAtLeast(0),
+                positionMs = currentPositionMs,
             )
+        }
+    }
+
+    /**
+     * Reports the identity evidence for a book that was imported before signatures
+     * existed, so edition matching can work for the library a listener already has.
+     *
+     * Hooked to opening a book rather than run as a library-wide sweep: it costs one
+     * tag read on the file that is being opened anyway, and it covers exactly the
+     * books someone actually listens to. Recorded once per file and never retried
+     * after a successful report, and every failure is silent because this only
+     * improves matching.
+     */
+    private fun reportEditionSignature(
+        book: LibraryBook,
+        uri: Uri,
+        chapters: List<AudioChapter>,
+        accessToken: String,
+    ) {
+        val reportedKey = "signature_reported_${book.fingerprint.sha256.lowercase()}"
+        if (localProgress.getBoolean(reportedKey, false)) return
+        viewModelScope.launch {
+            val signature = withContext(Dispatchers.IO) {
+                EditionSignatures.from(
+                    tags = Mp4TagReader(context.contentResolver).read(uri),
+                    chapters = chapters,
+                )
+            }
+            // Nothing to say about this file, so stop looking at it on every open.
+            if (signature == null) {
+                localProgress.edit().putBoolean(reportedKey, true).apply()
+                return@launch
+            }
+            val delivered = runCatching {
+                api.reportEditionSignature(
+                    accessToken,
+                    EditionSignatureReportRequest(book.fingerprint, signature),
+                )
+            }.isSuccess
+            if (delivered) localProgress.edit().putBoolean(reportedKey, true).apply()
         }
     }
 
@@ -330,10 +552,61 @@ class PlayerViewModel(
                 mutableState.value = mutableState.value.copy(error = "That EPUB could not be read.")
                 return@launch
             }
-            mutableState.value = mutableState.value.copy(epubText = text, readerTimingRanges = emptyList())
+            localAudio.saveEpubText(book.fingerprint.sha256, text)
+            mutableState.value = mutableState.value.copy(
+                epubText = text,
+                readerParagraphs = paragraphsFor(text),
+                readerTimingRanges = emptyList(),
+            )
             token?.let { syncReaderEdition(book, text, it) }
         }
     }
+
+    fun updateReaderSettings(settings: ReaderSettings) {
+        mutableState.value = mutableState.value.copy(readerSettings = settings)
+        viewModelScope.launch { localAudio.saveReaderSettings(settings) }
+    }
+
+    /**
+     * Records the reading anchor so reopening the reader lands where the listener
+     * left off, including after toggling out to the player and back.
+     */
+    fun saveReaderPosition(paragraphIndex: Int, scrollOffset: Int) {
+        val book = mutableState.value.book ?: return
+        val position = ReaderPosition(paragraphIndex.coerceAtLeast(0), scrollOffset.coerceAtLeast(0))
+        if (mutableState.value.readerPosition == position) return
+        mutableState.value = mutableState.value.copy(readerPosition = position)
+        viewModelScope.launch { localAudio.saveReaderPosition(book.fingerprint.sha256, position) }
+    }
+
+    /** Removes the attached reading edition, leaving the audiobook untouched. */
+    fun detachEpub() {
+        val book = mutableState.value.book ?: return
+        viewModelScope.launch {
+            localAudio.removeEpub(book.fingerprint.sha256)
+            mutableState.value = mutableState.value.copy(
+                epubText = null,
+                readerParagraphs = emptyList(),
+                readerTimingRanges = emptyList(),
+                readerSyncMessage = null,
+                readerPosition = ReaderPosition(),
+            )
+        }
+    }
+
+    /**
+     * Parses paragraph offsets off the main thread. A novel is a single pass over
+     * roughly a megabyte, which is cheap but not free enough to do during
+     * composition.
+     */
+    private suspend fun paragraphsFor(epubText: String?): List<ReaderParagraph> =
+        if (epubText == null) {
+            emptyList()
+        } else {
+            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
+                ReaderParagraphParser.parse(epubText)
+            }
+        }
 
     /** Reader mode always refreshes from the current EPUB text, avoiding stale maps. */
     fun syncReaderEditionNow() {
@@ -345,41 +618,71 @@ class PlayerViewModel(
 
     private suspend fun syncReaderEdition(book: LibraryBook, epubText: String, accessToken: String) {
         mutableState.value = mutableState.value.copy(readerSyncMessage = "Syncing reading edition…")
-        val alignment = runCatching { api.createReaderAlignment(accessToken, book.id, epubText) }.getOrNull()
-        val ranges = alignment?.ranges.orEmpty()
-        localAudio.saveEpubAlignment(book.fingerprint.sha256, ranges, epubText)
+        val outcome = runCatching { api.createReaderAlignment(accessToken, book.id, epubText) }
+        val ranges = outcome.getOrNull()?.ranges.orEmpty()
+
+        // Only cache a real answer. Caching a failure recorded "matched, zero
+        // ranges", which made epubAlignmentMatches() report success and stopped
+        // the sync from ever being retried on a later open.
+        if (outcome.isSuccess) {
+            localAudio.saveEpubAlignment(book.fingerprint.sha256, ranges, epubText)
+        }
+
         val current = mutableState.value
         if (current.book?.id != book.id) return
         mutableState.value = current.copy(
             readerTimingRanges = ranges,
-            readerSyncMessage = when {
-                alignment == null -> "Could not reach audiobook timing data."
-                ranges.isEmpty() -> "This reading edition did not match the audiobook text."
-                else -> "Synced ${ranges.size} reading sections to the audiobook."
-            },
+            readerSyncMessage = readerSyncMessageFor(outcome.exceptionOrNull(), ranges.size),
         )
+    }
+
+    /**
+     * The previous single message ("Could not reach audiobook timing data")
+     * collapsed a network failure, an expired session and "this book has no
+     * transcript on the server" into one unactionable string.
+     */
+    private fun readerSyncMessageFor(failure: Throwable?, rangeCount: Int): String = when {
+        failure is ApiException && failure.statusCode == 404 ->
+            // The server's own wording is the useful part here, e.g. that no
+            // private timing data exists for this audiobook yet.
+            failure.message?.takeIf { it.isNotBlank() }
+                ?: "This audiobook has no timing data on the server yet, so the reader cannot follow along."
+
+        failure is ApiException && failure.statusCode == 400 ->
+            "This reading edition is empty or too large to sync."
+
+        failure is ApiException ->
+            "Reading sync failed (${failure.statusCode}). ${failure.message.orEmpty()}".trim()
+
+        failure != null ->
+            "Could not reach AudioChoice to sync the reading edition. Check your connection, then tap Re-sync."
+
+        rangeCount == 0 ->
+            "This reading edition did not match the audiobook text, so the reader cannot follow along."
+
+        else -> "Synced $rangeCount reading sections to the audiobook."
     }
 
     fun toggle() {
         if (!mutableState.value.isReady) return
-        if (player.isPlaying) {
-            player.pause()
+        if (isPlayingNow) {
+            controller?.pause()
         } else {
-            enforceEnabledFilters(player.currentPosition, allowLookAhead = true)
-            player.play()
+            enforceEnabledFilters(currentPositionMs, allowLookAhead = true)
+            controller?.play()
         }
     }
     fun close() {
         saveProgress()
-        player.stop()
-        player.clearMediaItems()
+        controller?.stop()
+        controller?.clearMediaItems()
         mutableState.value = PlayerUiState()
         token = null
     }
     fun start(fromBeginning: Boolean) {
         if (!mutableState.value.isReady) return
-        if (fromBeginning) seekTo(0) else enforceEnabledFilters(player.currentPosition, allowLookAhead = true)
-        player.play()
+        if (fromBeginning) seekTo(0) else enforceEnabledFilters(currentPositionMs, allowLookAhead = true)
+        controller?.play()
     }
 
     fun openAndStart(book: LibraryBook, accessToken: String, fromBeginning: Boolean) {
@@ -394,30 +697,30 @@ class PlayerViewModel(
     }
     fun seekTo(positionMs: Long) {
         if (!mutableState.value.isReady) return
-        val duration = player.duration.takeIf { it > 0 }
+        val duration = rawDurationMs.takeIf { it > 0 }
         val target = positionMs.coerceAtLeast(0).let { requested ->
             if (duration == null) requested else requested.coerceAtMost(duration)
         }
         pendingFilterSeekTargetMs = null
-        player.seekTo(target)
+        controller?.seekTo(target)
         // The listener normally runs immediately, but this direct check also
         // protects same-position seeks that some devices may coalesce.
-        enforceEnabledFilters(target, allowLookAhead = player.isPlaying)
+        enforceEnabledFilters(target, allowLookAhead = isPlayingNow)
     }
-    fun skip(seconds: Int) { seekTo(player.currentPosition + seconds * 1000L) }
+    fun skip(seconds: Int) { seekTo(currentPositionMs + seconds * 1000L) }
     fun previousChapter() {
-        val position = player.currentPosition / 1000.0
+        val position = currentPositionMs / 1000.0
         val currentIndex = mutableState.value.chapters.indexOfLast { it.startSeconds <= position }
         val target = if (currentIndex > 0) mutableState.value.chapters[currentIndex - 1] else null
         if (target != null) seekToChapter(target) else skip(-30)
     }
 
     fun nextChapter() {
-        val position = player.currentPosition / 1000.0
+        val position = currentPositionMs / 1000.0
         val target = mutableState.value.chapters.firstOrNull { it.startSeconds > position + 1.0 }
         if (target != null) seekToChapter(target) else skip(30)
     }
-    fun setSpeed(speed: Float) { player.setPlaybackSpeed(speed); mutableState.value = mutableState.value.copy(speed = speed) }
+    fun setSpeed(speed: Float) { controller?.setPlaybackSpeed(speed); mutableState.value = mutableState.value.copy(speed = speed) }
 
     fun setSleepTimer(minutes: Int?) {
         sleepJob?.cancel()
@@ -433,7 +736,7 @@ class PlayerViewModel(
                 val remaining = (mutableState.value.sleepSecondsRemaining ?: 1) - 1
                 mutableState.value = mutableState.value.copy(sleepSecondsRemaining = remaining)
             }
-            player.pause()
+            controller?.pause()
             mutableState.value = mutableState.value.copy(sleepSecondsRemaining = null)
             saveProgress()
         }
@@ -441,7 +744,7 @@ class PlayerViewModel(
 
     fun sleepAtEndOfChapter() {
         sleepJob?.cancel()
-        val position = player.currentPosition / 1000.0
+        val position = currentPositionMs / 1000.0
         val chapter = mutableState.value.chapters.firstOrNull { position >= it.startSeconds && position < it.endSeconds }
             ?: return
         sleepAtPositionMs = (chapter.endSeconds * 1000).toLong()
@@ -455,7 +758,7 @@ class PlayerViewModel(
     fun addBookmark() {
         val book = mutableState.value.book ?: return
         val accessToken = token ?: return
-        val position = player.currentPosition.coerceAtLeast(0) / 1000.0
+        val position = currentPositionMs / 1000.0
         viewModelScope.launch {
             val pending = PendingBookmark(
                 clientID = UUID.randomUUID().toString(),
@@ -639,7 +942,54 @@ class PlayerViewModel(
     fun saveProgress(onSaved: (() -> Unit)? = null) {
         val book = mutableState.value.book ?: return
         val accessToken = token ?: return
-        checkpointProgress(book, accessToken, player.currentPosition.coerceAtLeast(0), onSaved)
+        checkpointProgress(book, accessToken, currentPositionMs, onSaved)
+    }
+
+    /**
+     * Synchronous variant used by Activity.onStop() and onCleared(). Guarantees
+     * the SharedPreferences write reaches disk before the process can be killed.
+     * The network save still fires asynchronously, but the local checkpoint is
+     * durable even under immediate process death.
+     */
+    // commit() is the point of this method: apply() is asynchronous and can lose
+    // the write when the process is killed right after onStop.
+    @SuppressLint("ApplySharedPref")
+    fun saveProgressSync() {
+        val book = mutableState.value.book ?: return
+        val accessToken = token ?: return
+        val trusted = trustedPositionMs
+        val positionMs = trusted ?: lastKnownPositionMs
+        // With no live transport this is a best-effort cached value, so it must
+        // not be allowed to rewind a checkpoint that is already further along.
+        // Deliberately only guards the untrusted path: a listener who really did
+        // restart a book and closed the app still gets their 0 recorded.
+        if (trusted == null && localProgress.getLong(progressKey(book.id), -1L) > positionMs) return
+        val seconds = positionMs / 1000.0
+        savedPositions[book.id] = seconds
+        latestProgressMs[book.id] = positionMs
+        localProgress.edit()
+            .putLong(progressKey(book.id), positionMs)
+            .putBoolean(progressDirtyKey(book.id), true)
+            .putString(LAST_BOOK_ID_KEY, book.id)
+            .commit()
+        val mutex = progressSaveMutexes.getOrPut(book.id) { Mutex() }
+        viewModelScope.launch {
+            mutex.withLock {
+                if (latestProgressMs[book.id] != positionMs) return@withLock
+                runCatching { api.saveProgress(accessToken, book.id, seconds, false) }
+                    .onSuccess { savedBook ->
+                        if (latestProgressMs[book.id] != positionMs) return@onSuccess
+                        localProgress.edit()
+                            .putLong(progressKey(book.id), positionMs)
+                            .putBoolean(progressDirtyKey(book.id), false)
+                            .apply()
+                        val current = mutableState.value
+                        if (current.book?.id == savedBook.id) {
+                            mutableState.value = current.copy(book = savedBook)
+                        }
+                    }
+            }
+        }
     }
 
     /**
@@ -661,21 +1011,23 @@ class PlayerViewModel(
             // this fix does not discard the user's last known place.
             val dirty = localProgress.getBoolean(progressDirtyKey(book.id), false) ||
                 (localMs >= 0L && !localProgress.contains(progressDirtyKey(book.id)))
-            if (dirty && localMs >= 0L) {
-                onPositionAvailable(book.id, localMs / 1000.0)
+            val serverMs = (book.playbackPositionSeconds.coerceAtLeast(0.0) * 1000.0).toLong()
+            val hydrated = PlaybackResume.hydratedPositionMs(localMs, dirty, serverMs)
+
+            savedPositions[book.id] = hydrated.positionMs / 1000.0
+            onPositionAvailable(book.id, hydrated.positionMs / 1000.0)
+
+            if (hydrated.needsPush) {
                 pendingCount += 1
-                checkpointProgress(book, accessToken, localMs) {
+                checkpointProgress(book, accessToken, hydrated.positionMs) {
                     pendingCount -= 1
                     if (pendingCount == 0) onSynced()
                 }
             } else {
-                val serverMs = (book.playbackPositionSeconds.coerceAtLeast(0.0) * 1000.0).toLong()
-                savedPositions[book.id] = serverMs / 1000.0
                 localProgress.edit()
-                    .putLong(progressKey(book.id), serverMs)
+                    .putLong(progressKey(book.id), hydrated.positionMs)
                     .putBoolean(progressDirtyKey(book.id), false)
                     .apply()
-                onPositionAvailable(book.id, serverMs / 1000.0)
             }
         }
     }
@@ -694,6 +1046,7 @@ class PlayerViewModel(
         localProgress.edit()
             .putLong(progressKey(book.id), safePositionMs)
             .putBoolean(progressDirtyKey(book.id), true)
+            .putString(LAST_BOOK_ID_KEY, book.id)
             .apply()
         val mutex = progressSaveMutexes.getOrPut(book.id) { Mutex() }
         viewModelScope.launch {
@@ -714,22 +1067,27 @@ class PlayerViewModel(
                         }
                         progressSaveCallbacks.remove(book.id)?.forEach { callback -> callback() }
                     }
+                    .onFailure {
+                        // The dirty flag stays set. Schedule a background drain so
+                        // a failed save is not stranded until the next sign-in.
+                        ProgressSyncWorker.enqueue(context)
+                    }
             }
         }
     }
 
-    private fun progressKey(bookID: String): String = "position_ms_$bookID"
-    private fun progressDirtyKey(bookID: String): String = "position_dirty_$bookID"
+    private fun progressKey(bookID: String): String = PlaybackProgressKeys.positionKey(bookID)
+    private fun progressDirtyKey(bookID: String): String = PlaybackProgressKeys.dirtyKey(bookID)
 
     private fun resumePositionMs(book: LibraryBook): Long {
         val localMs = localProgress.getLong(progressKey(book.id), -1L)
         val localIsDirty = localProgress.getBoolean(progressDirtyKey(book.id), false)
-        val serverMs = (book.playbackPositionSeconds.coerceAtLeast(0.0) * 1000.0).toLong()
-        val positionMs = when {
-            savedPositions.containsKey(book.id) -> (savedPositions.getValue(book.id) * 1000.0).toLong()
-            localIsDirty && localMs >= 0L -> localMs
-            else -> serverMs
-        }.coerceAtLeast(0L)
+        val positionMs = PlaybackResume.resumePositionMs(
+            sessionPositionMs = savedPositions[book.id]?.let { (it * 1000.0).toLong() },
+            localPositionMs = localMs,
+            localIsDirty = localIsDirty,
+            serverPositionMs = (book.playbackPositionSeconds.coerceAtLeast(0.0) * 1000.0).toLong(),
+        )
         if (!localIsDirty) {
             localProgress.edit().putLong(progressKey(book.id), positionMs).apply()
         }
@@ -740,15 +1098,8 @@ class PlayerViewModel(
         val current = mutableState.value
         if (current.scanEvents.isEmpty()) return
 
-        val enabledWindows = current.scanEvents.asSequence()
-            .filter { event ->
-                event.categoryID.lowercase() !in current.disabledCategoryIDs &&
-                    event.groupID.lowercase() !in current.disabledGroupIDs &&
-                    event.stableKey.ifBlank { event.id } !in current.disabledEventKeys &&
-                    (event.aggregateKey == null || event.aggregateKey !in current.disabledAggregateKeys)
-            }
+        val enabledWindows = current.enabledScanEvents()
             .map { FilterWindow(it.startTime, it.endTime) }
-            .toList()
 
         val positionSeconds = positionMs.coerceAtLeast(0) / 1000.0
         val targetSeconds = FilterSkipPlanner.targetSeconds(
@@ -760,7 +1111,7 @@ class PlayerViewModel(
             return
         }
 
-        val durationMs = player.duration.takeIf { it > 0 } ?: Long.MAX_VALUE
+        val durationMs = rawDurationMs.takeIf { it > 0 } ?: Long.MAX_VALUE
         val targetMs = ((targetSeconds + FILTER_EXIT_PADDING_SECONDS) * 1000.0)
             .toLong()
             .coerceAtMost(durationMs)
@@ -768,21 +1119,59 @@ class PlayerViewModel(
         if (pendingFilterSeekTargetMs == targetMs) return
 
         pendingFilterSeekTargetMs = targetMs
-        player.seekTo(targetMs)
+        controller?.seekTo(targetMs)
     }
 
     private companion object {
         const val FILTER_LOOK_AHEAD_SECONDS = 0.25
         const val FILTER_EXIT_PADDING_SECONDS = 0.20
         const val FILTER_SEEK_TOLERANCE_MS = 25L
+        val LAST_BOOK_ID_KEY = PlaybackProgressKeys.LAST_BOOK_ID
     }
 
 
     override fun onCleared() {
-        saveProgress()
-        betaPlaybackControls?.release()
-        player.release()
+        // Save while the controller is still connected, then release only the
+        // controller. The service keeps the ExoPlayer alive so audio continues
+        // while the app is backgrounded; it stops itself when nothing is playing
+        // and the task is removed.
+        saveProgressSync()
+        // viewModelScope is already cancelled here, so the network save launched
+        // by saveProgressSync cannot run. WorkManager drains the local checkpoint
+        // instead, surviving both this teardown and process death.
+        ProgressSyncWorker.enqueue(context)
+        controller?.removeListener(playerListener)
+        controllerFuture?.let { MediaController.releaseFuture(it) }
+        controllerFuture = null
+        controller = null
+        connectedController.value = null
     }
+
+    /**
+     * Supplies the title, author and artwork that the system media notification
+     * and lock screen display. This replaces the old beta-only
+     * PlayerNotificationManager: Media3's MediaSessionService renders the
+     * notification from MediaMetadata for every build variant.
+     */
+    private fun mediaItemFor(book: LibraryBook, uri: Uri, coverPath: String?): MediaItem =
+        MediaItem.Builder()
+            .setUri(uri)
+            // Lets open() recognise a book the service is already playing.
+            .setMediaId(book.id)
+            .setMediaMetadata(
+                MediaMetadata.Builder()
+                    .setTitle(book.title)
+                    .setArtist(book.author)
+                    .setArtworkUri(
+                        coverPath?.let { path ->
+                            java.io.File(path).takeIf(java.io.File::isFile)?.let(Uri::fromFile)
+                        },
+                    )
+                    .setIsBrowsable(false)
+                    .setIsPlayable(true)
+                    .build(),
+            )
+            .build()
 
     class Factory(context: Context, private val api: AudioChoiceApi, private val localAudio: LocalAudioStore) : ViewModelProvider.Factory {
         private val appContext = context.applicationContext

@@ -3,6 +3,7 @@ package com.audiochoice.mobile.auth
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
+import com.audiochoice.mobile.BuildConfig
 import com.audiochoice.mobile.data.AudioChoiceApi
 import com.audiochoice.mobile.data.AuthResponse
 import com.audiochoice.mobile.data.LoginRequest
@@ -35,6 +36,19 @@ class AuthViewModel(
                 loadingSession = false,
                 session = sessions.session.first(),
             )
+        }
+        // The server is the authority on session validity. When it rejects the
+        // stored token, drop it and return to sign-in rather than leaving the
+        // app signed in with a dead session where every request fails.
+        viewModelScope.launch {
+            api.sessionExpired.collect {
+                if (mutableState.value.session == null) return@collect
+                sessions.clear()
+                mutableState.value = AuthUiState(
+                    loadingSession = false,
+                    error = "Your AudioChoice session has expired. Please sign in again.",
+                )
+            }
         }
     }
 
@@ -70,10 +84,21 @@ class AuthViewModel(
                     sessions.save(it)
                     mutableState.value = AuthUiState(loadingSession = false, session = it)
                 }
-                .onFailure {
+                .onFailure { failure ->
+                    // Beta builds append the underlying Credential Manager type so
+                    // a sign-in problem can be diagnosed from a tester's report
+                    // rather than only from an opaque provider string.
+                    val diagnostic = (failure as? GoogleSignInFailure)?.diagnostic
                     mutableState.value = mutableState.value.copy(
                         busy = false,
-                        error = it.message ?: "AudioChoice could not sign you in.",
+                        error = buildString {
+                            append(failure.message ?: "AudioChoice could not sign you in.")
+                            if (BuildConfig.BETA_BUILD && diagnostic != null) {
+                                append("\n\n(")
+                                append(diagnostic)
+                                append(")")
+                            }
+                        },
                     )
                 }
         }

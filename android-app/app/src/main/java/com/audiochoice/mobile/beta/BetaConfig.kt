@@ -12,9 +12,21 @@ data class BetaApprovedEdition(
 
 /** Single source of truth for every closed-beta-only behavior. */
 object BetaConfig {
-    // Private owner test access. This is deliberately not surfaced in the UI.
-    // Closed-beta testers still follow the normal pre-scanned-edition flow.
-    private const val OWNER_TEST_EMAIL = "stevenwyattt91@gmail.com"
+    /**
+     * Private owner test access, deliberately not surfaced in the UI. Closed-beta
+     * testers still follow the normal pre-scanned-edition flow.
+     *
+     * Stored as a SHA-256 digest rather than the address itself: the plaintext
+     * value was compiled into every shipping APK, so anyone who unzipped the app
+     * could read a personal email address. The digest is not personal data and
+     * the comparison is unchanged.
+     *
+     * The proper fix is a server-side entitlement on the account, which is
+     * tracked on the backend checklist; this removes the exposure without adding
+     * a backend dependency to the beta build.
+     */
+    private const val OWNER_TEST_EMAIL_SHA256 =
+        "645252a133fb36dd27445f7343e30c0f35ba5d2d6c13d8c83c54259ce784abab"
     /**
      * Approved local converter output for Fourth Wing Part 1. Conversion can
      * rewrite the M4B container and strip its tags, so this full SHA-256 is
@@ -31,8 +43,21 @@ object BetaConfig {
     val discordUrl: String get() = BuildConfig.BETA_DISCORD_URL
     val feedbackFormUrl: String get() = BuildConfig.BETA_FEEDBACK_FORM_URL
 
-    fun hasOwnerTestingAccess(email: String): Boolean =
-        enabled && email.trim().equals(OWNER_TEST_EMAIL, ignoreCase = true)
+    fun hasOwnerTestingAccess(email: String): Boolean {
+        if (!enabled) return false
+        val normalized = email.trim().lowercase()
+        if (normalized.isEmpty()) return false
+        return java.security.MessageDigest.isEqual(
+            sha256Hex(normalized).toByteArray(),
+            OWNER_TEST_EMAIL_SHA256.toByteArray(),
+        )
+    }
+
+    /** Internal for test coverage of the hex encoding, which must be unsigned. */
+    internal fun sha256Hex(value: String): String =
+        java.security.MessageDigest.getInstance("SHA-256")
+            .digest(value.toByteArray())
+            .joinToString("") { "%02x".format(it) }
 
     val supportedAudiobooks = listOf(
         "ACOTAR GraphicAudio Part 1",
