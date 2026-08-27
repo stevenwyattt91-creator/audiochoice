@@ -472,6 +472,11 @@ class PlayerViewModel(
                 // Audio is still running from the background session. Re-publish
                 // the live transport state, which the fresh PlayerUiState above
                 // reset, and leave the position untouched.
+                trace(
+                    book.id,
+                    "open ADOPTED position=${active.currentPosition} playing=${active.isPlaying} " +
+                        "state=${active.playbackState}",
+                )
                 if (active.isPlaying) hasStartedPlayback = true
                 mutableState.value = mutableState.value.copy(
                     isPlaying = active.isPlaying,
@@ -485,6 +490,7 @@ class PlayerViewModel(
             active.prepare()
             val resumeMs = resumePositionMs(book)
             active.seekTo(resumeMs)
+            trace(book.id, "open loaded seekTo=$resumeMs after=${active.currentPosition}")
             // Filter state is loaded before the player becomes ready. Resuming,
             // scrubbing, chapter jumps and skip buttons therefore cannot begin
             // playback from inside an enabled filter window.
@@ -955,15 +961,33 @@ class PlayerViewModel(
     // the write when the process is killed right after onStop.
     @SuppressLint("ApplySharedPref")
     fun saveProgressSync() {
-        val book = mutableState.value.book ?: return
-        val accessToken = token ?: return
+        val book = mutableState.value.book
+        val accessToken = token
+        if (book == null || accessToken == null) {
+            // A silent bail here would look identical to a save that wrote 0, so it
+            // is recorded against the last opened book.
+            lastOpenBookID()?.let { bookID ->
+                trace(bookID, "saveSync SKIPPED book=${book != null} token=${accessToken != null}")
+            }
+            return
+        }
         val trusted = trustedPositionMs
         val positionMs = trusted ?: lastKnownPositionMs
         // With no live transport this is a best-effort cached value, so it must
         // not be allowed to rewind a checkpoint that is already further along.
         // Deliberately only guards the untrusted path: a listener who really did
         // restart a book and closed the app still gets their 0 recorded.
-        if (trusted == null && localProgress.getLong(progressKey(book.id), -1L) > positionMs) return
+        val storedBefore = localProgress.getLong(progressKey(book.id), -1L)
+        if (trusted == null && storedBefore > positionMs) {
+            trace(book.id, "saveSync BLOCKED trusted=null cached=$positionMs stored=$storedBefore")
+            return
+        }
+        trace(
+            book.id,
+            "saveSync wrote=$positionMs trusted=${trusted ?: -1} cached=$lastKnownPositionMs " +
+                "stored=$storedBefore state=${controller?.playbackState ?: -1} " +
+                "connected=${controller?.isConnected ?: false}",
+        )
         val seconds = positionMs / 1000.0
         savedPositions[book.id] = seconds
         latestProgressMs[book.id] = positionMs
@@ -1014,6 +1038,11 @@ class PlayerViewModel(
             val serverMs = (book.playbackPositionSeconds.coerceAtLeast(0.0) * 1000.0).toLong()
             val hydrated = PlaybackResume.hydratedPositionMs(localMs, dirty, serverMs)
 
+            trace(
+                book.id,
+                "hydrate chose=${hydrated.positionMs} local=$localMs dirty=$dirty server=$serverMs " +
+                    "push=${hydrated.needsPush}",
+            )
             savedPositions[book.id] = hydrated.positionMs / 1000.0
             onPositionAvailable(book.id, hydrated.positionMs / 1000.0)
 
@@ -1039,6 +1068,7 @@ class PlayerViewModel(
         onSaved: (() -> Unit)? = null,
     ) {
         val safePositionMs = positionMs.coerceAtLeast(0)
+        trace(book.id, "checkpoint wrote=$safePositionMs")
         val seconds = safePositionMs / 1000.0
         savedPositions[book.id] = seconds
         latestProgressMs[book.id] = safePositionMs
@@ -1079,6 +1109,33 @@ class PlayerViewModel(
     private fun progressKey(bookID: String): String = PlaybackProgressKeys.positionKey(bookID)
     private fun progressDirtyKey(bookID: String): String = PlaybackProgressKeys.dirtyKey(bookID)
 
+    /**
+     * Appends a line to this book's persisted progress trace.
+     *
+     * Position loss only shows up across a process restart, which is precisely when
+     * a tester cannot read logs. Three attempts at fixing this were made by reasoning
+     * about the code and all three missed, so the inputs are recorded instead of
+     * inferred. Written with commit() because the interesting case is the app being
+     * killed immediately afterwards.
+     */
+    @SuppressLint("ApplySharedPref")
+    private fun trace(bookID: String, line: String) {
+        val key = PlaybackProgressKeys.traceKey(bookID)
+        val existing = localProgress.getString(key, "").orEmpty()
+        // Keep only the last few entries; this is a diagnostic, not a log file.
+        val kept = (existing.lines() + line).filter { it.isNotBlank() }.takeLast(12)
+        localProgress.edit().putString(key, kept.joinToString("\n")).commit()
+    }
+
+    /** The recorded trace for a book, newest last. */
+    fun progressTrace(bookID: String): String =
+        localProgress.getString(PlaybackProgressKeys.traceKey(bookID), null)
+            ?: "No progress activity recorded yet for this book."
+
+    fun clearProgressTrace(bookID: String) {
+        localProgress.edit().remove(PlaybackProgressKeys.traceKey(bookID)).apply()
+    }
+
     private fun resumePositionMs(book: LibraryBook): Long {
         val localMs = localProgress.getLong(progressKey(book.id), -1L)
         val localIsDirty = localProgress.getBoolean(progressDirtyKey(book.id), false)
@@ -1087,6 +1144,11 @@ class PlayerViewModel(
             localPositionMs = localMs,
             localIsDirty = localIsDirty,
             serverPositionMs = (book.playbackPositionSeconds.coerceAtLeast(0.0) * 1000.0).toLong(),
+        )
+        trace(
+            book.id,
+            "resume chose=$positionMs session=${savedPositions[book.id]?.let { (it * 1000.0).toLong() } ?: -1} " +
+                "local=$localMs dirty=$localIsDirty server=${(book.playbackPositionSeconds * 1000.0).toLong()}",
         )
         if (!localIsDirty) {
             localProgress.edit().putLong(progressKey(book.id), positionMs).apply()

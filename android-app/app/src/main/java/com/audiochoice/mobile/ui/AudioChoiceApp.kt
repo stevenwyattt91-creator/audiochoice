@@ -36,6 +36,7 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.foundation.text.KeyboardOptions
@@ -1375,9 +1376,47 @@ private fun BookDetailsScreen(
     var bookmarkDialog by remember { mutableStateOf(false) }
     var moreMenu by remember { mutableStateOf(false) }
     var editDetails by remember { mutableStateOf(false) }
+    var showDiagnostics by remember { mutableStateOf(false) }
     var confirmDelete by remember { mutableStateOf(false) }
     var readingEditionSheet by remember { mutableStateOf(false) }
     val epubLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri -> uri?.let(player::attachEpub) }
+    if (showDiagnostics) {
+        // Reads the persisted trace rather than live state: the failure only occurs
+        // across a process restart, so the useful values are the ones recorded before
+        // the app was killed.
+        val trace = remember(book.id, showDiagnostics) { player.progressTrace(book.id) }
+        AlertDialog(
+            onDismissRequest = { showDiagnostics = false },
+            icon = { Icon(Icons.Outlined.BugReport, null, tint = ChoiceGreen) },
+            title = { Text("Playback diagnostics") },
+            text = {
+                Column(
+                    Modifier.verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    Text(
+                        "The most recent saves and resume decisions for this book, " +
+                            "oldest first. Send this to support.",
+                        color = ChoiceMuted,
+                        fontSize = 12.sp,
+                    )
+                    Text(trace, fontSize = 11.sp, fontFamily = FontFamily.Monospace)
+                    Text(
+                        "live position ${state.positionMs}ms of ${state.durationMs}ms",
+                        fontSize = 11.sp,
+                        fontFamily = FontFamily.Monospace,
+                        color = ChoiceMuted,
+                    )
+                }
+            },
+            confirmButton = { TextButton(onClick = { showDiagnostics = false }) { Text("Close") } },
+            dismissButton = {
+                TextButton(onClick = { player.clearProgressTrace(book.id); showDiagnostics = false }) {
+                    Text("Clear")
+                }
+            },
+        )
+    }
     if (editDetails) {
         BookDetailsEditDialog(
             book = book,
@@ -1402,6 +1441,13 @@ private fun BookDetailsScreen(
                         leadingIcon = { Icon(Icons.Outlined.Edit, null) },
                         onClick = { moreMenu = false; editDetails = true },
                     )
+                    if (BuildConfig.BETA_BUILD) {
+                        DropdownMenuItem(
+                            text = { Text("Playback Diagnostics") },
+                            leadingIcon = { Icon(Icons.Outlined.BugReport, null) },
+                            onClick = { moreMenu = false; showDiagnostics = true },
+                        )
+                    }
                     DropdownMenuItem(
                         text = { Text("Delete from Library") },
                         leadingIcon = { Icon(Icons.Outlined.DeleteOutline, null) },
