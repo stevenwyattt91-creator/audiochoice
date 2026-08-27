@@ -21,6 +21,8 @@ public sealed class AudioChoiceDataPaths
         Entitlements = Path.Combine(Root, "entitlements.json");
         CompanionTransfers = Path.Combine(Root, "companion-transfers.json");
         ConversionConsents = Path.Combine(Root, "conversion-consents.json");
+        EditionAliases = Path.Combine(Root, "edition-aliases.json");
+        EditionSignatures = Path.Combine(Root, "edition-signatures.json");
     }
 
     public string Root { get; }
@@ -34,6 +36,10 @@ public sealed class AudioChoiceDataPaths
     public string Entitlements { get; }
     public string CompanionTransfers { get; }
     public string ConversionConsents { get; }
+    /// <summary>Links between file fingerprints that are the same recording.</summary>
+    public string EditionAliases { get; }
+    /// <summary>Client-reported identity evidence per file fingerprint.</summary>
+    public string EditionSignatures { get; }
 
     public void EnsureDirectories()
     {

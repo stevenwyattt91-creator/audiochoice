@@ -362,6 +362,253 @@ var retryResult = await retryScheduler.Transcribe(
     [new AudioChunk("retry", 0, 1)], null, CancellationToken.None);
 Assert(retryResult[0].RetryCount == 1, "Transient transcription failure was not retried once.");
 
+// Edition identity. A fingerprint is a hash of file bytes, so a converted or
+// re-tagged copy of the same recording gets a different one and every artifact keyed
+// by it -- transcripts above all -- goes missing.
+var editionBase = new BookFingerprint(
+    1, new string('a', 64), 1_000, 28_800, "m4b",
+    "King Sorrow", "Joe Hill", null, null, null, null, null);
+var editionConverted = editionBase with { Sha256 = new string('b', 64), FileSize = 2_000, FileType = "m4a" };
+
+Assert(EditionMatch.SameRecording(editionBase, editionConverted),
+    "A converted copy of the same recording was not recognised.");
+Assert(EditionMatch.SameRecording(editionBase, editionBase),
+    "A fingerprint did not match itself.");
+Assert(!EditionMatch.SameRecording(
+        editionBase,
+        editionConverted with { Duration = 28_800 + EditionMatch.MaximumRuntimeDriftSeconds + 1 }),
+    "Recordings with clearly different runtimes were treated as the same edition.");
+Assert(!EditionMatch.SameRecording(editionBase, editionConverted with { Duration = null }),
+    "An unknown runtime was accepted as corroboration.");
+Assert(!EditionMatch.SameRecording(editionBase, editionConverted with { WorkTitle = "Heart-Shaped Box" }),
+    "Two different works were treated as the same edition.");
+Assert(!EditionMatch.SameRecording(
+        editionBase,
+        editionConverted with { EditionType = "Dramatized Adaptation" }),
+    "A dramatized adaptation matched a straight reading.");
+Assert(!EditionMatch.SameRecording(
+        editionBase with { WorkTitle = "Iron Flame Part 1 of 2" },
+        editionConverted with { WorkTitle = "Iron Flame Part 2 of 2" }),
+    "Two halves of a split audiobook were treated as the same edition.");
+Assert(EditionMatch.SameRecording(
+        editionBase with { WorkTitle = "King Sorrow" },
+        editionConverted with { WorkTitle = "King Sorrow: A Novel" }),
+    "A trailing title qualifier defeated the match.");
+Assert(EditionMatch.SameRecording(editionBase, editionConverted with { Author = null }),
+    "A missing author was treated as a contradiction.");
+
+var aliasFolder = Path.Combine(Path.GetTempPath(), $"audiochoice-aliases-{Guid.NewGuid()}");
+try
+{
+    var aliasPath = Path.Combine(aliasFolder, "edition-aliases.json");
+    var aliasStore = new FileEditionAliasStore(aliasPath);
+    aliasStore.Link(editionBase, editionConverted);
+    Assert(aliasStore.Aliases(editionBase).Any(value => value.Sha256 == editionConverted.Sha256),
+        "An edition alias was not recorded.");
+    Assert(aliasStore.Aliases(editionConverted).Any(value => value.Sha256 == editionBase.Sha256),
+        "Edition aliases were not linked in both directions.");
+    aliasStore.Link(editionBase, editionConverted);
+    Assert(aliasStore.Aliases(editionBase).Count == 1, "Linking the same pair twice duplicated it.");
+    Assert(new FileEditionAliasStore(aliasPath).Aliases(editionBase).Count == 1,
+        "Edition aliases did not survive a reload.");
+
+    // The transcript exists, but under the fingerprint of the file that was
+    // uploaded rather than the one the library row carries.
+    var timedTranscript = new PrivateTranscript(
+        "1.0", "en", "test-model", DateTimeOffset.UtcNow,
+        [new TranscriptSegment(0, 4, "A line of narration.")], true);
+    var keyedTranscripts = new KeyedTranscriptStore();
+    await keyedTranscripts.Save(editionConverted, timedTranscript, CancellationToken.None);
+
+    // ListFingerprints reports uploads and jobs rather than saved results, so the
+    // scanned file has to be registered the way a real import registers it.
+    var resolverCatalog = new InMemoryScanCatalog();
+    resolverCatalog.CreateUpload(
+        Guid.NewGuid(),
+        new CloudUploadAuthorizationRequest(
+            editionConverted, "king-sorrow.m4a", "audio/mp4", editionConverted.FileSize),
+        DateTimeOffset.UtcNow.AddHours(1),
+        "upload-token");
+    var resolverAliases = new FileEditionAliasStore(Path.Combine(aliasFolder, "resolver-aliases.json"));
+    var resolverSignatures = new FileEditionSignatureStore(
+        Path.Combine(aliasFolder, "resolver-signatures.json"));
+    var resolver = new EditionResolver(
+        keyedTranscripts, resolverCatalog, resolverAliases, resolverSignatures,
+        NullLogger<EditionResolver>.Instance);
+
+    Assert(await resolver.LoadTranscript(editionConverted, CancellationToken.None) is not null,
+        "The resolver failed on an exact fingerprint match.");
+    Assert(await resolver.LoadTranscript(editionBase, CancellationToken.None) is not null,
+        "The resolver did not recover a transcript stored under the source file's fingerprint.");
+    Assert(resolverAliases.Aliases(editionBase).Any(value => value.Sha256 == editionConverted.Sha256),
+        "The resolver did not remember the link it discovered.");
+
+    // Proving it is the remembered link doing the work on the second call, not a
+    // repeat of the metadata scan.
+    var aliasOnlyResolver = new EditionResolver(
+        keyedTranscripts, new InMemoryScanCatalog(), resolverAliases, resolverSignatures,
+        NullLogger<EditionResolver>.Instance);
+    Assert(await aliasOnlyResolver.LoadTranscript(editionBase, CancellationToken.None) is not null,
+        "A recorded alias did not resolve without the catalog.");
+
+    var unrelated = editionBase with
+    {
+        Sha256 = new string('c', 64), WorkTitle = "Heart-Shaped Box", Duration = 14_400,
+    };
+    Assert(await resolver.LoadTranscript(unrelated, CancellationToken.None) is null,
+        "The resolver returned another recording's transcript.");
+
+    // A transcript with no segments carries no timing and is not an answer.
+    var emptyTranscripts = new KeyedTranscriptStore();
+    await emptyTranscripts.Save(
+        editionConverted,
+        new PrivateTranscript("1.0", "en", "test-model", DateTimeOffset.UtcNow, [], true),
+        CancellationToken.None);
+    var emptyResolver = new EditionResolver(
+        emptyTranscripts, resolverCatalog,
+        new FileEditionAliasStore(Path.Combine(aliasFolder, "empty-aliases.json")),
+        new FileEditionSignatureStore(Path.Combine(aliasFolder, "empty-signatures.json")),
+        NullLogger<EditionResolver>.Instance);
+    Assert(await emptyResolver.LoadTranscript(editionBase, CancellationToken.None) is null,
+        "A transcript with no segments was treated as usable timing data.");
+
+    // Correcting a guessed title. A file with no tags leaves AudioChoice guessing from
+    // the filename, so this has to be fixable, and it must stay scoped to one listener.
+    var detailsLibrary = new FileUserLibraryStore(Path.Combine(aliasFolder, "details-library.json"));
+    var detailsOwner = Guid.NewGuid();
+    var detailsIntruder = Guid.NewGuid();
+    var detailBook = detailsLibrary.Upsert(detailsOwner, new LibraryBookUpsertRequest(
+        editionBase, "fourth wingggg", null, null, null));
+    var corrected = detailsLibrary.UpdateDetails(
+        detailsOwner,
+        detailBook.ID,
+        new LibraryBookDetailsRequest("Fourth Wing", "Rebecca Yarros", "Rebecca Soler"));
+    Assert(corrected?.Title == "Fourth Wing", "A corrected title was not saved.");
+    Assert(corrected?.Author == "Rebecca Yarros", "A corrected author was not saved.");
+    Assert(corrected?.Narrator == "Rebecca Soler", "A corrected narrator was not saved.");
+    Assert(detailsLibrary.UpdateDetails(
+            detailsIntruder, detailBook.ID, new LibraryBookDetailsRequest("Hijacked")) is null,
+        "Another user corrected someone else's book details.");
+    Assert(detailsLibrary.List(detailsOwner).Single().Title == "Fourth Wing",
+        "A corrected title did not survive being read back.");
+    // Identity must keep coming from the file, never from typed-in text.
+    Assert(detailsLibrary.List(detailsOwner).Single().Fingerprint.WorkTitle == editionBase.WorkTitle,
+        "Correcting the display title altered the edition fingerprint used for matching.");
+
+    // Identity evidence the byte hash cannot express. A retail identifier settles the
+    // question outright; a narrator or chapter structure can rule a match out.
+    var audibleSignature = new EditionSignature("B0CTJ1PDKM", "Zachary Quinto");
+    var sameProduct = new EditionSignature("B0CTJ1PDKM", null);
+    var otherProduct = new EditionSignature("B0XXXXXXXX", "Zachary Quinto");
+    Assert(EditionMatch.SameRecording(editionBase, editionConverted, audibleSignature, sameProduct),
+        "A shared retail product identifier did not settle a match.");
+    Assert(!EditionMatch.SameRecording(editionBase, editionConverted, audibleSignature, otherProduct),
+        "Different retail product identifiers were not treated as different editions.");
+    Assert(EditionMatch.SameRecording(
+            editionBase with { WorkTitle = "Something Else", Author = "Someone Else" },
+            editionConverted,
+            audibleSignature,
+            sameProduct),
+        "A retail identifier should outrank a disagreeing title and author.");
+// Signatures are client-reported, so an identifier must never be able to waive the
+// one claim a tagger cannot forge. Otherwise a borrowed ASIN would redirect filter
+// results between unrelated recordings.
+Assert(!EditionMatch.SameRecording(
+        editionBase with { Duration = 100 },
+        editionConverted,
+        audibleSignature,
+        sameProduct),
+    "A reported product identifier overrode a contradicting runtime.");
+Assert(!EditionMatch.SameRecording(
+        editionBase with { Duration = null },
+        editionConverted,
+        audibleSignature,
+        sameProduct),
+    "A reported product identifier stood in for missing runtime evidence.");
+    Assert(!EditionMatch.SameRecording(
+            editionBase, editionConverted,
+            new EditionSignature(null, "Zachary Quinto"),
+            new EditionSignature(null, "Someone Entirely Different")),
+        "Two different readings of the same book were treated as interchangeable.");
+    Assert(EditionMatch.SameRecording(
+            editionBase, editionConverted,
+            new EditionSignature(null, "Zachary Quinto"),
+            new EditionSignature(null, "Zachary Quinto and a Full Cast")),
+        "A longer narrator credit was treated as a contradiction.");
+    Assert(!EditionMatch.SameRecording(
+            editionBase, editionConverted,
+            new EditionSignature(null, null, [0, 1200, 2400]),
+            new EditionSignature(null, null, [0, 1200, 2400, 3600])),
+        "A different chapter structure was accepted as the same edition.");
+    Assert(EditionMatch.SameRecording(
+            editionBase, editionConverted,
+            new EditionSignature(null, null, [0, 1200, 2400]),
+            new EditionSignature(null, null, [0, 1201, 2399])),
+        "Whole-second chapter rounding defeated the match.");
+    Assert(EditionMatch.SameRecording(
+            editionBase, editionConverted,
+            new EditionSignature(null, null, [0, 1200, 2400]),
+            new EditionSignature(null, null, null)),
+        "Missing chapter marks were treated as a contradiction rather than silence.");
+
+    var signatureStore = new FileEditionSignatureStore(
+        Path.Combine(aliasFolder, "signatures.json"));
+    signatureStore.Record(editionBase, new EditionSignature("B0CTJ1PDKM", null));
+    signatureStore.Record(editionBase, new EditionSignature(null, "Zachary Quinto"));
+    Assert(signatureStore.Find(editionBase)?.ProductIdentifier == "B0CTJ1PDKM",
+        "A later report without an identifier erased the one already held.");
+    Assert(signatureStore.Find(editionBase)?.Narrator == "Zachary Quinto",
+        "Signature fields were not merged.");
+    Assert(new FileEditionSignatureStore(Path.Combine(aliasFolder, "signatures.json"))
+            .Find(editionBase)?.ProductIdentifier == "B0CTJ1PDKM",
+        "Edition signatures did not survive a reload.");
+
+    // Filters are held to a stricter standard than timings: a wrong filter result
+    // could play content a listener asked never to hear.
+    var filterCatalog = new InMemoryScanCatalog();
+    filterCatalog.CreateUpload(
+        Guid.NewGuid(),
+        new CloudUploadAuthorizationRequest(
+            editionConverted, "king-sorrow.m4a", "audio/mp4", editionConverted.FileSize),
+        DateTimeOffset.UtcNow.AddHours(1),
+        "filter-token");
+    filterCatalog.SaveResult(editionConverted, result);
+    var metadataOnlySignatures = new FileEditionSignatureStore(
+        Path.Combine(aliasFolder, "filter-metadata-signatures.json"));
+    var metadataOnlyFilters = new EditionResolver(
+        keyedTranscripts, filterCatalog,
+        new FileEditionAliasStore(Path.Combine(aliasFolder, "filter-metadata-aliases.json")),
+        metadataOnlySignatures, NullLogger<EditionResolver>.Instance);
+    Assert(metadataOnlyFilters.FindResult(editionConverted) is not null,
+        "An exact fingerprint did not return its own filter results.");
+    Assert(metadataOnlyFilters.FindResult(editionBase) is null,
+        "Filter results were reused on metadata similarity alone.");
+
+    var provenSignatures = new FileEditionSignatureStore(
+        Path.Combine(aliasFolder, "filter-proven-signatures.json"));
+    provenSignatures.Record(editionBase, new EditionSignature("B0CTJ1PDKM", null));
+    provenSignatures.Record(editionConverted, new EditionSignature("B0CTJ1PDKM", null));
+    var provenFilters = new EditionResolver(
+        keyedTranscripts, filterCatalog,
+        new FileEditionAliasStore(Path.Combine(aliasFolder, "filter-proven-aliases.json")),
+        provenSignatures, NullLogger<EditionResolver>.Instance);
+    Assert(provenFilters.FindResult(editionBase) is not null,
+        "A matching retail product identifier did not allow filter results to be reused.");
+
+    var clientLinkedAliases = new FileEditionAliasStore(
+        Path.Combine(aliasFolder, "filter-linked-aliases.json"));
+    clientLinkedAliases.Link(editionBase, editionConverted);
+    var clientLinkedFilters = new EditionResolver(
+        keyedTranscripts, filterCatalog, clientLinkedAliases, metadataOnlySignatures,
+        NullLogger<EditionResolver>.Instance);
+    Assert(clientLinkedFilters.FindResult(editionBase) is not null,
+        "A link the client reported outright did not allow filter results to be reused.");
+}
+finally
+{
+    if (Directory.Exists(aliasFolder)) Directory.Delete(aliasFolder, true);
+}
+
 Console.WriteLine("AudioChoice backend contract tests passed.");
 
 static void Assert(bool condition, string message)
@@ -419,6 +666,31 @@ sealed class FakeAnalysisProvider : IContentAnalysisProvider
         Action<double>? reportProgress,
         CancellationToken cancellationToken) =>
         Task.FromResult<IReadOnlyList<ScanEvent>>([]);
+}
+
+/// <summary>
+/// A transcript store that actually keys by fingerprint, which is what resolution
+/// tests need: CapturingTranscriptStore returns the same transcript for every
+/// fingerprint and so cannot tell a hit from a miss.
+/// </summary>
+sealed class KeyedTranscriptStore : IPrivateTranscriptStore
+{
+    private readonly Dictionary<string, PrivateTranscript> _byFingerprint = [];
+
+    public Task<PrivateTranscript?> Load(
+        BookFingerprint fingerprint,
+        CancellationToken cancellationToken) =>
+        Task.FromResult(_byFingerprint.GetValueOrDefault(
+            InMemoryScanCatalog.FingerprintKey(fingerprint)));
+
+    public Task Save(
+        BookFingerprint fingerprint,
+        PrivateTranscript transcript,
+        CancellationToken cancellationToken)
+    {
+        _byFingerprint[InMemoryScanCatalog.FingerprintKey(fingerprint)] = transcript;
+        return Task.CompletedTask;
+    }
 }
 
 sealed class CapturingTranscriptStore(PrivateTranscript? initial = null) : IPrivateTranscriptStore
