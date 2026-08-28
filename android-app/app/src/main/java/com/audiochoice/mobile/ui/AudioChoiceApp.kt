@@ -1437,6 +1437,12 @@ private fun BookDetailsScreen(
                 IconButton(onClick = { moreMenu = true }) { Icon(Icons.Outlined.MoreVert, "More") }
                 DropdownMenu(expanded = moreMenu, onDismissRequest = { moreMenu = false }) {
                     DropdownMenuItem(
+                        text = { Text("Start from Beginning") },
+                        leadingIcon = { Icon(Icons.Outlined.Replay, null) },
+                        enabled = state.localUri != null,
+                        onClick = { moreMenu = false; onPlay(true) },
+                    )
+                    DropdownMenuItem(
                         text = { Text("Edit Details") },
                         leadingIcon = { Icon(Icons.Outlined.Edit, null) },
                         onClick = { moreMenu = false; editDetails = true },
@@ -1484,13 +1490,20 @@ private fun BookDetailsScreen(
             Text("This audiobook file is no longer on this device. Re-import it to play.", color = ChoiceMuted, textAlign = TextAlign.Center)
             Spacer(Modifier.height(10.dp))
         }
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            Button(enabled = state.localUri != null, onClick = { onPlay(true) }, modifier = Modifier.weight(1f).height(50.dp)) {
-                Icon(Icons.Outlined.PlayArrow, null); Spacer(Modifier.width(6.dp)); Text("Play")
-            }
-            OutlinedButton(enabled = state.localUri != null, onClick = { onPlay(false) }, modifier = Modifier.weight(1f).height(50.dp)) {
-                Icon(Icons.Outlined.BookmarkBorder, null); Spacer(Modifier.width(6.dp)); Text("Continue")
-            }
+        // One button, and it always picks up where the listener stopped. Having Play
+        // mean "start over" beside Continue meaning "resume" invited exactly the
+        // mistake of losing your place. Starting over is the rarer intent, so it
+        // moved to the overflow menu.
+        val hasProgress = state.positionMs > RESUMABLE_POSITION_MS ||
+            book.playbackPositionSeconds > 1.0
+        Button(
+            enabled = state.localUri != null,
+            onClick = { onPlay(false) },
+            modifier = Modifier.fillMaxWidth().height(50.dp),
+        ) {
+            Icon(Icons.Outlined.PlayArrow, null)
+            Spacer(Modifier.width(6.dp))
+            Text(if (hasProgress) "Resume" else "Play")
         }
         Spacer(Modifier.height(16.dp))
         Card(
@@ -2477,6 +2490,9 @@ private fun BookDetailsEditDialog(
 
 /** Matches the varchar(300) columns these values are stored in. */
 private const val MAXIMUM_BOOK_DETAIL_LENGTH = 300
+
+/** Far enough in that calling it a resume is honest rather than pedantic. */
+private const val RESUMABLE_POSITION_MS = 5_000L
 
 @Composable
 private fun ReaderSettingsDialog(
