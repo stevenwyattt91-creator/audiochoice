@@ -806,6 +806,59 @@ app.MapGet("/v1/admin/scans/jobs/{scanID:guid}", (
         PercentComplete: progress.Percent));
 });
 
+// Lists every known edition, including those with no timing data. /v1/admin/transcripts
+// only reports editions that already have one, so a missing transcript is invisible
+// there -- which is exactly the case that needs finding.
+app.MapGet("/v1/admin/editions", async (
+    HttpContext context,
+    IScanCatalog catalog,
+    IPrivateTranscriptStore transcriptStore,
+    CancellationToken cancellationToken) =>
+{
+    if (!IsConfiguredApiToken(context, app.Configuration)) return Results.Unauthorized();
+
+    var editions = new List<AdminEditionInfo>();
+    foreach (var fingerprint in catalog.ListFingerprints())
+    {
+        var transcript = await transcriptStore.Load(fingerprint, cancellationToken);
+        var segmentCount = transcript?.Segments.Count ?? 0;
+        editions.Add(new AdminEditionInfo(fingerprint, segmentCount > 0, segmentCount));
+    }
+    return Results.Ok(editions);
+});
+
+/// Accepts timing data produced outside the scan pipeline, keyed to an existing
+/// edition. This exists because transcription needs audio the server deliberately
+/// deletes after scanning, so a transcript lost to a storage fault cannot be
+/// regenerated server-side. Saving through the store keeps the key derivation and
+/// payload schema identical to the pipeline's own writes.
+app.MapPost("/v1/admin/transcripts", async (
+    AdminTranscriptIngestRequest request,
+    HttpContext context,
+    IPrivateTranscriptStore transcriptStore,
+    ILogger<Program> logger,
+    CancellationToken cancellationToken) =>
+{
+    if (!IsConfiguredApiToken(context, app.Configuration)) return Results.Unauthorized();
+
+    var segments = request.Transcript.Segments;
+    if (segments.Count is 0 or > 200_000)
+        return Results.BadRequest(new { error = "A transcript must have between 1 and 200000 segments." });
+    if (segments.Any(segment => segment.EndTime < segment.StartTime || segment.StartTime < 0))
+        return Results.BadRequest(new { error = "Every segment needs a non-negative start at or before its end." });
+    // Alignment walks segments in order, so reject rather than silently mis-time.
+    if (segments.Zip(segments.Skip(1)).Any(pair => pair.Second.StartTime < pair.First.StartTime))
+        return Results.BadRequest(new { error = "Segments must be ordered by start time." });
+
+    await transcriptStore.Save(request.Fingerprint, request.Transcript, cancellationToken);
+    logger.LogInformation(
+        "Ingested {SegmentCount} externally produced transcript segments for {Title}, covering {Seconds:F0}s.",
+        segments.Count,
+        request.Fingerprint.WorkTitle,
+        segments[^1].EndTime);
+    return Results.Ok(new { segmentCount = segments.Count, coverageSeconds = segments[^1].EndTime });
+});
+
 app.MapGet("/v1/admin/transcripts", async (
     HttpContext context,
     IScanCatalog catalog,

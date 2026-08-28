@@ -96,6 +96,26 @@ public sealed record AdminTranscriptInfo(
     string TranscriptionModel,
     DateTimeOffset CreatedAt);
 
+/// <summary>
+/// A known audiobook edition and whether timing data exists for it.
+/// </summary>
+/// <remarks>
+/// Unlike <see cref="AdminTranscriptInfo"/> this lists editions that have *no*
+/// transcript, which is what makes a missing one findable in the first place.
+/// </remarks>
+public sealed record AdminEditionInfo(
+    BookFingerprint Fingerprint,
+    bool HasTranscript,
+    int SegmentCount);
+
+/// <summary>
+/// Timing data produced outside the scan pipeline, to be stored against an
+/// existing edition.
+/// </summary>
+public sealed record AdminTranscriptIngestRequest(
+    BookFingerprint Fingerprint,
+    Processing.PrivateTranscript Transcript);
+
 public sealed record AdminEditionMetadataRequest(
     BookFingerprint Fingerprint,
     string WorkTitle,

@@ -2,7 +2,8 @@ Playback now keeps going in the background
 - Your audiobook no longer stops when you leave the app or lock your phone
 - Play, pause and skip from the lock screen and the notification shade
 - Playback pauses for phone calls, quiets for navigation, and pauses when you unplug headphones
-- Your place is kept when you pause and close the app, and Continue picks up where you stopped
+- Your place is kept when you pause and close the app, even after swiping it away
+- One Play button, and it always resumes where you stopped. "Start from Beginning" moved into the book's menu
 Filters are more trustworthy
 - If a book's filter data cannot load, the app now tells you instead of silently playing unfiltered audio
 - Filter choices are no longer lost when a save fails; they sync in the background once you reconnect

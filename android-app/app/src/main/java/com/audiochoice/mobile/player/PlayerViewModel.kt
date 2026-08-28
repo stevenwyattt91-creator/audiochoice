@@ -123,6 +123,12 @@ class PlayerViewModel(
     private var controller: MediaController? = null
     private val connectedController = MutableStateFlow<MediaController?>(null)
     private var controllerFuture: com.google.common.util.concurrent.ListenableFuture<MediaController>? = null
+    /**
+     * The position playback must reach before it may begin, and which a checkpoint
+     * must not overwrite until reached. Null once satisfied or when resuming from
+     * the very start, where there is nothing to protect.
+     */
+    private var pendingResumeMs: Long? = null
     private var lastKnownPositionMs = 0L
     private var lastKnownDurationMs = 0L
     private val mutableState = MutableStateFlow(PlayerUiState())
@@ -484,6 +490,7 @@ class PlayerViewModel(
                 // the book to play from the start.
                 if (!active.isPlaying) {
                     val resumeMs = resumePositionMs(book)
+                    pendingResumeMs = resumeMs.takeIf { it > RESUME_TOLERANCE_MS }
                     if (resumeMs > active.currentPosition + ADOPTED_POSITION_TOLERANCE_MS) {
                         active.seekTo(resumeMs)
                         trace(book.id, "open ADOPTED corrected to=$resumeMs")
@@ -505,6 +512,9 @@ class PlayerViewModel(
             // 0 and plays from the beginning. Supplying it here makes the resume
             // position part of preparing, with no in-flight seek to lose.
             val resumeMs = resumePositionMs(book)
+            // Recorded as the position playback must reach before it may begin, and
+            // as the value a checkpoint must not overwrite until it has been reached.
+            pendingResumeMs = resumeMs.takeIf { it > RESUME_TOLERANCE_MS }
             active.setMediaItem(mediaItemFor(book, uri, coverPath), resumeMs)
             active.prepare()
             trace(book.id, "open loaded startAt=$resumeMs after=${active.currentPosition}")
@@ -704,7 +714,27 @@ class PlayerViewModel(
     }
     fun start(fromBeginning: Boolean) {
         if (!mutableState.value.isReady) return
-        if (fromBeginning) seekTo(0) else enforceEnabledFilters(currentPositionMs, allowLookAhead = true)
+        if (fromBeginning) {
+            pendingResumeMs = null
+            seekTo(0)
+        } else {
+            // Never begin playback before the resume position has actually taken
+            // effect. The transport lives in another process, so a start position or
+            // seek can still be in flight when the player reports itself ready --
+            // and starting in that window is what plays a book from the beginning.
+            // Verifying rather than assuming makes this independent of *why* the
+            // position had not been applied yet.
+            pendingResumeMs?.let { target ->
+                if (currentPositionMs + RESUME_TOLERANCE_MS < target) {
+                    trace(
+                        mutableState.value.book?.id.orEmpty(),
+                        "start REAPPLIED target=$target was=$currentPositionMs",
+                    )
+                    controller?.seekTo(target)
+                }
+            }
+            enforceEnabledFilters(currentPositionMs, allowLookAhead = true)
+        }
         controller?.play()
     }
 
@@ -999,6 +1029,15 @@ class PlayerViewModel(
             trace(book.id, "saveSync BLOCKED trusted=null cached=$positionMs stored=$storedBefore")
             return
         }
+        // Same protection as the periodic save: an outstanding resume means this
+        // position is not where the listener actually was.
+        pendingResumeMs?.let { target ->
+            if (positionMs + RESUME_TOLERANCE_MS < target) {
+                trace(book.id, "saveSync BLOCKED at=$positionMs pendingResume=$target")
+                return
+            }
+            pendingResumeMs = null
+        }
         trace(
             book.id,
             "saveSync wrote=$positionMs trusted=${trusted ?: -1} cached=$lastKnownPositionMs " +
@@ -1085,6 +1124,17 @@ class PlayerViewModel(
         onSaved: (() -> Unit)? = null,
     ) {
         val safePositionMs = positionMs.coerceAtLeast(0)
+        // A resume that has not landed yet means the transport is reporting a position
+        // the listener was never at. Saving it destroys the real checkpoint, which is
+        // why a single failed resume used to become permanent: playback ran from the
+        // start and the periodic save overwrote the good position within seconds.
+        pendingResumeMs?.let { target ->
+            if (safePositionMs + RESUME_TOLERANCE_MS < target) {
+                trace(book.id, "checkpoint BLOCKED at=$safePositionMs pendingResume=$target")
+                return
+            }
+            pendingResumeMs = null
+        }
         trace(book.id, "checkpoint wrote=$safePositionMs")
         val seconds = safePositionMs / 1000.0
         savedPositions[book.id] = seconds
@@ -1212,6 +1262,13 @@ class PlayerViewModel(
          * the scrubber, narrow enough to catch a discarded resume.
          */
         const val ADOPTED_POSITION_TOLERANCE_MS = 5_000L
+
+        /**
+         * How close the transport must be to the intended resume position before it
+         * counts as applied. Also the margin that protects a saved checkpoint from
+         * being overwritten while a resume is still outstanding.
+         */
+        const val RESUME_TOLERANCE_MS = 3_000L
         val LAST_BOOK_ID_KEY = PlaybackProgressKeys.LAST_BOOK_ID
     }
 
