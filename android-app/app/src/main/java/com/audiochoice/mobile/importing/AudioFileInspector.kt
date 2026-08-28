@@ -53,34 +53,67 @@ class AudioFileInspector(private val context: Context) {
         if (size < 0) size = measuredSize
         require(size == measuredSize) { "The audiobook changed while it was being read." }
 
+        val extension = name.substringAfterLast('.', "audio").lowercase()
+        val isMp4Family = extension in MP4_FAMILY_EXTENSIONS
+        // MediaMetadataRetriever cannot reach freeform tags, which is where the
+        // retail identifiers and the narrator live, so read the atoms directly. This also
+        // supplies the runtime and the artwork, because it opens a seekable descriptor and
+        // therefore keeps working on files the retriever cannot open at all.
+        val container = if (isMp4Family) {
+            Mp4TagReader(resolver).readContainer(uri)
+        } else {
+            ContainerMetadata()
+        }
+        val tags = container.tags
+
         val retriever = MediaMetadataRetriever()
         var embeddedTitle: String? = null
         var embeddedAuthor: String? = null
         var embeddedSeries: String? = null
         var embeddedCover: ByteArray? = null
-        val duration = runCatching {
-            // MediaMetadataRetriever is more reliable with a direct path for the
-            // file:// URI used by website companion transfers. The content-resolver
-            // overload remains necessary for document-provider imports.
-            if (uri.scheme.equals("file", ignoreCase = true) && !uri.path.isNullOrBlank()) {
-                retriever.setDataSource(uri.path)
-            } else {
-                retriever.setDataSource(context, uri)
+        var retrieverDuration: Double? = null
+        // Each field is read on its own. All five used to sit inside one runCatching, so a
+        // failure anywhere -- most often opening the data source -- silently abandoned every
+        // field after it. That is how a book arrived with a title, an author, a narrator and
+        // chapters but no runtime and no cover: those four come from the atom reader above,
+        // and everything the retriever would have supplied was lost together.
+        val opened = runCatching {
+            // A seekable descriptor first, matching what the atom reader uses. The
+            // content-resolver overload fails on providers that only hand back a stream, and
+            // the retriever needs random access.
+            when {
+                uri.scheme.equals("file", ignoreCase = true) && !uri.path.isNullOrBlank() ->
+                    retriever.setDataSource(uri.path)
+                else -> resolver.openFileDescriptor(uri, "r")?.use { descriptor ->
+                    retriever.setDataSource(descriptor.fileDescriptor)
+                } ?: retriever.setDataSource(context, uri)
             }
-            embeddedTitle = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_TITLE)
-            embeddedAuthor = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_ARTIST)
-                ?: retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_AUTHOR)
-            embeddedSeries = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_ALBUM)
-            embeddedCover = retriever.embeddedPicture
-            retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toDouble()?.div(1000.0)
-        }.getOrNull()
-        retriever.release()
+        }.isSuccess
 
-        val extension = name.substringAfterLast('.', "audio").lowercase()
-        val isMp4Family = extension in MP4_FAMILY_EXTENSIONS
-        // MediaMetadataRetriever cannot reach freeform tags, which is where the
-        // retail identifiers and the narrator live, so read the atoms directly.
-        val tags = if (isMp4Family) Mp4TagReader(resolver).read(uri) else AudioEditionTags()
+        if (opened) {
+            embeddedTitle = runCatching {
+                retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_TITLE)
+            }.getOrNull()
+            embeddedAuthor = runCatching {
+                retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_ARTIST)
+                    ?: retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_AUTHOR)
+            }.getOrNull()
+            embeddedSeries = runCatching {
+                retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_ALBUM)
+            }.getOrNull()
+            embeddedCover = runCatching { retriever.embeddedPicture }.getOrNull()
+            retrieverDuration = runCatching {
+                retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)
+                    ?.toDouble()?.div(1000.0)
+            }.getOrNull()
+        }
+        runCatching { retriever.release() }
+
+        // The container's own movie header is authoritative and cheap, so it is preferred and
+        // the retriever fills in for formats this reader does not parse.
+        val duration = container.durationSeconds?.takeIf { it > 0 }
+            ?: retrieverDuration?.takeIf { it > 0 }
+        val coverBytes = container.coverBytes ?: embeddedCover
 
         // Anything inside the file outranks the filename. For a tagged M4B the
         // first two sources are the same `©nam` value, so this changes nothing for
@@ -109,7 +142,7 @@ class AudioFileInspector(private val context: Context) {
             contentType = resolver.getType(uri) ?: "audio/$extension",
             chapters = if (isMp4Family)
                 Mp4ChapterReader(resolver).read(uri, duration) else emptyList(),
-            coverBytes = embeddedCover,
+            coverBytes = coverBytes,
             tags = tags,
             isTitleFromMetadata = metadataTitle != null,
         )
