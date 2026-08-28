@@ -17,6 +17,10 @@ final class AudioPlaybackManager: ObservableObject {
     @Published private(set) var activeFilterEvent: ScanEvent?
     @Published private(set) var skippedEventCount = 0
     @Published private(set) var playbackError: String?
+    /// Whether this book's filters can currently be enforced. Surfaced in the player
+    /// because filtering silently doing nothing is worse than saying so: the listener
+    /// would otherwise assume their filters were active.
+    @Published private(set) var filterAvailability: FilterAvailability = .unavailable
 
     private var player: AVPlayer?
     private var timeObserver: Any?
@@ -66,6 +70,7 @@ final class AudioPlaybackManager: ObservableObject {
         self.lastHandledEventID = nil
         self.activeFilterEvent = nil
         self.skippedEventCount = 0
+        self.filterAvailability = FilterAvailability.of(record)
         playbackError = nil
         currentBookID = record.id
         duration = 0
@@ -195,6 +200,9 @@ final class AudioPlaybackManager: ObservableObject {
     }
 
     private func applyContentFilter() {
+        // No scan data means nothing can be filtered. That state is published as
+        // filterAvailability and shown in the player rather than passing silently,
+        // because the audio plays either way and the listener needs to know which.
         guard let events = record?.scanResult?.events else {
             player?.isMuted = false
             activeFilterEvent = nil
@@ -215,8 +223,14 @@ final class AudioPlaybackManager: ObservableObject {
         guard lastHandledEventID != matching.id else { return }
         lastHandledEventID = matching.id
         skippedEventCount += 1
-        setPosition(min(matching.endTime + 0.2, duration))
+        // Duration is 0 until the asset finishes loading asynchronously, and clamping
+        // against it in that window turned a skip into a jump to the start of the book.
+        let target = matching.endTime + Self.filterExitPadding
+        setPosition(duration > 0 ? min(target, duration) : target)
     }
+
+    /// Clears the flagged range before resuming, so its final moment is not replayed.
+    private static let filterExitPadding: Double = 0.2
 
     private func configureRemoteCommands() {
         let commands = MPRemoteCommandCenter.shared()

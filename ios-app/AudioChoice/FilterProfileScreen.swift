@@ -1,12 +1,17 @@
 import SwiftUI
 
 struct FilterProfileScreen: View {
+    // All on by default, matching FilterPreferences.defaultEnabled. These previously
+    // declared violence, drugs, blasphemy and self-harm as off while playback skipped
+    // them regardless, so the screen showed four switches that contradicted what was
+    // actually happening. Defaulting them on makes the display truthful without
+    // removing protection from anyone who never opened this screen.
     @AppStorage("filterEnabled.profanity") private var profanity = true
     @AppStorage("filterEnabled.sexualContent") private var sexualContent = true
-    @AppStorage("filterEnabled.graphicViolence") private var graphicViolence = false
-    @AppStorage("filterEnabled.drugsAndAlcohol") private var drugsAndAlcohol = false
-    @AppStorage("filterEnabled.blasphemy") private var blasphemy = false
-    @AppStorage("filterEnabled.selfHarm") private var selfHarm = false
+    @AppStorage("filterEnabled.graphicViolence") private var graphicViolence = true
+    @AppStorage("filterEnabled.drugsAndAlcohol") private var drugsAndAlcohol = true
+    @AppStorage("filterEnabled.blasphemy") private var blasphemy = true
+    @AppStorage("filterEnabled.selfHarm") private var selfHarm = true
     @AppStorage("parentalPin") private var parentalPin = ""
     @State private var enteredPin = ""
     @State private var unlocked = false
@@ -26,7 +31,7 @@ struct FilterProfileScreen: View {
                 }
                 ACCard {
                     Text("Content Categories").font(.title3.bold())
-                    Text("Enabled categories are always skipped during playback.")
+                    Text("Enabled categories are skipped during playback. Violence only skips graphic and torture scenes, not every mention.")
                         .font(.caption)
                         .foregroundStyle(ACTheme.secondaryText)
                         .padding(.bottom, 8)

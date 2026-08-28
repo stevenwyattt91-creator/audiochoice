@@ -157,6 +157,8 @@ private struct LegacyPlayerScreen: View {
                     .multilineTextAlignment(.center)
             }
 
+            FilterAvailabilityNotice(availability: playback.filterAvailability)
+
             if let event = playback.activeFilterEvent,
                let category = IOSContentTaxonomy.category(for: event) {
                 Label(
@@ -337,6 +339,9 @@ struct PlayerScreen: View {
                         .padding(.horizontal)
                 }
 
+                FilterAvailabilityNotice(availability: playback.filterAvailability)
+                    .padding(.horizontal)
+
                 VStack(spacing: 4) {
                     Slider(value: Binding(get: { playback.position }, set: playback.seek(to:)), in: 0...max(playback.duration, 1))
                         .tint(ACTheme.accent)
@@ -444,5 +449,37 @@ struct NowPlayingScreen: View {
             }
         }
         .navigationBarHidden(true)
+    }
+}
+
+/// Tells the listener when their filters are not actually being applied.
+///
+/// A book with no scan data plays exactly like a book with nothing to filter, so
+/// without this the two are indistinguishable and someone relying on filtering has no
+/// way to know it is inactive. Shown only when there is something to say.
+struct FilterAvailabilityNotice: View {
+    let availability: FilterAvailability
+
+    var body: some View {
+        switch availability {
+        case .available:
+            EmptyView()
+        case .loading:
+            Label(
+                "Still checking this audiobook's filters. Nothing is filtered until they load.",
+                systemImage: "clock.fill"
+            )
+            .font(.footnote)
+            .foregroundStyle(ACTheme.secondaryText)
+            .multilineTextAlignment(.center)
+        case .unavailable:
+            Label(
+                "No filter data for this audiobook, so nothing is being filtered.",
+                systemImage: "exclamationmark.shield.fill"
+            )
+            .font(.footnote.weight(.semibold))
+            .foregroundStyle(.red)
+            .multilineTextAlignment(.center)
+        }
     }
 }

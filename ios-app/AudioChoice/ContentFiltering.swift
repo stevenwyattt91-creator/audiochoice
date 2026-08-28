@@ -89,6 +89,10 @@ enum IOSContentTaxonomy {
 
     static func shouldSkip(_ event: ScanEvent) -> Bool {
         guard let category = category(for: event) else { return false }
+        // A listener's choice has to actually reach playback. This previously called
+        // a stub that always returned true, so every toggle on the filter screen was
+        // decorative and the screen displayed states that did not match behaviour.
+        guard FilterPreferences.isEnabled(category) else { return false }
         guard category == .graphicViolence else { return true }
         // The scanner can retain lower-severity violence for internal review,
         // but playback only skips the severe Android-visible groups.
@@ -169,8 +173,50 @@ enum IOSContentTaxonomy {
     }
 }
 
+/// The listener's per-category filter choices, as playback sees them.
+///
+/// Backed by the same UserDefaults keys the filter screen writes through
+/// `@AppStorage`, because a preference that playback never consults is a lie told to
+/// someone who may be relying on it.
 enum FilterPreferences {
-    static func isEnabled(_ category: FilterCategory) -> Bool { true }
+    static func storageKey(_ category: FilterCategory) -> String {
+        "filterEnabled.\(category.rawValue)"
+    }
+
+    /// Filtered until the listener says otherwise.
+    ///
+    /// `UserDefaults.bool(forKey:)` reports false for a key that was never written,
+    /// which for a content filter means "expose everything". Anyone who had not opened
+    /// the filter screen would silently lose protection they never knew they had, so
+    /// an absent value resolves to on rather than to the type default.
+    static let defaultEnabled = true
+
+    static func isEnabled(_ category: FilterCategory) -> Bool {
+        let defaults = UserDefaults.standard
+        let key = storageKey(category)
+        guard defaults.object(forKey: key) != nil else { return defaultEnabled }
+        return defaults.bool(forKey: key)
+    }
+}
+
+/// Whether playback can currently enforce a book's filters.
+///
+/// Mirrors the Android client's FilterAvailability. The distinction that matters is
+/// between "this book has nothing to filter" and "this book's filter data is missing",
+/// which look identical from an empty event list.
+enum FilterAvailability {
+    /// A scan is queued or running, so filter data is expected shortly.
+    case loading
+    /// Filter data is present and being enforced.
+    case available
+    /// No filter data, and none pending. Nothing is being filtered.
+    case unavailable
+
+    static func of(_ record: LibraryBookRecord?) -> FilterAvailability {
+        guard let record else { return .unavailable }
+        if record.scanResult != nil { return .available }
+        return record.pendingScanID != nil ? .loading : .unavailable
+    }
 }
 
 struct FilterCorrection: Codable, Identifiable {
