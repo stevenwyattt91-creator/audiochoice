@@ -37,6 +37,14 @@ services:
       ASPNETCORE_ENVIRONMENT: Production
       AudioChoice__OpenAI__WorkerEnabled: "true"
       AudioChoice__OpenAI__ProcessingLane: ios-beta-lambda
+      # Transcripts MUST go to shared Blob storage, not this container's disk.
+      # Nothing mounts a volume for the scanner and these instances are replaced
+      # nightly, so a file-backed transcript is destroyed within a day -- while the
+      # scan result survives in PostgreSQL. That combination is exactly what makes a
+      # book show working filters and yet report no read-along timing data.
+      # Requires BlobEnabled and StorageAccountName in lambda-worker.env; the
+      # scanner refuses to start otherwise rather than writing somewhere temporary.
+      AudioChoice__TemporaryAudioStorage__BlobTranscriptEnabled: "true"
       AudioChoice__OpenAI__TranscriptionProvider: faster-whisper
       AudioChoice__OpenAI__FasterWhisperEndpoint: http://127.0.0.1:8001/
       # A single GPU chunk may take several minutes under load. The scanner now

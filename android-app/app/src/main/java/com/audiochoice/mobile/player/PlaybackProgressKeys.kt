@@ -14,6 +14,17 @@ internal object PlaybackProgressKeys {
     private const val POSITION_PREFIX = "position_ms_"
     private const val DIRTY_PREFIX = "position_dirty_"
 
+    /**
+     * A human-readable trace of the last save and the last resume decision.
+     *
+     * Position loss can only be diagnosed across a process restart, which is
+     * exactly when logs are unavailable to whoever is testing. Persisting the
+     * trace makes the inputs readable in the app afterwards.
+     */
+    private const val TRACE_PREFIX = "progress_trace_"
+
+    fun traceKey(bookID: String): String = "$TRACE_PREFIX$bookID"
+
     fun positionKey(bookID: String): String = "$POSITION_PREFIX$bookID"
 
     fun dirtyKey(bookID: String): String = "$DIRTY_PREFIX$bookID"
