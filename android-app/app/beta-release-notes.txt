@@ -1,34 +1,13 @@
-Playback now keeps going in the background
-- Your audiobook no longer stops when you leave the app or lock your phone
-- Play, pause and skip from the lock screen and the notification shade
-- Playback pauses for phone calls, quiets for navigation, and pauses when you unplug headphones
-- Your place is kept when you pause and close the app, even after swiping it away
-- One Play button, and it always resumes where you stopped. "Start from Beginning" moved into the book's menu
-Filters are more trustworthy
-- If a book's filter data cannot load, the app now tells you instead of silently playing unfiltered audio
-- Filter choices are no longer lost when a save fails; they sync in the background once you reconnect
-Reading edition (attach an EPUB)
-- Open a book, tap the book icon at the top of the player, and read along full screen
-- Continuous scrolling, adjustable text size, light/sepia/dark themes and margins
-- The text follows the narration and highlights the current passage; tap any paragraph to jump the audio there
-- Filtered passages are removed from the text, not blacked out
-- Your reading place is remembered per book
-- If read-along timing is unavailable, the app now says why instead of giving one vague message
-- OpenDyslexic typeface option, the same one Kindle offers, under Reading settings
-Titles and details
-- Titles now come from the audiobook file's own details rather than its filename
-- Narrator is shown when the file provides it
-- Correct a title, author or narrator yourself from Edit Details in a book's menu
-- After importing, the app says so when it only had a filename to go on
-- A converted or re-tagged copy of an audiobook is now recognised as the same edition
-Getting around
-- Tapping a book in your library opens its details
-- The green play button on Continue Listening goes straight to the player and resumes
-Fixes
-- Deleting a book now actually frees its storage, and imports no longer leave duplicate copies behind
-- Leaving the app mid-import no longer drains the battery
-- Flaky connections no longer create duplicate bookmarks
-- An expired sign-in now asks you to sign in again instead of showing a password error
-- Faster book opening, no freeze when entering a parental PIN, and fewer crashes on large cover art
-- Larger tap targets, readable label sizes, and screen-reader support in the player and reader
+Tell us when a filter gets it wrong
+- Tap the flag in the player the moment you hear something that should have been filtered. One tap, no form, and it works with no signal
+- A report records where you were, never what you heard. No audio and no text leaves your phone
+- In a book's Playback Filters, each control now has a flag to report that it removed something it should not have. That is the one that fixes over-filtering, because it tells us exactly which control fired
+- Turning a filter off only helps you; reporting it helps everyone listening to the same recording
+Finished books
+- Books are marked finished when you reach the end, and covers show a green tick
+- You can mark a book finished yourself from its details, for when you stop before the credits
+- This never worked before: finishing a book left no trace
+Explore is tidier
+- The same audiobook no longer appears several times because two people's files disagreed about the author or carried a different edition note
+- Different editions and separate parts are still listed separately, because those are genuinely different recordings with their own filter data
 Please report anything odd in Discord.
