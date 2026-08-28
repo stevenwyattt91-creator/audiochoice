@@ -930,6 +930,34 @@ app.MapGet("/v1/admin/explore", (
         : Results.Unauthorized();
 });
 
+// Every scanned edition, including the ones listeners cannot see. Managing the catalogue
+// needs this: an entry that was hidden, or that is being withheld because it names no book,
+// does not appear in the listing above, which is the one place you would look for it.
+app.MapGet("/v1/admin/explore/all", (
+    HttpContext context,
+    IScanCatalog catalog) =>
+{
+    return IsConfiguredApiToken(context, app.Configuration)
+        ? Results.Ok(catalog.ListExploreCatalog())
+        : Results.Unauthorized();
+});
+
+// Undoes a hide. Without this, hiding the wrong edition could only be corrected by editing
+// the database by hand.
+app.MapPost("/v1/admin/explore/{catalogID}/restore", (
+    string catalogID,
+    HttpContext context,
+    IScanCatalog catalog) =>
+{
+    if (!IsConfiguredApiToken(context, app.Configuration))
+    {
+        return Results.Unauthorized();
+    }
+    return catalog.RestoreExploreBook(catalogID)
+        ? Results.NoContent()
+        : Results.NotFound(new { error = "No hidden Explore audiobook has that catalog ID." });
+});
+
 // Returns only aggregate audit-pricing information for an already scanned
 // Explore edition. Individual event details remain protected behind the
 // authenticated internal portals.

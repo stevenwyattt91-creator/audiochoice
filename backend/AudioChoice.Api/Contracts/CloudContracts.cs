@@ -154,3 +154,20 @@ public sealed record ExploreCatalogBook(
     /// ways depending on who tagged the file.
     /// </remarks>
     string? ProductIdentifier = null);
+
+/// <summary>
+/// One scanned edition as an administrator sees it, published or not.
+/// </summary>
+/// <remarks>
+/// The catalogue listing shows only what listeners can see, which is no use for managing it:
+/// an entry that has been hidden, or that is being withheld because it names no book, is
+/// invisible in exactly the view you would use to find and fix it.
+/// </remarks>
+public sealed record ExploreCatalogAdminEntry(
+    ExploreCatalogBook Book,
+    /// <summary>False once an administrator has hidden this edition.</summary>
+    bool IsPublished,
+    /// <summary>Whether the edition names a book well enough to be listed.</summary>
+    bool IsPublishable,
+    /// <summary>Why listeners cannot see this entry, or null when they can.</summary>
+    string? WithheldReason);

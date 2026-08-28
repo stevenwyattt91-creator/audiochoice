@@ -74,6 +74,23 @@ public interface IScanCatalog
     bool SaveEditionDescription(BookFingerprint fingerprint, string description);
     (byte[] Bytes, string ContentType)? FindExploreCover(string catalogID);
     bool HideExploreBook(string catalogID);
+    /// <summary>
+    /// Puts a hidden edition back in the catalogue.
+    /// </summary>
+    /// <remarks>
+    /// Hiding was a one-way door, so a mistake could only be undone by editing the database
+    /// by hand.
+    /// </remarks>
+    bool RestoreExploreBook(string catalogID);
+    /// <summary>
+    /// Every scanned edition with its catalogue status, for administration.
+    /// </summary>
+    /// <remarks>
+    /// Unlike <see cref="ListExploreBooks"/> this withholds nothing and does not merge
+    /// duplicates, because the entries an administrator needs to act on are precisely the
+    /// ones the listener-facing view removes.
+    /// </remarks>
+    IReadOnlyList<ExploreCatalogAdminEntry> ListExploreCatalog();
     IReadOnlyList<BookFingerprint> ListFingerprints();
     bool UpdateEditionMetadata(AdminEditionMetadataRequest request);
 }
@@ -421,6 +438,28 @@ public sealed class InMemoryScanCatalog : IScanCatalog
         return true;
     }
 
+    public bool RestoreExploreBook(string catalogID) =>
+        !string.IsNullOrWhiteSpace(catalogID) &&
+        _hiddenExploreBooks.TryRemove(catalogID.Trim().ToLowerInvariant(), out _);
+
+    public IReadOnlyList<ExploreCatalogAdminEntry> ListExploreCatalog() => _jobs.Values
+        .Where(value => value.Status == CloudScanStatus.Completed && value.Result is not null)
+        .GroupBy(value => FingerprintKey(value.Fingerprint))
+        .Select(group => group.OrderByDescending(value => value.Result!.ScanDate).First())
+        .Select(value => ExploreCatalog.AdminEntry(
+            ExploreCatalog.Create(
+                value.Fingerprint,
+                value.Result!,
+                _exploreCovers.ContainsKey(CatalogIDOf(value.Fingerprint)),
+                _editionDescriptions.TryGetValue(CatalogIDOf(value.Fingerprint), out var description)
+                    ? description
+                    : null,
+                _editionSignatures?.Find(value.Fingerprint)?.ProductIdentifier),
+            value.Fingerprint,
+            !_hiddenExploreBooks.ContainsKey(CatalogIDOf(value.Fingerprint))))
+        .OrderBy(value => value.Book.Title)
+        .ToArray();
+
     public IReadOnlyList<BookFingerprint> ListFingerprints() =>
         _uploads.Values
             .Select(value => value.Fingerprint)
@@ -766,14 +805,41 @@ public static class ExploreCatalog
     /// does. That is a proxy rather than a proof, and the cost of it being wrong is a
     /// correctly-titled book waiting for one listener with a properly tagged copy.
     /// </remarks>
-    public static bool IsPublishable(BookFingerprint fingerprint)
+    public static bool IsPublishable(BookFingerprint fingerprint) =>
+        UnpublishableReason(fingerprint) is null;
+
+    /// <summary>
+    /// Why an edition is being withheld from the catalogue, or null when it is fit to list.
+    /// </summary>
+    /// <remarks>
+    /// Returned to administrators so a missing book can be explained rather than guessed at.
+    /// </remarks>
+    public static string? UnpublishableReason(BookFingerprint fingerprint)
     {
         var title = Normalize(EditionTitleFormatter.Format(fingerprint));
-        if (title.Length == 0) return false;
-        if (PlaceholderTitles.Contains(title, StringComparer.Ordinal)) return false;
+        if (title.Length == 0) return "The edition has no title.";
+        if (PlaceholderTitles.Contains(title, StringComparer.Ordinal))
+        {
+            return "The title is a placeholder, so this file was never identified.";
+        }
         // A title that is only digits, or a single character, names nothing.
-        if (title.Length < 2 || title.All(char.IsDigit)) return false;
-        return !string.IsNullOrWhiteSpace(fingerprint.Author);
+        if (title.Length < 2) return "The title is too short to name a book.";
+        if (title.All(char.IsDigit)) return "The title is only digits, so it is a filename.";
+        return string.IsNullOrWhiteSpace(fingerprint.Author)
+            ? "The edition has no author, so its title was probably guessed from a filename."
+            : null;
+    }
+
+    /// <summary>Builds the administrative view of one edition.</summary>
+    public static ExploreCatalogAdminEntry AdminEntry(
+        ExploreCatalogBook book, BookFingerprint fingerprint, bool isPublished)
+    {
+        var reason = UnpublishableReason(fingerprint);
+        return new ExploreCatalogAdminEntry(
+            book,
+            isPublished,
+            reason is null,
+            isPublished ? reason : "An administrator hid this edition.");
     }
 
     /// <summary>

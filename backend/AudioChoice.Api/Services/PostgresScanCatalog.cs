@@ -443,7 +443,29 @@ public sealed class PostgresScanCatalog(
 
     public IReadOnlyList<ExploreCatalogBook> ListExploreBooks()
     {
+        // A catalogue entry has to name a book. That is applied here rather than in SQL so
+        // both catalogues share one rule, and because the title is assembled by
+        // EditionTitleFormatter rather than read straight from a column.
+        var publishable = ReadExploreCatalog(includeHidden: false)
+            .Where(entry => entry.IsPublishable)
+            .Select(entry => entry.Book);
+        return ExploreCatalog.Deduplicate(publishable);
+    }
+
+    public IReadOnlyList<ExploreCatalogAdminEntry> ListExploreCatalog() =>
+        ReadExploreCatalog(includeHidden: true);
+
+    /// <summary>
+    /// Reads every scanned edition, with the status an administrator needs.
+    /// </summary>
+    /// <param name="includeHidden">
+    /// True to include editions an administrator has hidden, which is what makes them
+    /// findable again. The listener-facing catalogue excludes them in SQL.
+    /// </param>
+    private List<ExploreCatalogAdminEntry> ReadExploreCatalog(bool includeHidden)
+    {
         using var connection = dataSource.OpenConnection();
+        var publishedFilter = includeHidden ? "" : "\n              and e.explore_published = true";
         using var command = new NpgsqlCommand($"""
             select {FingerprintSelect}, r.scanned_at, r.scanner_version,
                    count(se.id)::int,
@@ -451,15 +473,15 @@ public sealed class PostgresScanCatalog(
                     + count(distinct nullif(se.aggregate_key, '')))::int,
                    coalesce(array_agg(distinct se.group_id) filter (where se.group_id is not null), array[]::uuid[]),
                    e.cover_image is not null,
-                   e.description
+                   e.description,
+                   e.explore_published
             from audiobook_editions e
             join lateral (
                 select id, scanned_at, scanner_version from scan_results
                 where edition_id = e.id order by scanned_at desc limit 1
             ) r on true
             left join scan_events se on se.scan_result_id = r.id
-            where e.work_title is not null and btrim(e.work_title) <> ''
-              and e.explore_published = true
+            where e.work_title is not null and btrim(e.work_title) <> ''{publishedFilter}
               and lower(e.work_title) not like '%iron flame%'
               -- An entry advertises a reusable scan, so the scan has to have finished. The
               -- lateral join above already requires a result row, but a result can also be
@@ -474,14 +496,10 @@ public sealed class PostgresScanCatalog(
             order by e.work_title;
             """, connection);
         using var reader = command.ExecuteReader();
-        var values = new List<ExploreCatalogBook>();
+        var values = new List<ExploreCatalogAdminEntry>();
         while (reader.Read())
         {
             var fingerprint = ReadFingerprint(reader, 0);
-            // A catalogue entry has to name a book. Placeholder titles are excluded here
-            // rather than in SQL so both catalogues apply one rule, and because the title
-            // is assembled by EditionTitleFormatter rather than read straight from a column.
-            if (!ExploreCatalog.IsPublishable(fingerprint)) continue;
             var result = new ScanResult(
                 reader.GetFieldValue<Guid[]>(16).Select((groupID, index) => new ScanEvent(
                     Guid.Empty, index, index, Guid.Empty, groupID, Guid.Empty, 0)).ToArray(),
@@ -493,9 +511,12 @@ public sealed class PostgresScanCatalog(
                 reader.GetBoolean(17),
                 reader.IsDBNull(18) ? null : reader.GetString(18),
                 editionSignatures.Find(fingerprint)?.ProductIdentifier);
-            values.Add(item with { EventCount = reader.GetInt32(15) });
+            values.Add(ExploreCatalog.AdminEntry(
+                item with { EventCount = reader.GetInt32(15) },
+                fingerprint,
+                reader.GetBoolean(19)));
         }
-        return ExploreCatalog.Deduplicate(values);
+        return values;
     }
 
     public bool SaveEditionCover(BookFingerprint fingerprint, byte[] imageBytes, string contentType, bool replaceExisting = false)
@@ -567,15 +588,25 @@ public sealed class PostgresScanCatalog(
         return reader.Read() ? (reader.GetFieldValue<byte[]>(0), reader.GetString(1)) : null;
     }
 
-    public bool HideExploreBook(string catalogID)
+    public bool HideExploreBook(string catalogID) => SetExplorePublished(catalogID, false);
+
+    public bool RestoreExploreBook(string catalogID) => SetExplorePublished(catalogID, true);
+
+    /// <remarks>
+    /// Hiding sets a flag rather than deleting anything. The scan, the transcript and the
+    /// events all stay, so an edition can be put back, and a listener who owns that file
+    /// keeps the filter results it already produced.
+    /// </remarks>
+    private bool SetExplorePublished(string catalogID, bool published)
     {
         if (string.IsNullOrWhiteSpace(catalogID)) return false;
         using var connection = dataSource.OpenConnection();
         using var command = new NpgsqlCommand("""
-            update audiobook_editions set explore_published = false
-            where left(lower(sha256), 24) = $1;
+            update audiobook_editions set explore_published = $2
+            where left(lower(sha256), 24) = $1 and explore_published <> $2;
             """, connection);
         command.Parameters.AddWithValue(catalogID.Trim().ToLowerInvariant());
+        command.Parameters.AddWithValue(published);
         return command.ExecuteNonQuery() > 0;
     }
 

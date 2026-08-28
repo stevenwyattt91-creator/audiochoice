@@ -950,6 +950,52 @@ Assert(ExploreCatalog.Deduplicate([
     ]).Count == 2,
     "Two different readings of one title were merged.");
 
+// Curating the catalogue. Hiding has to be reversible and has to leave the scan alone: the
+// entry comes off the store front, but a listener who owns that file keeps its filter
+// results, and putting it back must not need a database edit.
+var curated = new InMemoryScanCatalog(Path.Combine(Path.GetTempPath(),
+    $"audiochoice-curation-{Guid.NewGuid():N}"));
+var curatedFingerprint = new BookFingerprint(
+    3, new string('c', 64), 650_000, 39_600, "m4b", "The Deal", "Elle Kennedy",
+    null, null, null, null, null);
+var curatedCatalogID = new string('c', 24);
+var curationOwner = Guid.NewGuid();
+var curatedUpload = curated.CreateUpload(
+    curationOwner,
+    new CloudUploadAuthorizationRequest(curatedFingerprint, "the-deal.m4b", "audio/mp4", 650_000),
+    DateTimeOffset.UtcNow.AddHours(1),
+    "curation-token");
+Assert(curated.MarkUploaded(curatedUpload.ID, "/private/curation.m4b"),
+    "The curation fixture's upload was not recorded.");
+var curatedJob = curated.CreateJob(curationOwner, curatedUpload.ID, curatedFingerprint);
+Assert(curatedJob is not null, "The curation fixture's scan job was not created.");
+Assert(curated.CompleteJob(curatedJob!.ID, new ScanResult([], DateTimeOffset.UnixEpoch, "v1")),
+    "The curation fixture's scan did not complete.");
+Assert(curated.ListExploreBooks().Any(book => book.CatalogID == curatedCatalogID),
+    "A completed, identified scan did not reach the catalogue.");
+
+Assert(curated.HideExploreBook(curatedCatalogID), "Hiding a catalogue entry failed.");
+Assert(!curated.ListExploreBooks().Any(book => book.CatalogID == curatedCatalogID),
+    "A hidden entry was still shown to listeners.");
+// The whole point of hiding rather than deleting: the scan survives, so the listener who owns
+// this file still gets their filters.
+Assert(curated.FindResult(curatedFingerprint) is not null,
+    "Hiding an entry destroyed the scan result.");
+// An administrator has to be able to see a hidden entry, or it cannot be found to restore.
+var hiddenEntry = curated.ListExploreCatalog()
+    .SingleOrDefault(entry => entry.Book.CatalogID == curatedCatalogID);
+Assert(hiddenEntry is not null, "A hidden entry was invisible to administrators too.");
+Assert(!hiddenEntry!.IsPublished, "A hidden entry was reported as published.");
+Assert(hiddenEntry.WithheldReason is not null, "A hidden entry gave no reason.");
+
+Assert(curated.RestoreExploreBook(curatedCatalogID), "Restoring a hidden entry failed.");
+Assert(curated.ListExploreBooks().Any(book => book.CatalogID == curatedCatalogID),
+    "A restored entry did not come back to the catalogue.");
+Assert(!curated.RestoreExploreBook(curatedCatalogID),
+    "Restoring an entry that was never hidden reported success.");
+Assert(!curated.RestoreExploreBook("nosuchcatalogid"),
+    "Restoring an unknown catalog ID reported success.");
+
 // Where the buy button goes. Every Explore entry points at Audible now, and the link has to
 // be an exact listing whenever the file told us its product identifier, because sending a
 // listener to a search result for a book they asked to buy is how they buy the wrong edition.
