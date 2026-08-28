@@ -23,13 +23,36 @@ public sealed class OpenAIContentAnalysisProvider(
     private readonly string _checkpointFolder = dataPaths.AnalysisCheckpoints;
     public string ScannerVersion => options.ScannerVersion;
 
+    /// <summary>
+    /// The confidence floor as it applies to the mode actually running.
+    /// </summary>
+    /// <remarks>
+    /// Lambda-first mode has no model first pass: the keyword cues are the only evidence
+    /// there is, and they are emitted at 0.35 by design. Applying the floor there would
+    /// silence the entire scanner rather than tighten it.
+    /// </remarks>
+    private double EffectiveMinimumConfidence =>
+        options.LambdaFirstPassEnabled ? 0 : options.MinimumEventConfidence;
+
     public async Task<IReadOnlyList<ScanEvent>> Analyze(
         IReadOnlyList<TranscriptSegment> segments,
         Action<double>? reportProgress,
         CancellationToken cancellationToken)
     {
         var events = new List<ScanEvent>();
-        var deterministic = DeterministicContentDetector.Detect(segments);
+        // Exact profane words always count: there is no judgement in matching a literal
+        // word, and the apps need the word itself to group its occurrences under one switch.
+        var deterministic = DeterministicContentDetector.DetectProfanity(segments).ToList();
+
+        // Keyword cues are only a source of events where nothing else reads the passage.
+        // With Luna reading the whole transcript, adding them produced events its own
+        // instructions rule out -- a single "bloody" reported as graphic violence, "high"
+        // as intoxication, "pot" as a drug reference -- at a confidence nothing checked.
+        if (options.LambdaFirstPassEnabled)
+        {
+            deterministic.AddRange(DeterministicContentDetector.DetectCategoryCues(segments));
+        }
+
         for (var index = 0; index < deterministic.Count; index += 1)
         {
             var item = deterministic[index];
@@ -38,9 +61,11 @@ public sealed class OpenAIContentAnalysisProvider(
                 item.StartTime, item.EndTime, $"deterministic-{index}");
         }
         logger.LogInformation(
-            "Deterministic analysis found {EventCount} events in {SegmentCount} transcript segments.",
+            "Deterministic analysis found {EventCount} events in {SegmentCount} transcript segments " +
+            "(category cues {CueMode}).",
             deterministic.Count,
-            segments.Count);
+            segments.Count,
+            options.LambdaFirstPassEnabled ? "included" : "used for review selection only");
 
         if (options.LambdaFirstPassEnabled)
         {
@@ -81,7 +106,7 @@ public sealed class OpenAIContentAnalysisProvider(
                 "Lambda-first content analysis completed with {EventCount} events.",
                 lambdaResult.Length);
             return UserFacingEventPostProcessor.Process(
-                ApplyCompleteSceneSafetyGuard(lambdaResult, segments));
+                ReportCompleteSceneCoverage(lambdaResult, segments));
         }
 
         var batchSize = Math.Max(1, options.MaximumSegmentsPerAnalysisRequest);
@@ -118,11 +143,20 @@ public sealed class OpenAIContentAnalysisProvider(
                 classified.Events.Count,
                 batch.Count);
 
+            var admitted = 0;
             foreach (var item in classified.Events)
             {
-                AddEvent(events, item.Label, item.StartTime, item.EndTime,
+                if (AddEvent(events, item.Label, item.StartTime, item.EndTime,
                     item.Confidence, item.SafeDescription, item.ProfanityWord,
-                    batchStart, batchEnd);
+                    batchStart, batchEnd)) admitted += 1;
+            }
+            if (admitted != classified.Events.Count)
+            {
+                logger.LogInformation(
+                    "Batch {BatchNumber} had {RejectedCount} of {EventCount} events rejected " +
+                    "below the {Floor:F2} confidence floor.",
+                    batchNumber, classified.Events.Count - admitted,
+                    classified.Events.Count, options.MinimumEventConfidence);
             }
         }
 
@@ -140,7 +174,7 @@ public sealed class OpenAIContentAnalysisProvider(
             progress => reportProgress?.Invoke(.75 + progress * .25),
             cancellationToken);
         var result = SceneEventPostProcessor.Process(verifiedEvents, segments).ToArray();
-        result = ApplyCompleteSceneSafetyGuard(result, segments);
+        result = ReportCompleteSceneCoverage(result, segments);
 
         if (segments.Count >= 500 && result.Length == 0 &&
             DeterministicContentDetector.ContainsObviousContent(segments))
@@ -212,30 +246,55 @@ public sealed class OpenAIContentAnalysisProvider(
         return events.Where(item => !excludedEventIds.Contains(item.EventID)).ToArray();
     }
 
-    private ScanEvent[] ApplyCompleteSceneSafetyGuard(
+    /// <summary>
+    /// Records how much of the audiobook the verified scenes cover. Suppresses nothing.
+    /// </summary>
+    /// <remarks>
+    /// This previously discarded every complete-scene range when there were more than 25 of
+    /// them, or when they covered more than a fifth of the runtime, logging an error and
+    /// returning success. The thresholds were meant to catch a runaway verifier, but an
+    /// explicit romance genuinely has more than 25 scenes, and a fifth of the runtime is an
+    /// ordinary amount for one. So the guard fired hardest on the books the filters exist
+    /// for, removed every broad skip, and told the listener nothing -- leaving them to hear
+    /// the content they had asked to have removed.
+    ///
+    /// Three passes already have to agree before a range gets this far: Luna proposes it,
+    /// Terra confirms a sustained act, and Sol reviews it again, all at 0.85 confidence or
+    /// better. A result that survives all of that is evidence about the book, not a fault to
+    /// be corrected by throwing it away. Density is logged so an actually broken run is still
+    /// visible after the fact.
+    /// </remarks>
+    private ScanEvent[] ReportCompleteSceneCoverage(
         IReadOnlyList<ScanEvent> events,
         IReadOnlyList<TranscriptSegment> segments)
     {
         if (segments.Count == 0) return events.ToArray();
         var mapping = ContentTaxonomy.Mappings["sexual_complete_scene"];
         var completeScenes = events.Where(item => item.EventID == mapping.EventID).ToArray();
+        if (completeScenes.Length == 0) return events.ToArray();
+
         var audiobookDuration = Math.Max(1, segments.Max(item => item.EndTime) -
             segments.Min(item => item.StartTime));
         var skippedDuration = completeScenes.Sum(item => Math.Max(0, item.EndTime - item.StartTime));
+        var share = skippedDuration / audiobookDuration;
 
-        // Broad scene skips can hide minutes of narration, so an obviously implausible
-        // verifier result must fail closed. Narrow explicit-content events remain available;
-        // only the unsafe broad ranges are suppressed until a later scanner can review them.
-        if (completeScenes.Length <= 25 && skippedDuration <= audiobookDuration * .20)
+        // Warn rather than suppress. A very high share is worth a human look, but the
+        // listener still gets the filtering they asked for in the meantime.
+        if (completeScenes.Length > 25 || share > .20)
         {
-            return events.ToArray();
+            logger.LogWarning(
+                "Unusually dense sexual-scene result: {SceneCount} scenes covering " +
+                "{SkippedSeconds:F0} of {AudiobookSeconds:F0} seconds ({Share:P0}). " +
+                "All ranges are retained; review the edition if this looks wrong.",
+                completeScenes.Length, skippedDuration, audiobookDuration, share);
         }
-
-        logger.LogError(
-            "Suppressed {SceneCount} complete sexual-scene ranges covering {SkippedSeconds:F0} " +
-            "of {AudiobookSeconds:F0} seconds because the result exceeded the safety limit.",
-            completeScenes.Length, skippedDuration, audiobookDuration);
-        return events.Where(item => item.EventID != mapping.EventID).ToArray();
+        else
+        {
+            logger.LogInformation(
+                "Sexual-scene coverage: {SceneCount} scenes over {Share:P0} of the audiobook.",
+                completeScenes.Length, share);
+        }
+        return events.ToArray();
     }
 
     private string CheckpointPath(IReadOnlyList<TranscriptSegment> segments)
@@ -281,7 +340,8 @@ public sealed class OpenAIContentAnalysisProvider(
         File.Move(temporary, path, overwrite: true);
     }
 
-    private static void AddEvent(
+    /// <returns>False when the event was rejected and will not reach a listener.</returns>
+    private bool AddEvent(
         ICollection<ScanEvent> events,
         string label,
         double start,
@@ -293,7 +353,23 @@ public sealed class OpenAIContentAnalysisProvider(
         double batchEnd,
         string? stableSuffix = null)
     {
-        if (!ContentTaxonomy.Mappings.TryGetValue(label, out var mapping)) return;
+        if (!ContentTaxonomy.Mappings.TryGetValue(label, out var mapping))
+        {
+            // Previously a silent return. A label the taxonomy does not know means the prompt
+            // or schema moved ahead of it, and the detection is being dropped -- which is
+            // exactly the kind of thing that must not happen quietly.
+            logger.LogError(
+                "Discarded a detection with unknown taxonomy label {Label}. The analysis " +
+                "schema and ContentTaxonomy have diverged.", label);
+            return false;
+        }
+
+        // Enforces the floor the prompt already states. Nothing downstream reads confidence,
+        // so anything admitted here is presented to a listener with full authority.
+        if (confidence < EffectiveMinimumConfidence)
+        {
+            return false;
+        }
         var startTime = Math.Clamp(start, batchStart, batchEnd);
         var endTime = Math.Clamp(end, startTime, batchEnd);
         var description = label.StartsWith("profanity_", StringComparison.Ordinal)
@@ -304,6 +380,7 @@ public sealed class OpenAIContentAnalysisProvider(
             mapping.EventID, Math.Clamp(confidence, 0, 1),
             StableEventKey(mapping, startTime, endTime, description, stableSuffix), description,
             AggregateKey(profanityWord), CensorWord(profanityWord)));
+        return true;
     }
 
     public static string SafeDescriptionForEvent(string label, string? supplied)
@@ -498,8 +575,20 @@ public sealed class OpenAIContentAnalysisProvider(
             .Where(item => item is not null)
             .Select(item => item!)
             .DistinctBy(item => item.Source.CandidateKey)
-            .Take(options.MaximumSceneEscalationRequestsPerJob)
             .ToArray();
+
+        // Fails rather than truncating. This used to `.Take()` the cap, so scenes past it
+        // silently fell back to their Terra decision and the ambiguous ones were dropped
+        // outright -- a scan that quietly covered less than it should while reporting
+        // success. Its sibling verification cap has always thrown; the two now agree, and a
+        // job that hits this needs the cap raised rather than the result trimmed.
+        if (escalationCandidates.Length > options.MaximumSceneEscalationRequestsPerJob)
+        {
+            throw new InvalidOperationException(
+                $"Scene escalation produced {escalationCandidates.Length} candidates, above " +
+                $"the configured limit of {options.MaximumSceneEscalationRequestsPerJob}. " +
+                "The job was stopped rather than scanning part of the audiobook.");
+        }
 
         logger.LogInformation(
             "Sol escalation planned: {SolCandidateCount} confirmed or ambiguous scene candidates " +
@@ -511,8 +600,16 @@ public sealed class OpenAIContentAnalysisProvider(
             escalationCandidates,
             progress => reportProgress?.Invoke(.5 + progress * .5),
             cancellationToken);
-        var solByCandidate = solDecisions.ToDictionary(
-            item => item.CandidateKey, StringComparer.Ordinal);
+        // Grouped rather than keyed directly. Each request carries one candidate, but the
+        // schema permits an array, so a model returning two decisions for the same key threw
+        // and failed the job at the very last step, after every model call had been paid for.
+        // The most confident decision wins, matching how the first pass deduplicates.
+        var solByCandidate = solDecisions
+            .GroupBy(item => item.CandidateKey, StringComparer.Ordinal)
+            .ToDictionary(
+                group => group.Key,
+                group => group.OrderByDescending(item => item.Confidence).First(),
+                StringComparer.Ordinal);
 
         foreach (var (_, terraDecision) in terraDecisions)
         {
@@ -820,7 +917,42 @@ Candidates:
         }
     }
 
-    private static string BuildInput(
+    /// <summary>
+    /// The allowed labels as the prompt states them, wrapped for readability.
+    /// </summary>
+    /// <remarks>
+    /// Built from <see cref="ContentTaxonomy.EnforcedLabels"/> rather than written out again,
+    /// so the prompt, the response schema and the taxonomy cannot disagree about what the
+    /// model may return.
+    /// </remarks>
+    internal static readonly string AllowedLabelList = BuildAllowedLabelList();
+
+    private static string BuildAllowedLabelList()
+    {
+        var builder = new StringBuilder();
+        var lineLength = 0;
+        for (var index = 0; index < ContentTaxonomy.EnforcedLabels.Count; index += 1)
+        {
+            var label = ContentTaxonomy.EnforcedLabels[index];
+            var last = index == ContentTaxonomy.EnforcedLabels.Count - 1;
+            var token = label + (last ? "." : ",");
+            if (lineLength > 0 && lineLength + token.Length + 1 > 78)
+            {
+                builder.Append('\n');
+                lineLength = 0;
+            }
+            else if (lineLength > 0)
+            {
+                builder.Append(' ');
+                lineLength += 1;
+            }
+            builder.Append(token);
+            lineLength += token.Length;
+        }
+        return builder.ToString();
+    }
+
+    internal static string BuildInput(
         IReadOnlyList<TranscriptSegment> segments)
     {
         var transcript = JsonSerializer.Serialize(segments);
@@ -852,14 +984,7 @@ explicit acts, and the immediate aftermath may establish continuity even when no
 appears in every segment. Do not extend a scene across a clear topic, location, time, or chapter
 change.
 Allowed labels:
-sexual_suggestive_dialogue, sexual_references, sexual_nudity, sexual_implied_activity,
-sexual_explicit_activity, sexual_complete_scene, profanity_mild, profanity_strong,
-profanity_sexual, profanity_slur, violence_graphic, violence_torture,
-violence_children, violence_animals,
-substance_alcohol_use, substance_intoxication, substance_drug_reference,
-substance_drug_use, substance_abuse_overdose, blasphemy_religious_profanity,
-blasphemy_statement, self_harm_reference, self_harm_suicidal_thoughts,
-self_harm_suicide_attempt, self_harm_depiction.
+""" + AllowedLabelList + """
 For safeDescription, write a neutral, discreet, non-graphic summary of at most 80 characters.
 It must still tell a parent why they might choose to skip: name the high-level situation, not
 the mechanics. For example: "A character removes clothing and is described without clothing",
@@ -916,17 +1041,11 @@ Transcript segments:
                                     ["label"] = new JsonObject
                                     {
                                         ["type"] = "string",
-                                        ["enum"] = new JsonArray(
-                                            "sexual_suggestive_dialogue", "sexual_references",
-                                            "sexual_nudity", "sexual_implied_activity",
-                                            "sexual_explicit_activity", "sexual_complete_scene",
-                                            "profanity_mild", "profanity_strong", "profanity_sexual", "profanity_slur",
-                                            "violence_graphic", "violence_torture", "violence_children", "violence_animals",
-                                            "substance_alcohol_use", "substance_intoxication", "substance_drug_reference",
-                                            "substance_drug_use", "substance_abuse_overdose",
-                                            "blasphemy_religious_profanity", "blasphemy_statement",
-                                            "self_harm_reference", "self_harm_suicidal_thoughts",
-                                            "self_harm_suicide_attempt", "self_harm_depiction")
+                                        // Derived from the taxonomy so the schema cannot
+                                        // permit a label the taxonomy would then discard.
+                                        ["enum"] = new JsonArray(ContentTaxonomy.EnforcedLabels
+                                            .Select(label => (JsonNode)JsonValue.Create(label)!)
+                                            .ToArray())
                                     },
                                     ["startTime"] = new JsonObject { ["type"] = "number" },
                                     ["endTime"] = new JsonObject { ["type"] = "number" },

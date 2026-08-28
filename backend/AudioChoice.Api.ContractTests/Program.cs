@@ -1,4 +1,5 @@
 using System.Text;
+using System.Text.Json;
 using AudioChoice.Api.Contracts;
 using AudioChoice.Api.Processing;
 using AudioChoice.Api.Services;
@@ -334,6 +335,20 @@ var narrowSceneEvents = SceneEventPostProcessor.Process(
     [new TranscriptSegment(0, 600, "Test transcript")]);
 Assert(narrowSceneEvents.Count == 0,
     "A short detection was incorrectly promoted to a complete-scene skip.");
+
+// Both sides of the minimum are pinned, because only asserting that short scenes are dropped
+// would be satisfied by dropping every scene. The threshold was lowered from 60 seconds once
+// Terra and Sol began verifying every scene, and a verified minute-long encounter has to keep
+// its skip.
+var retainedSceneEvents = SceneEventPostProcessor.Process(
+    [
+        new ScanEvent(Guid.NewGuid(), 300, 380, completeSceneMapping.CategoryID,
+            completeSceneMapping.GroupID, completeSceneMapping.EventID, .94, "real-scene",
+            "Sustained intimate encounter")
+    ],
+    [new TranscriptSegment(0, 600, "Test transcript")]);
+Assert(retainedSceneEvents.Count == 1,
+    "A verified scene comfortably above the minimum lost its complete-scene skip.");
 
 var schedulerProvider = new SchedulerFakeProvider();
 var scheduler = new ConcurrentChunkTranscriber(
@@ -672,6 +687,84 @@ Assert(!AppleIdentityToken.SignatureIsValid($"{appleHeader}.{applePayload}.{appl
 
 Assert(AppleIdentityToken.ParseJsonWebKeySet("}{not json").Count == 0,
     "Malformed JWKS did not degrade to an empty key set.");
+
+// The taxonomy has to say the same thing everywhere. It is declared in the contracts file,
+// implemented in C#, and mirrored in each mobile client's own table; the declared file had
+// drifted to five labels while the implementation carried twenty-eight and responses
+// advertised version 2.0. These assertions make that kind of drift fail here instead of
+// showing up as a filter control that does nothing.
+var taxonomyPath = Path.Combine(
+    AppContext.BaseDirectory, "..", "..", "..", "..", "..",
+    "contracts", "content-taxonomy.v2.json");
+Assert(File.Exists(taxonomyPath), $"The taxonomy contract file was not found at {taxonomyPath}.");
+using var taxonomyDocument = JsonDocument.Parse(File.ReadAllText(taxonomyPath));
+var declaredGroups = taxonomyDocument.RootElement.GetProperty("categories").EnumerateArray()
+    .SelectMany(category => category.GetProperty("groups").EnumerateArray()
+        .Select(group => new
+        {
+            Label = group.GetProperty("label").GetString()!,
+            Enforced = group.GetProperty("enforced").GetBoolean(),
+            CategoryID = category.GetProperty("categoryID").GetString()!,
+            Digit = category.GetProperty("digit").GetInt32(),
+            Index = group.GetProperty("index").GetInt32()
+        }))
+    .ToArray();
+
+foreach (var declared in declaredGroups)
+{
+    Assert(ContentTaxonomy.Mappings.TryGetValue(declared.Label, out var mapping),
+        $"The taxonomy contract declares {declared.Label} but ContentTaxonomy does not.");
+    Assert(mapping!.CategoryID == Guid.Parse(declared.CategoryID),
+        $"{declared.Label} has a different category identifier in code than in the contract.");
+    // The identifiers are derived, so a mismatch here means the derivation changed.
+    Assert(mapping.GroupID == Guid.Parse(
+            $"{declared.Digit}1000000-0000-0000-0000-{declared.Index:D12}"),
+        $"{declared.Label} does not have the derived group identifier.");
+    Assert(mapping.EventID == Guid.Parse(
+            $"{declared.Digit}1100000-0000-0000-0000-{declared.Index:D12}"),
+        $"{declared.Label} does not have the derived event identifier.");
+}
+
+var declaredLabels = declaredGroups.Select(item => item.Label).ToHashSet(StringComparer.Ordinal);
+var legacyDeclared = taxonomyDocument.RootElement.GetProperty("legacyLabels").EnumerateArray()
+    .Select(item => item.GetProperty("label").GetString()!).ToHashSet(StringComparer.Ordinal);
+foreach (var label in ContentTaxonomy.Mappings.Keys)
+{
+    Assert(declaredLabels.Contains(label) || legacyDeclared.Contains(label),
+        $"ContentTaxonomy has {label} but the taxonomy contract never declares it.");
+}
+
+// What the model is allowed to return must be exactly what the contract marks enforced.
+var enforcedDeclared = declaredGroups.Where(item => item.Enforced)
+    .Select(item => item.Label).ToHashSet(StringComparer.Ordinal);
+Assert(ContentTaxonomy.EnforcedLabels.ToHashSet(StringComparer.Ordinal)
+        .SetEquals(enforcedDeclared),
+    "The labels the analysis model may emit do not match the enforced labels in the contract.");
+Assert(ContentTaxonomy.EnforcedLabels.Distinct(StringComparer.Ordinal).Count() ==
+        ContentTaxonomy.EnforcedLabels.Count,
+    "The enforced label list contains a duplicate.");
+Assert(ContentTaxonomy.EnforcedLabels.All(ContentTaxonomy.Mappings.ContainsKey),
+    "An enforced label has no taxonomy mapping, so its detections would be discarded.");
+
+// The three broad violence labels must stay out of reach of the model.
+foreach (var excluded in new[] { "violence_mild", "violence_intense", "violence_death" })
+{
+    Assert(!ContentTaxonomy.EnforcedLabels.Contains(excluded, StringComparer.Ordinal),
+        $"{excluded} is emittable again, which reopens the over-filtering the narrow " +
+        "violence policy exists to prevent.");
+    Assert(ContentTaxonomy.Mappings.ContainsKey(excluded),
+        $"{excluded} lost its mapping, so older scans containing it would stop resolving.");
+}
+
+// The prompt lists the allowed labels for the model. It is generated from the same source as
+// the response schema, and this is what proves the generation still covers everything.
+foreach (var label in ContentTaxonomy.EnforcedLabels)
+{
+    Assert(OpenAIContentAnalysisProvider.AllowedLabelList.Contains(label, StringComparison.Ordinal),
+        $"The analysis prompt does not mention the allowed label {label}.");
+}
+Assert(!OpenAIContentAnalysisProvider.AllowedLabelList.Contains("violence_mild", StringComparison.Ordinal),
+    "The analysis prompt offers the model a label the policy excludes.");
 
 // Listener reports that filtering was wrong. The only route by which a missed passage
 // becomes something anyone can act on, so what it accepts and refuses matters.

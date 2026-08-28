@@ -3,7 +3,13 @@
 Stage 13 establishes a versioned wire contract shared by the private backend, iOS,
 and Android.
 
-- `content-taxonomy.v1.json` is the canonical stable ID registry.
+- `content-taxonomy.v2.json` is the canonical stable ID registry, and the only place the
+  taxonomy is declared. The backend asserts it matches `Processing/ContentTaxonomy.cs`, and
+  both mobile clients assert their own group tables match it, so adding a group in one place
+  fails a check instead of silently producing a filter with no switch.
+- `content-taxonomy.v1.json` is superseded. It describes the five prototype labels and is
+  kept only so a scan stamped with taxonomy version 1.0 still resolves. It was described here
+  as canonical while carrying five of the twenty-eight labels the backend actually used.
 - `fixtures/completed-scan-response.v1.json` is the canonical completed-result fixture.
 - Backend responses include `taxonomyVersion`.
 - Mobile clients must reject nonempty results with an unsupported taxonomy version or

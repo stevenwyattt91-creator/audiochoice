@@ -21,5 +21,9 @@ swiftc -O -o "$workspace/filterchecks" \
   "$sources/BookFilterSettings.swift" \
   "$sources/PlaybackFilterTaxonomy.swift" \
 
+# The taxonomy table in the app is one of four copies of the same thing. Pointing the checks
+# at the declared contract is what stops them drifting apart unnoticed.
+export AUDIOCHOICE_TAXONOMY_CONTRACT="$repository_root/contracts/content-taxonomy.v2.json"
+
 # UserDefaults needs somewhere to write for the storage round trip.
 cd "$workspace" && "$workspace/filterchecks"
