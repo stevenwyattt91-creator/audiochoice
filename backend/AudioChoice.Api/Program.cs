@@ -258,6 +258,17 @@ else
 // which is what converting or re-tagging an audiobook produces.
 // Constructed explicitly because the type also exposes a path-based constructor for
 // tests, and container-selected constructors should not depend on that overload set.
+if (databaseOptions.Enabled)
+{
+#if POSTGRES
+    builder.Services.AddSingleton<IFilterReportStore, PostgresFilterReportStore>();
+#endif
+}
+else
+{
+    builder.Services.AddSingleton<IFilterReportStore>(services =>
+        new FileFilterReportStore(services.GetRequiredService<AudioChoiceDataPaths>()));
+}
 builder.Services.AddSingleton<IEditionAliasStore>(services =>
     new FileEditionAliasStore(services.GetRequiredService<AudioChoiceDataPaths>()));
 builder.Services.AddSingleton<IEditionSignatureStore>(services =>
@@ -1525,6 +1536,53 @@ app.MapPut("/v1/library/{bookID:guid}/filter-settings", (
     if (user is null) return Results.Unauthorized();
     var settings = data.SaveBookFilterSettings(user.ID, bookID, request);
     return settings is null ? Results.BadRequest() : Results.Ok(settings);
+});
+
+// Listeners telling us filtering was wrong. The only route by which a missed passage or an
+// over-zealous skip becomes something anyone can act on, so it accepts generously: a
+// malformed report is dropped with 400 rather than retried, because the listener has moved
+// on and a queued retry would report the wrong moment.
+app.MapPost("/v1/filter-reports", (
+    FilterReportRequest request,
+    HttpContext context,
+    IFilterReportStore reports) =>
+{
+    var user = CurrentUser(context);
+    if (user is null) return Results.Unauthorized();
+    var report = reports.Record(user.ID, request);
+    return report is null
+        ? Results.BadRequest(new { error = "A fingerprint and a playback position are required." })
+        : Results.Created($"/v1/filter-reports/{report.ID}", report);
+});
+
+app.MapGet("/v1/admin/filter-reports", (
+    HttpContext context,
+    IFilterReportStore reports,
+    int? limit,
+    string? sha256,
+    int? fingerprintVersion,
+    long? fileSize) =>
+{
+    if (!IsConfiguredApiToken(context, app.Configuration)) return Results.Unauthorized();
+
+    // All three parts identify an edition; a sha256 on its own is not enough to build a
+    // fingerprint, so a partial filter is refused rather than silently ignored.
+    BookFingerprint? fingerprint = null;
+    if (!string.IsNullOrWhiteSpace(sha256) || fingerprintVersion is not null || fileSize is not null)
+    {
+        if (string.IsNullOrWhiteSpace(sha256) || fingerprintVersion is null || fileSize is null)
+        {
+            return Results.BadRequest(new
+            {
+                error = "Filtering by edition needs sha256, fingerprintVersion and fileSize together."
+            });
+        }
+        fingerprint = new BookFingerprint(
+            fingerprintVersion.Value, sha256!, fileSize.Value,
+            null, "", null, null, null, null, null, null, null);
+    }
+
+    return Results.Ok(reports.List(limit ?? 200, fingerprint));
 });
 
 app.MapGet("/v1/filter-profiles", (

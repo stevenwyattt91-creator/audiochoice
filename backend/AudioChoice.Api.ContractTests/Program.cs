@@ -662,7 +662,97 @@ Assert(!AppleIdentityToken.SignatureIsValid($"{appleHeader}.{applePayload}.{appl
 Assert(AppleIdentityToken.ParseJsonWebKeySet("}{not json").Count == 0,
     "Malformed JWKS did not degrade to an empty key set.");
 
+// Listener reports that filtering was wrong. The only route by which a missed passage
+// becomes something anyone can act on, so what it accepts and refuses matters.
+var reportFolder = Path.Combine(Path.GetTempPath(), $"audiochoice-reports-{Guid.NewGuid()}");
+Directory.CreateDirectory(reportFolder);
+var reportPath = Path.Combine(reportFolder, "filter-reports.json");
+var reportStore = new FileFilterReportStore(reportPath);
+var reporter = Guid.NewGuid();
+var reported = reportStore.Record(reporter, new FilterReportRequest(
+    editionBase, FilterReportKind.MissedContent, 1234.5));
+Assert(reported is not null, "A well-formed missed-content report was refused.");
+Assert(reported!.WindowSeconds == FilterReports.DefaultWindowSeconds,
+    "A report without a window did not fall back to the default look-back.");
+Assert(reported.Kind == FilterReportKind.MissedContent, "A report changed kind on the way in.");
+
+// A report carries a timestamp and nothing about what was heard, which is what lets
+// filtering be corrected without a listener's audio ever leaving their device.
+Assert(reported.GetType().GetProperties().All(property =>
+        property.Name is not ("Transcript" or "Text" or "Audio" or "Words" or "Note")),
+    "A filter report gained a field that could carry the content it reports.");
+
+Assert(reportStore.Record(reporter, new FilterReportRequest(
+        editionBase, FilterReportKind.MissedContent, -5)) is null,
+    "A report at a negative position was accepted.");
+Assert(reportStore.Record(reporter, new FilterReportRequest(
+        editionBase, FilterReportKind.MissedContent, double.NaN)) is null,
+    "A report at a non-finite position was accepted.");
+Assert(reportStore.Record(Guid.Empty, new FilterReportRequest(
+        editionBase, FilterReportKind.MissedContent, 10)) is null,
+    "A report with no account was accepted.");
+Assert(reportStore.Record(reporter, new FilterReportRequest(
+        editionBase, FilterReportKind.MissedContent, 10, WindowSeconds: 10_000))!
+        .WindowSeconds == FilterReports.MaximumWindowSeconds,
+    "An unbounded look-back window was not clamped.");
+
+// Over-filtering is the complaint that needs an event to be actionable: without one there
+// is no way to tell which control was wrong.
+var overFiltered = reportStore.Record(reporter, new FilterReportRequest(
+    editionBase, FilterReportKind.WronglyFiltered, 99, ScanEventID: Guid.NewGuid(),
+    ScannerVersion: "test-1"));
+Assert(overFiltered?.ScanEventID is not null, "A wrongly-filtered report lost its event.");
+Assert(overFiltered?.ScannerVersion == "test-1",
+    "A report lost the scanner version that produced the result.");
+Assert(reportStore.List().Count >= 3, "Reports were not listed back.");
+Assert(reportStore.List(limit: 1).Count == 1, "A report listing ignored its limit.");
+Assert(reportStore.List(fingerprint: editionBase).Count >= 3,
+    "Filtering reports by edition returned nothing.");
+Assert(new FileFilterReportStore(reportPath).List().Count >= 3,
+    "Reports did not survive being read back from disk.");
+
+// Explore de-duplication. Merging too little leaves the duplicate rows; merging too much
+// hides a different recording behind another's entry, applying a scan that does not
+// describe it.
+Assert(ExploreCatalog.Deduplicate([
+        Catalogued("a", "Fourth Wing", "Rebecca Yarros", cover: "/cover"),
+        Catalogued("b", "Fourth Wing (Unabridged)", "Rebecca Yarros"),
+        Catalogued("c", "Fourth Wing")
+    ]).Count == 1,
+    "Three spellings of one recording were not merged.");
+Assert(ExploreCatalog.Deduplicate([
+        Catalogued("a", "Fourth Wing", "Rebecca Yarros", eventCount: 900),
+        Catalogued("b", "Fourth Wing", "Rebecca Yarros", eventCount: 2, cover: "/cover")
+    ]).Single().CatalogID == "b",
+    "A cover did not outrank a richer scan when choosing which entry survives.");
+Assert(ExploreCatalog.Deduplicate([
+        Catalogued("a", "Fourth Wing", "Rebecca Yarros", editionType: "GraphicAudio"),
+        Catalogued("b", "Fourth Wing", "Rebecca Yarros")
+    ]).Count == 2,
+    "Two different editions were collapsed into one.");
+Assert(ExploreCatalog.Deduplicate([
+        Catalogued("a", "Fourth Wing 1 of 2", "Rebecca Yarros"),
+        Catalogued("b", "Fourth Wing 2 of 2", "Rebecca Yarros")
+    ]).Count == 2,
+    "Two parts of one release were collapsed into one.");
+Assert(ExploreCatalog.Deduplicate([
+        Catalogued("a", "Fourth Wing", "Rebecca Yarros"),
+        Catalogued("b", "Fourth Wing", "Someone Else")
+    ]).Count == 2,
+    "Two different authors sharing a title were merged.");
+Assert(ExploreCatalog.Deduplicate([
+        Catalogued("1", "Alpha", "A"), Catalogued("2", "Beta", "B")
+    ]).Select(value => value.CatalogID).SequenceEqual(["1", "2"]),
+    "De-duplication reordered a catalogue that had no duplicates.");
+
 Console.WriteLine("AudioChoice backend contract tests passed.");
+
+static ExploreCatalogBook Catalogued(
+    string id, string title, string? author = null, string? editionType = null,
+    int eventCount = 10, string? cover = null) =>
+    new(id, title, author, null, null, editionType, 3600, "m4b",
+        DateTimeOffset.UnixEpoch, "v1", eventCount, [], cover, null,
+        new Uri("https://example.com"), "example", false);
 
 static string Base64Url(byte[] value) =>
     Convert.ToBase64String(value).TrimEnd('=').Replace('+', '-').Replace('/', '_');
