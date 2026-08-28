@@ -195,6 +195,14 @@ resource api 'Microsoft.App/containerApps@2024-03-01' = {
               value: 'true'
             }
             {
+              // Transcripts must be shared storage, not a local disk. The GPU worker
+              // that produces them runs on a different host from this API, which is
+              // the one that serves read-along, so a file-backed store is invisible
+              // to it. The container is created on first write.
+              name: 'AudioChoice__TemporaryAudioStorage__BlobTranscriptEnabled'
+              value: 'true'
+            }
+            {
               name: 'AudioChoice__TemporaryAudioStorage__StorageAccountName'
               value: storage.name
             }

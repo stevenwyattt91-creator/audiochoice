@@ -121,6 +121,12 @@ resource worker 'Microsoft.App/containerApps@2024-03-01' = {
               value: 'true'
             }
             {
+              // Shared with the API and the Lambda GPU worker, so a transcript
+              // produced on any host is readable by the one serving read-along.
+              name: 'AudioChoice__TemporaryAudioStorage__BlobTranscriptEnabled'
+              value: 'true'
+            }
+            {
               name: 'AudioChoice__TemporaryAudioStorage__StorageAccountName'
               value: storage.name
             }
