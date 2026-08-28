@@ -141,6 +141,14 @@ data class ExploreCatalogBook(
     val purchaseURL: String,
     val purchaseProvider: String,
     val purchaseVerified: Boolean = false,
+    /**
+     * The retail product identifier for this recording, when one is known.
+     *
+     * Lets two copies of one recording be recognised as the same catalogue entry, which
+     * titles cannot do on their own: the same edition arrives spelled several ways
+     * depending on who tagged the file.
+     */
+    val productIdentifier: String? = null,
 )
 
 @Serializable

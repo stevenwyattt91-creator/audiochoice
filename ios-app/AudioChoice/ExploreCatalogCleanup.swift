@@ -15,25 +15,95 @@ enum ExploreCatalogCleanup {
 
     static func deduplicated(_ books: [ExploreCatalogBook]) -> [ExploreCatalogBook] {
         var clusters: [[ExploreCatalogBook]] = []
+        // A retail product identifier names one published recording outright, so two copies
+        // sharing one are the same entry however their titles are spelled. Consulted first
+        // because it is the only signal here that cannot be mistaken.
+        var indexByIdentifier: [String: Int] = [:]
         var indexByKey: [String: [Int]] = [:]
 
         for book in books {
+            let identifier = book.productIdentifier
+                .map { $0.uppercased() }
+                .flatMap { $0.isEmpty ? nil : $0 }
+            if let identifier, let known = indexByIdentifier[identifier] {
+                clusters[known].append(book)
+                continue
+            }
+
             let key = groupKey(book)
-            var placed = false
+            var placed: Int?
             for index in indexByKey[key] ?? [] where isSameBook(clusters[index][0], book) {
                 clusters[index].append(book)
-                placed = true
+                placed = index
                 break
             }
-            if !placed {
+
+            // Same author, same part, same runtime to the second: one recording whose title
+            // is written two ways. Only reached when the titles disagree, since matching
+            // titles would have been caught above.
+            if placed == nil {
+                for index in clusters.indices where isSameRecording(clusters[index][0], book) {
+                    clusters[index].append(book)
+                    placed = index
+                    break
+                }
+            }
+
+            if placed == nil {
                 clusters.append([book])
+                placed = clusters.count - 1
                 indexByKey[key, default: []].append(clusters.count - 1)
+            }
+
+            // Remember the identifier against whichever cluster this joined, so a later copy
+            // carrying the same one lands in the same place.
+            if let identifier, let placed, indexByIdentifier[identifier] == nil {
+                indexByIdentifier[identifier] = placed
             }
         }
 
         // Order is preserved from the incoming list, which the server already sorted by
         // title, so cleaning up does not reshuffle the catalogue.
         return clusters.map(best)
+    }
+
+    /// How far two runtimes may differ and still be the same recording.
+    ///
+    /// Converting a file re-encodes it, which shifts the reported length slightly, and a
+    /// container's runtime is rounded. Two seconds absorbs that without being wide enough to
+    /// merge an abridged reading with an unabridged one.
+    private static let runtimeMatchSeconds: Double = 2
+
+    /// Whether two entries are the same recording judged on runtime rather than title.
+    ///
+    /// The last resort for copies carrying no product identifier, where one was tagged by
+    /// hand and the other named from a filename. Runtime discriminates because two different
+    /// recordings of a book run to different lengths: a different narrator reads at a
+    /// different pace.
+    ///
+    /// An author is required on both sides. Without one this would merge on runtime alone,
+    /// and two unrelated books that happen to run the same length are not the same book.
+    static func isSameRecording(_ left: ExploreCatalogBook, _ right: ExploreCatalogBook) -> Bool {
+        // Two identifiers that disagree are evidence of two different recordings, and that
+        // outranks a runtime coincidence. Equal identifiers never reach here, having already
+        // merged above, so anything left with one on both sides is genuinely two books.
+        if left.productIdentifier != nil && right.productIdentifier != nil { return false }
+        guard let leftDuration = left.duration, leftDuration > 0,
+              let rightDuration = right.duration, rightDuration > 0,
+              abs(leftDuration - rightDuration) <= runtimeMatchSeconds,
+              partMarker(left.title) == partMarker(right.title),
+              normalized(left.editionType) == normalized(right.editionType) else { return false }
+        let leftAuthor = normalized(left.author)
+        return !leftAuthor.isEmpty && leftAuthor == normalized(right.author)
+    }
+
+    /// Whether two runtimes are close enough to be the same recording.
+    ///
+    /// An unknown runtime is treated as agreement rather than as a mismatch, because an
+    /// untagged file is one of the differences being reconciled here.
+    private static func runtimesAgree(_ left: Double?, _ right: Double?) -> Bool {
+        guard let left, left > 0, let right, right > 0 else { return true }
+        return abs(left - right) <= runtimeMatchSeconds
     }
 
     /// The entry to keep when several describe the same recording.
@@ -85,7 +155,11 @@ enum ExploreCatalogCleanup {
     static func isSameBook(_ left: ExploreCatalogBook, _ right: ExploreCatalogBook) -> Bool {
         guard normalizedTitle(left.title) == normalizedTitle(right.title),
               partMarker(left.title) == partMarker(right.title),
-              normalized(left.editionType) == normalized(right.editionType) else { return false }
+              normalized(left.editionType) == normalized(right.editionType),
+              // Two runtimes that disagree are two different readings of one book, whatever
+              // the edition type says: a different narrator, or an abridgement. Merging them
+              // would show one entry's scan for audio it does not describe.
+              runtimesAgree(left.duration, right.duration) else { return false }
 
         let leftAuthor = normalized(left.author)
         let rightAuthor = normalized(right.author)

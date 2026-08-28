@@ -144,4 +144,13 @@ public sealed record ExploreCatalogBook(
     string? Description,
     Uri PurchaseURL,
     string PurchaseProvider,
-    bool PurchaseVerified);
+    bool PurchaseVerified,
+    /// <summary>
+    /// The retail product identifier for this recording, when one is known.
+    /// </summary>
+    /// <remarks>
+    /// Carried so the catalogue can recognise two copies of one recording as the same
+    /// entry. Titles cannot do that on their own: the same edition arrives spelled several
+    /// ways depending on who tagged the file.
+    /// </remarks>
+    string? ProductIdentifier = null);

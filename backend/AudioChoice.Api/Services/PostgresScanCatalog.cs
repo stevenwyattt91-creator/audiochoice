@@ -478,6 +478,10 @@ public sealed class PostgresScanCatalog(
         while (reader.Read())
         {
             var fingerprint = ReadFingerprint(reader, 0);
+            // A catalogue entry has to name a book. Placeholder titles are excluded here
+            // rather than in SQL so both catalogues apply one rule, and because the title
+            // is assembled by EditionTitleFormatter rather than read straight from a column.
+            if (!ExploreCatalog.IsPublishable(fingerprint)) continue;
             var result = new ScanResult(
                 reader.GetFieldValue<Guid[]>(16).Select((groupID, index) => new ScanEvent(
                     Guid.Empty, index, index, Guid.Empty, groupID, Guid.Empty, 0)).ToArray(),

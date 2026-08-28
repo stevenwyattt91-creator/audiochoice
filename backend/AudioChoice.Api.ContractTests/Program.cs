@@ -888,6 +888,68 @@ Assert(
         describedFingerprint, "A completely different and equally long replacement text."),
     "A second report overwrote a synopsis that was already stored.");
 
+// What reaches the catalogue at all. Explore is a store front, so an entry has to name a
+// book: every edition anyone scans is published by default, which put files that were never
+// identified into the catalogue as "Imported audiobook".
+static BookFingerprint Edition(string? title, string? author = "Elle Kennedy") =>
+    new(3, new string('f', 64), 700_000, 3600, "m4b", title, author,
+        null, null, null, null, null);
+Assert(ExploreCatalog.IsPublishable(Edition("The Deal")),
+    "An identified book was kept out of the catalogue.");
+Assert(!ExploreCatalog.IsPublishable(Edition("Imported audiobook")),
+    "A file that was never identified was published to the catalogue.");
+Assert(!ExploreCatalog.IsPublishable(Edition("Untitled Audiobook")),
+    "A placeholder title was published to the catalogue.");
+Assert(!ExploreCatalog.IsPublishable(Edition("imported audiobook!")),
+    "A placeholder title escaped by way of punctuation.");
+Assert(!ExploreCatalog.IsPublishable(Edition(null)),
+    "An edition with no title was published to the catalogue.");
+Assert(!ExploreCatalog.IsPublishable(Edition("   ")),
+    "A blank title was published to the catalogue.");
+Assert(!ExploreCatalog.IsPublishable(Edition("track 1")),
+    "A track placeholder was published to the catalogue.");
+Assert(!ExploreCatalog.IsPublishable(Edition("12345")),
+    "A numeric filename was published as a title.");
+// An author is the cheapest evidence the title came from the file's tags rather than a
+// filename, and an entry without one cannot be presented as a catalogue row anyway.
+Assert(!ExploreCatalog.IsPublishable(Edition("The Deal", null)),
+    "A book with no author was published to the catalogue.");
+
+// One row per recording. Titles cannot deliver that alone, because the same edition arrives
+// spelled differently depending on who tagged the file.
+Assert(ExploreCatalog.Deduplicate([
+        Catalogued("a", "The Deal", "Elle Kennedy", identifier: "B00SWZQZ4E"),
+        Catalogued("b", "The Deal: Off-Campus Book 1", "Elle Kennedy", identifier: "B00SWZQZ4E")
+    ]).Count == 1,
+    "Two spellings of one recording did not merge on a shared product identifier.");
+Assert(ExploreCatalog.Deduplicate([
+        Catalogued("a", "The Deal", "Elle Kennedy", identifier: "B00SWZQZ4E"),
+        Catalogued("b", "The Mistake", "Elle Kennedy", identifier: "B0112BOSKQ")
+    ]).Count == 2,
+    "Two books with different product identifiers were merged.");
+Assert(ExploreCatalog.Deduplicate([
+        Catalogued("a", "The Deal", "Elle Kennedy", duration: 39_600),
+        Catalogued("b", "the deal 3112r", "Elle Kennedy", duration: 39_601)
+    ]).Count == 1,
+    "One recording under two titles did not merge on author and runtime.");
+Assert(ExploreCatalog.Deduplicate([
+        Catalogued("a", "Some Book", "Elle Kennedy", duration: 39_600),
+        Catalogued("b", "A Different Book", "Rebecca Yarros", duration: 39_600)
+    ]).Count == 2,
+    "Two books sharing a runtime were merged despite different authors.");
+Assert(ExploreCatalog.Deduplicate([
+        Catalogued("a", "Some Book", null, duration: 39_600),
+        Catalogued("b", "A Different Book", null, duration: 39_600)
+    ]).Count == 2,
+    "Two books sharing a runtime were merged with no author to corroborate it.");
+// A different narrator reads at a different pace, so a runtime that disagrees means the scan
+// describes different audio and must not be served for this entry.
+Assert(ExploreCatalog.Deduplicate([
+        Catalogued("a", "The Deal", "Elle Kennedy", duration: 39_600),
+        Catalogued("b", "The Deal", "Elle Kennedy", duration: 28_800)
+    ]).Count == 2,
+    "Two different readings of one title were merged.");
+
 // Where the buy button goes. Every Explore entry points at Audible now, and the link has to
 // be an exact listing whenever the file told us its product identifier, because sending a
 // listener to a search result for a book they asked to buy is how they buy the wrong edition.
@@ -928,10 +990,11 @@ Console.WriteLine("AudioChoice backend contract tests passed.");
 
 static ExploreCatalogBook Catalogued(
     string id, string title, string? author = null, string? editionType = null,
-    int eventCount = 10, string? cover = null) =>
-    new(id, title, author, null, null, editionType, 3600, "m4b",
+    int eventCount = 10, string? cover = null, double? duration = 3600,
+    string? identifier = null) =>
+    new(id, title, author, null, null, editionType, duration, "m4b",
         DateTimeOffset.UnixEpoch, "v1", eventCount, [], cover, null,
-        new Uri("https://example.com"), "example", false);
+        new Uri("https://example.com"), "example", false, identifier);
 
 static string Base64Url(byte[] value) =>
     Convert.ToBase64String(value).TrimEnd('=').Replace('+', '-').Replace('/', '_');

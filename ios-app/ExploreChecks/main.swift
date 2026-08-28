@@ -25,7 +25,8 @@ func book(
     duration: Double? = 3600,
     eventCount: Int = 10,
     cover: String? = nil,
-    description: String? = nil
+    description: String? = nil,
+    productIdentifier: String? = nil
 ) -> ExploreCatalogBook {
     ExploreCatalogBook(
         catalogID: catalogID,
@@ -38,7 +39,8 @@ func book(
         coverImageURL: cover,
         description: description,
         purchaseURL: URL(string: "https://example.com")!,
-        purchaseProvider: "example"
+        purchaseProvider: "example",
+        productIdentifier: productIdentifier
     )
 }
 
@@ -119,6 +121,68 @@ merged = ExploreCatalogCleanup.deduplicated([
     book("b", "King Sorrow", author: "Joe Hill", description: "A novel")
 ])
 check("the entry that can describe itself wins", merged.first?.catalogID == "b")
+
+// The catalogue is meant to read like a store: one row per recording. Titles alone cannot
+// deliver that, because the same edition arrives spelled differently depending on who
+// tagged the file, and one copy is often named from a filename.
+print("Merging on the retail product identifier")
+check("two spellings of one recording merge on a shared identifier",
+      ExploreCatalogCleanup.deduplicated([
+        book("a", "The Deal", author: "Elle Kennedy", productIdentifier: "B00SWZQZ4E"),
+        book("b", "The Deal: Off-Campus Book 1", author: "Elle Kennedy", productIdentifier: "B00SWZQZ4E")
+      ]).count == 1)
+check("an identifier merges even when the author is written differently",
+      ExploreCatalogCleanup.deduplicated([
+        book("a", "The Deal", author: "Elle Kennedy", productIdentifier: "B00SWZQZ4E"),
+        book("b", "the deal off campus 1", author: "Kennedy, Elle", productIdentifier: "B00SWZQZ4E")
+      ]).count == 1)
+// Two genuinely different books must not merge just because both carry an identifier.
+check("different identifiers stay separate",
+      ExploreCatalogCleanup.deduplicated([
+        book("a", "The Deal", author: "Elle Kennedy", productIdentifier: "B00SWZQZ4E"),
+        book("b", "The Mistake", author: "Elle Kennedy", productIdentifier: "B0112BOSKQ")
+      ]).count == 2)
+
+print("Merging on author and runtime")
+check("one recording under two titles merges on runtime",
+      ExploreCatalogCleanup.deduplicated([
+        book("a", "The Deal", author: "Elle Kennedy", duration: 39_600),
+        book("b", "the deal 3112r", author: "Elle Kennedy", duration: 39_600)
+      ]).count == 1)
+// A re-encode shifts the reported length slightly, so an exact match cannot be required.
+check("a runtime differing by a second still merges",
+      ExploreCatalogCleanup.deduplicated([
+        book("a", "The Deal", author: "Elle Kennedy", duration: 39_600),
+        book("b", "The Deal Copy", author: "Elle Kennedy", duration: 39_601)
+      ]).count == 1)
+check("two different recordings of one book stay separate",
+      ExploreCatalogCleanup.deduplicated([
+        book("a", "The Deal", author: "Elle Kennedy", duration: 39_600),
+        book("b", "The Deal", author: "Elle Kennedy", duration: 28_800)
+      ]).count == 2)
+// Runtime alone is not identity. Two unrelated books can run the same length, so an author
+// has to agree before a runtime match counts for anything.
+check("a shared runtime with no author does not merge",
+      ExploreCatalogCleanup.deduplicated([
+        book("a", "Some Book", duration: 39_600),
+        book("b", "A Different Book", duration: 39_600)
+      ]).count == 2)
+check("a shared runtime with different authors does not merge",
+      ExploreCatalogCleanup.deduplicated([
+        book("a", "Some Book", author: "Elle Kennedy", duration: 39_600),
+        book("b", "A Different Book", author: "Rebecca Yarros", duration: 39_600)
+      ]).count == 2)
+check("a missing runtime does not merge unrelated books",
+      ExploreCatalogCleanup.deduplicated([
+        book("a", "Some Book", author: "Elle Kennedy", duration: nil),
+        book("b", "A Different Book", author: "Elle Kennedy", duration: nil)
+      ]).count == 2)
+// Parts are genuinely different audio and must survive every merge path.
+check("two parts sharing a runtime stay separate",
+      ExploreCatalogCleanup.deduplicated([
+        book("a", "Fourth Wing Part 1 of 2", author: "Rebecca Yarros", duration: 39_600),
+        book("b", "Fourth Wing Part 2 of 2", author: "Rebecca Yarros", duration: 39_600)
+      ]).count == 2)
 
 print("Stability")
 let unordered = [

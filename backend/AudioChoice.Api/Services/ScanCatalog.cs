@@ -375,6 +375,9 @@ public sealed class InMemoryScanCatalog : IScanCatalog
         .Select(group => group.OrderByDescending(value => value.Result!.ScanDate).First())
         .Where(value => !string.IsNullOrWhiteSpace(value.Fingerprint.WorkTitle))
         .Where(value => !value.Fingerprint.WorkTitle!.Contains("Iron Flame", StringComparison.OrdinalIgnoreCase))
+        // A catalogue entry has to name a book. Anything still called "Imported audiobook"
+        // was never identified and is not something another listener can look up or buy.
+        .Where(value => ExploreCatalog.IsPublishable(value.Fingerprint))
         .Select(value => ExploreCatalog.Create(
             value.Fingerprint,
             value.Result!,
@@ -509,10 +512,21 @@ public static class ExploreCatalog
         IEnumerable<ExploreCatalogBook> books)
     {
         var clusters = new List<List<ExploreCatalogBook>>();
+        // A product identifier names one published recording outright, so two copies sharing
+        // one are the same catalogue entry however their titles are spelled. Consulted first
+        // because it is the only signal here that cannot be mistaken.
+        var byIdentifier = new Dictionary<string, int>(StringComparer.Ordinal);
         var byKey = new Dictionary<string, List<int>>(StringComparer.Ordinal);
 
         foreach (var book in books)
         {
+            var identifier = book.ProductIdentifier;
+            if (identifier is not null && byIdentifier.TryGetValue(identifier, out var known))
+            {
+                clusters[known].Add(book);
+                continue;
+            }
+
             var key = GroupKey(book);
             if (!byKey.TryGetValue(key, out var indexes))
             {
@@ -520,23 +534,92 @@ public static class ExploreCatalog
                 byKey[key] = indexes;
             }
 
-            var placed = false;
+            var placed = -1;
             foreach (var index in indexes)
             {
                 if (!IsSameBook(clusters[index][0], book)) continue;
                 clusters[index].Add(book);
-                placed = true;
+                placed = index;
                 break;
             }
-            if (placed) continue;
 
-            clusters.Add([book]);
-            indexes.Add(clusters.Count - 1);
+            // Same author, same part, same runtime to the second: one recording whose title
+            // is written two ways. Only reached when the titles disagree, since a matching
+            // title would have been caught above.
+            if (placed < 0)
+            {
+                for (var index = 0; index < clusters.Count; index++)
+                {
+                    if (!IsSameRecording(clusters[index][0], book)) continue;
+                    clusters[index].Add(book);
+                    placed = index;
+                    break;
+                }
+            }
+
+            if (placed < 0)
+            {
+                clusters.Add([book]);
+                placed = clusters.Count - 1;
+                indexes.Add(placed);
+            }
+
+            // Remember the identifier against whichever cluster this joined, so a later copy
+            // carrying the same one lands in the same place.
+            if (identifier is not null) byIdentifier.TryAdd(identifier, placed);
         }
 
         // Incoming order is preserved, so the caller's sort still holds.
         return clusters.Select(Best).ToArray();
     }
+
+    /// <summary>
+    /// Whether two entries are the same recording judged on runtime rather than title.
+    /// </summary>
+    /// <remarks>
+    /// The last resort for copies that carry no product identifier, where one was tagged by
+    /// hand and the other named from a filename. Runtime is the discriminating signal: two
+    /// different recordings of the same book run to different lengths, because a different
+    /// narrator reads at a different pace.
+    ///
+    /// Requires an author on both sides. Without one this would merge on runtime alone, and
+    /// two unrelated books that happen to run the same length are not the same book.
+    /// </remarks>
+    private static bool IsSameRecording(ExploreCatalogBook left, ExploreCatalogBook right)
+    {
+        // Two identifiers that disagree are evidence of two different recordings, and that
+        // outranks a runtime coincidence. Equal identifiers never reach here, having already
+        // merged above, so anything left carrying one on both sides is genuinely two books.
+        if (left.ProductIdentifier is not null && right.ProductIdentifier is not null) return false;
+        if (left.Duration is not > 0 || right.Duration is not > 0) return false;
+        if (Math.Abs(left.Duration.Value - right.Duration.Value) > RuntimeMatchSeconds) return false;
+        if (PartMarker(left.Title) != PartMarker(right.Title)) return false;
+        if (Normalize(left.EditionType) != Normalize(right.EditionType)) return false;
+        var leftAuthor = Normalize(left.Author);
+        var rightAuthor = Normalize(right.Author);
+        return leftAuthor.Length > 0 && leftAuthor == rightAuthor;
+    }
+
+    /// <summary>
+    /// Whether two runtimes are close enough to be the same recording.
+    /// </summary>
+    /// <remarks>
+    /// An unknown runtime counts as agreement rather than a mismatch, because an untagged
+    /// file is one of the differences being reconciled here.
+    /// </remarks>
+    private static bool RuntimesAgree(double? left, double? right) =>
+        left is not > 0 || right is not > 0 ||
+        Math.Abs(left.Value - right.Value) <= RuntimeMatchSeconds;
+
+    /// <summary>
+    /// How far two runtimes may differ and still be the same recording.
+    /// </summary>
+    /// <remarks>
+    /// Converting a file re-encodes it, which shifts the reported length by a fraction of a
+    /// second, and a container's runtime is rounded. Two seconds absorbs that without being
+    /// wide enough to merge an abridged reading with an unabridged one.
+    /// </remarks>
+    private const double RuntimeMatchSeconds = 2;
 
     /// <summary>
     /// Which entry survives: a cover first, since a missing one is the visible symptom,
@@ -584,6 +667,10 @@ public static class ExploreCatalog
         if (NormalizedTitle(left.Title) != NormalizedTitle(right.Title)) return false;
         if (PartMarker(left.Title) != PartMarker(right.Title)) return false;
         if (Normalize(left.EditionType) != Normalize(right.EditionType)) return false;
+        // Two runtimes that disagree are two different readings of one book, whatever the
+        // edition type says: a different narrator, or an abridgement. Merging them would show
+        // one entry's scan for audio it does not describe.
+        if (!RuntimesAgree(left.Duration, right.Duration)) return false;
 
         var leftAuthor = Normalize(left.Author);
         var rightAuthor = Normalize(right.Author);
@@ -650,6 +737,44 @@ public static class ExploreCatalog
 
     /// Every Explore entry now points at Audible.
     public const string PurchaseProviderName = "Audible";
+
+    /// <summary>
+    /// Titles that mean "this file was never identified" rather than naming a book.
+    /// </summary>
+    /// <remarks>
+    /// Both clients and the server substitute one of these when a file carries no title
+    /// tag. They are compared after normalisation, so punctuation and casing do not matter.
+    /// </remarks>
+    private static readonly string[] PlaceholderTitles =
+    [
+        "imported audiobook", "untitled audiobook", "untitled", "audiobook",
+        "unknown", "unknown title", "unknown album", "track 1", "audio", "book"
+    ];
+
+    /// <summary>
+    /// Whether an edition belongs in Explore at all.
+    /// </summary>
+    /// <remarks>
+    /// Explore is a catalogue of recordings other listeners can look up, so an entry has to
+    /// name a book. Every edition anyone scans is published by default, which meant a file
+    /// with no tags arrived as "Imported audiobook" and sat in the catalogue as an entry
+    /// nobody could identify or buy.
+    ///
+    /// An author is required for the same reason. It is also the cheapest evidence that the
+    /// title came from the file's own tags rather than being guessed from a filename: a
+    /// tagged audiobook essentially always names its author, and a bare download rarely
+    /// does. That is a proxy rather than a proof, and the cost of it being wrong is a
+    /// correctly-titled book waiting for one listener with a properly tagged copy.
+    /// </remarks>
+    public static bool IsPublishable(BookFingerprint fingerprint)
+    {
+        var title = Normalize(EditionTitleFormatter.Format(fingerprint));
+        if (title.Length == 0) return false;
+        if (PlaceholderTitles.Contains(title, StringComparer.Ordinal)) return false;
+        // A title that is only digits, or a single character, names nothing.
+        if (title.Length < 2 || title.All(char.IsDigit)) return false;
+        return !string.IsNullOrWhiteSpace(fingerprint.Author);
+    }
 
     /// <summary>
     /// Where to buy this recording on Audible.
@@ -789,7 +914,16 @@ Carl and his ex-girlfriend's cat, Princess Donut, are forced into a planet-spann
             PurchaseProviderName,
             // "Verified" means the link is known to be this exact recording, which is only
             // true when the file told us its product identifier. A search result is a guess.
-            IsAudibleProductIdentifier(productIdentifier));
+            IsAudibleProductIdentifier(productIdentifier),
+            NormalizedIdentifier(productIdentifier));
+    }
+
+    /// <summary>An identifier reduced so two spellings of one value compare equal.</summary>
+    private static string? NormalizedIdentifier(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value)) return null;
+        var cleaned = new string(value.Where(char.IsLetterOrDigit).ToArray()).ToUpperInvariant();
+        return cleaned.Length == 0 ? null : cleaned;
     }
 
     private static int FilterControlCount(IReadOnlyList<ScanEvent> events) =>
