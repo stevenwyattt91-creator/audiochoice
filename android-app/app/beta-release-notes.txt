@@ -1,13 +1,15 @@
-Tell us when a filter gets it wrong
-- Tap the flag in the player the moment you hear something that should have been filtered. One tap, no form, and it works with no signal
+Runtime and cover art now come from the audiobook file itself
+- Fixes books importing with a title, author, narrator and chapters but no runtime and no cover
+- Those two groups were read by different code. The title and chapters are parsed from the file directly; the runtime and cover came from an Android helper that needs a seekable file and silently gave nothing when it could not open one
+- Runtime now comes from the file's own movie header, which every M4B has
+- Cover art now comes from the same part of the file the title and narrator already came from, so artwork arrives wherever those do
+- This also fixes missing covers in Explore. The upload only ran when a cover had been read, so a cover that failed to read was never sent anywhere
+- Please re-import any book showing no runtime or cover. It is quick and does not re-run the scan: editions are matched on the file's hash and size, so the existing scan is reused
+Also fixed
+- A book with a very large embedded cover could lose all of its metadata, not just the artwork, because the title, author, narrator and retail identifiers share the same part of the file
+Reporting and finished books, from the previous build
+- Tap the flag in the player the moment you hear something that should have been filtered. One tap, no form, works with no signal
+- Each control in a book's Playback Filters has a flag to report that it removed something it should not have
 - A report records where you were, never what you heard. No audio and no text leaves your phone
-- In a book's Playback Filters, each control now has a flag to report that it removed something it should not have. That is the one that fixes over-filtering, because it tells us exactly which control fired
-- Turning a filter off only helps you; reporting it helps everyone listening to the same recording
-Finished books
-- Books are marked finished when you reach the end, and covers show a green tick
-- You can mark a book finished yourself from its details, for when you stop before the credits
-- This never worked before: finishing a book left no trace
-Explore is tidier
-- The same audiobook no longer appears several times because two people's files disagreed about the author or carried a different edition note
-- Different editions and separate parts are still listed separately, because those are genuinely different recordings with their own filter data
+- Books are marked finished at the end, or by hand from their details, and covers show a green tick
 Please report anything odd in Discord.
