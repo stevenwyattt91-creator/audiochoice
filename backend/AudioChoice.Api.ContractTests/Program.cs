@@ -352,8 +352,19 @@ var scheduled = await scheduler.Transcribe(
     CancellationToken.None);
 Assert(scheduled.Select(item => item.Index).SequenceEqual([0, 1, 2, 3]),
     "Concurrent scheduler did not merge chunks by index.");
-Assert(schedulerProgress.Last() == (4, 4),
-    "Concurrent scheduler did not report completed/total progress.");
+// Order-independent on purpose. The scheduler reports progress as
+// progress(Interlocked.Increment(ref completed), total): the counter is atomic, but the
+// callback that follows it is not, so two workers can increment to 3 and 4 and then enqueue
+// in the opposite order. Asserting on the last item queued failed roughly one run in eight,
+// which is worse than no assertion because it teaches everyone to rerun and move on.
+//
+// What the scheduler does guarantee is that each count appears exactly once and the total
+// never changes, which is also a stronger statement than the last value being (4, 4).
+Assert(
+    schedulerProgress.Select(step => step.Done).OrderBy(done => done).SequenceEqual([1, 2, 3, 4]),
+    "Concurrent scheduler did not report each completed chunk exactly once.");
+Assert(schedulerProgress.All(step => step.Total == 4),
+    "Concurrent scheduler reported an inconsistent chunk total.");
 var retryProvider = new SchedulerFakeProvider(failFirst: true);
 var retryScheduler = new ConcurrentChunkTranscriber(
     retryProvider,
