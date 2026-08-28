@@ -203,3 +203,33 @@ struct LibraryBookDetailsRequest: Codable {
     var author: String? = nil
     var narrator: String? = nil
 }
+
+/// What a listener is telling us the filter got wrong.
+///
+/// Raw values match the server's camel-cased enum names.
+enum FilterReportKind: String, Codable {
+    /// Something played that should have been removed.
+    case missedContent
+    /// Something was removed that should have played.
+    case wronglyFiltered
+}
+
+/// A report that filtering was wrong at a particular moment.
+///
+/// Carries a position and nothing about what was heard: no audio, no transcript text, no
+/// words. The server already holds the transcript for this edition, so a timestamp is
+/// enough to find the passage, and sending the content would undo the promise that a
+/// listener's audio never leaves their device.
+struct FilterReportRequest: Codable, Equatable {
+    let fingerprint: BookFingerprint
+    let kind: FilterReportKind
+    let positionSeconds: Double
+    /// How much audio before the tap this covers. A listener reacts, finds the button and
+    /// taps, by which time the passage is already behind them.
+    let windowSeconds: Double?
+    /// Which scan produced the result, so a fixed scanner can be told from a bad match.
+    let scannerVersion: String?
+    /// Set when reporting a specific skip, which is what makes over-filtering actionable.
+    let scanEventID: UUID?
+    let categoryID: UUID?
+}

@@ -218,17 +218,24 @@ private struct LegacyPlayerScreen: View {
 
             if let event = playback.activeFilterEvent,
                let category = IOSContentTaxonomy.category(for: event) {
-                Label(
-                    "Skipping \(category.title)",
-                    systemImage: "checkmark.shield.fill"
-                )
-                .font(.caption.bold())
-                .foregroundStyle(ACTheme.accent)
+                HStack(spacing: 8) {
+                    Label(
+                        "Skipping \(category.title)",
+                        systemImage: "checkmark.shield.fill"
+                    )
+                    .font(.caption.bold())
+                    .foregroundStyle(ACTheme.accent)
+                    // The moment a skip is visible is the only moment the listener can say
+                    // it was wrong while the app still knows which control fired.
+                    WronglySkippedButton(record: record, event: event)
+                }
                 .padding(.horizontal, 12)
                 .padding(.vertical, 7)
                 .background(ACTheme.panel)
                 .clipShape(Capsule())
             }
+
+            FilterReportControl(record: record, playback: playback)
 
             VStack {
                 Slider(
@@ -421,6 +428,22 @@ struct PlayerScreen: View {
 
                 FilterAvailabilityNotice(availability: playback.filterAvailability)
                     .padding(.horizontal)
+
+                if let event = playback.activeFilterEvent,
+                   let category = IOSContentTaxonomy.category(for: event) {
+                    HStack(spacing: 8) {
+                        Label("Skipping \(category.title)", systemImage: "checkmark.shield.fill")
+                            .font(.caption.bold())
+                            .foregroundStyle(ACTheme.accent)
+                        WronglySkippedButton(record: record, event: event)
+                    }
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 7)
+                    .background(ACTheme.panel)
+                    .clipShape(Capsule())
+                }
+
+                FilterReportControl(record: record, playback: playback)
 
                 VStack(spacing: 4) {
                     Slider(

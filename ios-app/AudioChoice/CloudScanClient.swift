@@ -161,6 +161,18 @@ struct CloudScanClient {
             path: "v1/library/\(bookID.uuidString)/progress")
     }
 
+    /// Tells the server that filtering was wrong at a particular moment.
+    ///
+    /// The response is discarded: nothing in the app depends on the stored report, and the
+    /// queue only needs to know the upload was accepted.
+    func reportFilter(_ value: FilterReportRequest) async throws {
+        _ = try await post(value, path: "v1/filter-reports") as FilterReportAcknowledgement
+    }
+
+    /// Only the identifier is read back. Decoding the whole stored report would tie the
+    /// client to fields it has no use for.
+    private struct FilterReportAcknowledgement: Decodable { let id: UUID }
+
     /// Corrects how a book is labelled for this account.
     ///
     /// Title only from here. Author and narrator are read from the file's tags and are

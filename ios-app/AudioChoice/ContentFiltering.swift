@@ -41,6 +41,18 @@ enum IOSContentTaxonomy {
     private static let blasphemy = UUID(uuidString: "50000000-0000-0000-0000-000000000001")!
     private static let selfHarm = UUID(uuidString: "60000000-0000-0000-0000-000000000001")!
 
+    /// The identifier the server uses for a category, for tagging a listener's report.
+    static func categoryID(for category: FilterCategory) -> UUID {
+        switch category {
+        case .sexualContent: sexual
+        case .profanity: profanity
+        case .graphicViolence: violence
+        case .drugsAndAlcohol: substances
+        case .blasphemy: blasphemy
+        case .selfHarm: selfHarm
+        }
+    }
+
     /// Which broad category an event belongs to, for labelling only.
     ///
     /// What actually gets filtered is decided by PlaybackFilterTaxonomy and the book's
