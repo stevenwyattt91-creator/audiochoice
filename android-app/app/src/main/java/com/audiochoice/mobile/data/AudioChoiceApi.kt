@@ -224,6 +224,18 @@ class AudioChoiceApi(private val json: Json) {
         "PUT", "/v1/library/$bookID/filter-settings", json.encodeToString(settings), accessToken,
     )
 
+    /**
+     * Tells the server that filtering was wrong at a particular moment.
+     *
+     * The only route by which a missed passage or an over-zealous skip becomes something
+     * anyone can act on.
+     */
+    suspend fun reportFilter(
+        accessToken: String,
+        report: FilterReportRequest,
+    ): FilterReportAcknowledgement =
+        post("/v1/filter-reports", report, accessToken)
+
     private fun formatBookmarkTime(seconds: Double): String {
         val value = seconds.toLong()
         return "%d:%02d:%02d".format(value / 3600, (value % 3600) / 60, value % 60)

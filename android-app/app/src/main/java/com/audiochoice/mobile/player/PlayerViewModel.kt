@@ -22,10 +22,14 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import com.audiochoice.mobile.importing.EditionSignatures
 import com.audiochoice.mobile.importing.Mp4TagReader
+import kotlinx.serialization.json.Json
 import com.audiochoice.mobile.data.ApiException
 import com.audiochoice.mobile.data.AudioChoiceApi
 import com.audiochoice.mobile.data.AudioChapter
 import com.audiochoice.mobile.data.EditionSignature
+import com.audiochoice.mobile.data.FilterReportComposer
+import com.audiochoice.mobile.data.FilterReportQueue
+import com.audiochoice.mobile.data.FilterReportRequest
 import com.audiochoice.mobile.data.EditionSignatureReportRequest
 import com.audiochoice.mobile.data.LibraryBook
 import com.audiochoice.mobile.data.LibraryBookmark
@@ -95,6 +99,8 @@ data class PlayerUiState(
     val disabledEventKeys: Set<String> = emptySet(),
     val disabledAggregateKeys: Set<String> = emptySet(),
     val bookmarkSaved: Boolean = false,
+    /** Set after a filter report is queued, so the player can confirm it. */
+    val filterReportSent: Boolean = false,
     val error: String? = null,
     val epubText: String? = null,
     /** Parsed once per book rather than on every recomposition. */
@@ -149,6 +155,12 @@ class PlayerViewModel(
     private val localProgress: SharedPreferences = context.getSharedPreferences(
         PlaybackProgressKeys.PREFERENCES_NAME,
         Context.MODE_PRIVATE,
+    )
+    // Reports are written here before being sent, so one made without signal survives.
+    private val filterReports = FilterReportQueue(
+        context,
+        Json { ignoreUnknownKeys = true; encodeDefaults = true },
+        api,
     )
 
     /**
@@ -289,6 +301,7 @@ class PlayerViewModel(
                             )
                         }
                     }
+                    markFinishedIfAtEnd(position, rawDurationMs)
                     if (isPlayingNow && second > 0 && second / 15 != lastSavedSecond / 15) saveProgress()
                     lastSavedSecond = second
                 }
@@ -1056,7 +1069,11 @@ class PlayerViewModel(
         viewModelScope.launch {
             mutex.withLock {
                 if (latestProgressMs[book.id] != positionMs) return@withLock
-                runCatching { api.saveProgress(accessToken, book.id, seconds, false) }
+                runCatching {
+                    // The stored value, never a default: the server assigns position and
+                    // completion together, so sending false here would un-finish the book.
+                    api.saveProgress(accessToken, book.id, seconds, isFinished(book.id))
+                }
                     .onSuccess { savedBook ->
                         if (latestProgressMs[book.id] != positionMs) return@onSuccess
                         localProgress.edit()
@@ -1151,7 +1168,11 @@ class PlayerViewModel(
                 // Coalesce frequent checkpoints for this book only. A save for
                 // another audiobook can never cancel this one.
                 if (latestProgressMs[book.id] != safePositionMs) return@withLock
-                runCatching { api.saveProgress(accessToken, book.id, seconds, false) }
+                runCatching {
+                    // The stored value, never a default: the server assigns position and
+                    // completion together, so sending false here would un-finish the book.
+                    api.saveProgress(accessToken, book.id, seconds, isFinished(book.id))
+                }
                     .onSuccess { savedBook ->
                         if (latestProgressMs[book.id] != safePositionMs) return@onSuccess
                         localProgress.edit()
@@ -1173,8 +1194,116 @@ class PlayerViewModel(
         }
     }
 
+    /**
+     * Reports that something played which should have been removed.
+     *
+     * One call, no arguments: whoever heard it is usually driving or walking, and anything
+     * that needs answering means the report does not happen. The position is the tap and the
+     * report carries a look-back window, because by now the passage is behind them.
+     */
+    fun reportMissedContent(categoryID: String? = null) {
+        val current = mutableState.value
+        val book = current.book ?: return
+        val positionSeconds = (trustedPositionMs ?: lastKnownPositionMs) / 1000.0
+        queueReport(
+            FilterReportComposer.missedContent(
+                fingerprint = book.fingerprint,
+                positionSeconds = positionSeconds,
+                scannerVersion = current.scannerVersion,
+                categoryID = categoryID,
+            ),
+        )
+    }
+
+    /**
+     * Reports that a control removed something it should not have.
+     *
+     * Resolved back to a scan event so the report names the control that fired, which is what
+     * makes over-filtering correctable rather than just a complaint. An aggregate spans many
+     * occurrences and has no single event, so that case reports the category and the first
+     * range instead of inventing an identifier.
+     */
+    fun reportWronglyFiltered(controlKey: String, isAggregate: Boolean) {
+        val current = mutableState.value
+        val book = current.book ?: return
+        val matches = current.scanEvents.filter { event ->
+            if (isAggregate) event.aggregateKey == controlKey
+            else event.stableKey.ifBlank { event.id } == controlKey
+        }
+        val first = matches.minByOrNull { it.startTime } ?: return
+        queueReport(
+            FilterReportComposer.wronglyFiltered(
+                fingerprint = book.fingerprint,
+                eventID = if (isAggregate) null else first.id,
+                categoryID = first.categoryID,
+                startSeconds = first.startTime,
+                endSeconds = first.endTime,
+                scannerVersion = current.scannerVersion,
+            ),
+        )
+    }
+
+    private fun queueReport(report: FilterReportRequest) {
+        // Written to disk before anything is sent, so a report made with no signal survives.
+        filterReports.enqueue(report)
+        mutableState.value = mutableState.value.copy(filterReportSent = true)
+        val accessToken = token ?: return
+        viewModelScope.launch { filterReports.flush(accessToken) }
+    }
+
+    /** Clears the confirmation once the UI has shown it. */
+    fun acknowledgeFilterReport() {
+        mutableState.value = mutableState.value.copy(filterReportSent = false)
+    }
+
     private fun progressKey(bookID: String): String = PlaybackProgressKeys.positionKey(bookID)
     private fun progressDirtyKey(bookID: String): String = PlaybackProgressKeys.dirtyKey(bookID)
+    private fun progressFinishedKey(bookID: String): String =
+        PlaybackProgressKeys.finishedKey(bookID)
+
+    /**
+     * Whether the open book is finished, as every save path needs to report it.
+     *
+     * Read from local storage rather than from the loaded book, because it is written the
+     * moment playback reaches the end and the server copy may not have caught up.
+     */
+    private fun isFinished(bookID: String): Boolean =
+        localProgress.getBoolean(
+            progressFinishedKey(bookID),
+            mutableState.value.book?.takeIf { it.id == bookID }?.isFinished ?: false,
+        )
+
+    /** Marks the open book finished once playback reaches the end. */
+    private fun markFinishedIfAtEnd(positionMs: Long, durationMs: Long) {
+        val book = mutableState.value.book ?: return
+        if (!BookCompletion.isComplete(positionMs, durationMs)) return
+        // Guarded, or this would issue a save every hundred milliseconds through the outro.
+        if (isFinished(book.id)) return
+        setFinished(true)
+    }
+
+    /**
+     * Records completion, on the device and for the account.
+     *
+     * Also how a listener marks a book they chose to stop before the end of, which is the
+     * only way such a book can ever be finished.
+     */
+    fun setFinished(finished: Boolean) {
+        val book = mutableState.value.book ?: return
+        val accessToken = token ?: return
+        localProgress.edit().putBoolean(progressFinishedKey(book.id), finished).apply()
+        mutableState.value = mutableState.value.copy(book = book.copy(isFinished = finished))
+        val seconds = (trustedPositionMs ?: lastKnownPositionMs) / 1000.0
+        viewModelScope.launch {
+            runCatching { api.saveProgress(accessToken, book.id, seconds, finished) }
+                .onSuccess { saved ->
+                    val current = mutableState.value
+                    if (current.book?.id == saved.id) {
+                        mutableState.value = current.copy(book = saved)
+                    }
+                }
+        }
+    }
 
     /**
      * Appends a line to this book's persisted progress trace.
