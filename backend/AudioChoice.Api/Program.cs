@@ -186,6 +186,9 @@ else
         new FileConversionConsentStore(dataPaths.ConversionConsents));
 }
 builder.Services.AddHttpClient<ExternalIdentityVerifier>();
+// Apple identity tokens are verified against Apple's published signing keys. Without
+// this the claims in a token are simply attacker-supplied text.
+builder.Services.AddHttpClient<IAppleSigningKeyProvider, AppleSigningKeyProvider>();
 builder.Services.AddSingleton(transactionalEmailOptions);
 if (transactionalEmailOptions.Enabled)
 {

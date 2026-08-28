@@ -1,3 +1,4 @@
+using System.Text;
 using AudioChoice.Api.Contracts;
 using AudioChoice.Api.Processing;
 using AudioChoice.Api.Services;
@@ -609,7 +610,62 @@ finally
     if (Directory.Exists(aliasFolder)) Directory.Delete(aliasFolder, true);
 }
 
+// Apple identity tokens. Every claim in one is attacker-supplied text until the
+// signature is verified, so a hand-assembled token must never be accepted.
+using var appleKey = System.Security.Cryptography.RSA.Create(2048);
+var appleParameters = appleKey.ExportParameters(false);
+var appleKeySet = $$"""
+{"keys":[{"kty":"RSA","kid":"test-key","use":"sig","alg":"RS256",
+"n":"{{Base64Url(appleParameters.Modulus!)}}","e":"{{Base64Url(appleParameters.Exponent!)}}"}]}
+""";
+var appleKeys = AppleIdentityToken.ParseJsonWebKeySet(appleKeySet);
+Assert(appleKeys.ContainsKey("test-key"), "Apple JWKS parsing did not yield the signing key.");
+
+var appleHeader = Base64Url(Encoding.UTF8.GetBytes("""{"alg":"RS256","kid":"test-key"}"""));
+var applePayload = Base64Url(Encoding.UTF8.GetBytes(
+    $$"""{"iss":"https://appleid.apple.com","aud":"com.audiochoice.mobile","sub":"001","exp":{{DateTimeOffset.UtcNow.AddHours(1).ToUnixTimeSeconds()}}}"""));
+var appleSignature = Base64Url(appleKey.SignData(
+    Encoding.ASCII.GetBytes($"{appleHeader}.{applePayload}"),
+    System.Security.Cryptography.HashAlgorithmName.SHA256,
+    System.Security.Cryptography.RSASignaturePadding.Pkcs1));
+
+Assert(AppleIdentityToken.SignatureIsValid($"{appleHeader}.{applePayload}.{appleSignature}", appleKeys),
+    "A correctly signed Apple token was rejected.");
+
+// The forgery this guards against: valid-looking claims, no real signature.
+Assert(!AppleIdentityToken.SignatureIsValid($"{appleHeader}.{applePayload}.", appleKeys),
+    "An Apple token with an empty signature was accepted.");
+Assert(!AppleIdentityToken.SignatureIsValid($"{appleHeader}.{applePayload}.{Base64Url(Encoding.UTF8.GetBytes("not-a-signature"))}", appleKeys),
+    "An Apple token with a junk signature was accepted.");
+
+// Claims cannot be edited after signing.
+var tamperedPayload = Base64Url(Encoding.UTF8.GetBytes(
+    $$"""{"iss":"https://appleid.apple.com","aud":"com.audiochoice.mobile","sub":"victim","exp":{{DateTimeOffset.UtcNow.AddHours(1).ToUnixTimeSeconds()}}}"""));
+Assert(!AppleIdentityToken.SignatureIsValid($"{appleHeader}.{tamperedPayload}.{appleSignature}", appleKeys),
+    "An Apple token whose subject was swapped after signing was accepted.");
+
+// "alg": "none" must not bypass verification.
+var unsignedHeader = Base64Url(Encoding.UTF8.GetBytes("""{"alg":"none","kid":"test-key"}"""));
+Assert(!AppleIdentityToken.SignatureIsValid($"{unsignedHeader}.{applePayload}.", appleKeys),
+    "An unsigned Apple token was accepted.");
+
+// An unknown key id fails closed rather than skipping the check.
+var foreignHeader = Base64Url(Encoding.UTF8.GetBytes("""{"alg":"RS256","kid":"some-other-key"}"""));
+Assert(!AppleIdentityToken.SignatureIsValid($"{foreignHeader}.{applePayload}.{appleSignature}", appleKeys),
+    "An Apple token naming an unknown key was accepted.");
+
+Assert(!AppleIdentityToken.SignatureIsValid("not.a.jwt", appleKeys), "Malformed input was accepted.");
+Assert(!AppleIdentityToken.SignatureIsValid(null, appleKeys), "A null token was accepted.");
+Assert(!AppleIdentityToken.SignatureIsValid($"{appleHeader}.{applePayload}.{appleSignature}", new Dictionary<string, System.Security.Cryptography.RSA>()),
+    "A token was accepted when no signing keys were available.");
+
+Assert(AppleIdentityToken.ParseJsonWebKeySet("}{not json").Count == 0,
+    "Malformed JWKS did not degrade to an empty key set.");
+
 Console.WriteLine("AudioChoice backend contract tests passed.");
+
+static string Base64Url(byte[] value) =>
+    Convert.ToBase64String(value).TrimEnd('=').Replace('+', '-').Replace('/', '_');
 
 static void Assert(bool condition, string message)
 {
