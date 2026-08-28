@@ -20,6 +20,12 @@ struct AudioEditionTags: Equatable {
     /// Audible's product identifier.
     var asin: String?
     var isbn: String?
+    /// The publisher's synopsis, when the file carries one.
+    ///
+    /// Audiobooks routinely ship with the back-cover text in `ldes` or `©des`. It is the
+    /// only description of the story available without asking an outside service, and it
+    /// came with the file the listener already owns.
+    var synopsis: String?
 
     /// A retail product identifier names one published edition, so it can be trusted
     /// outright. Everything else here needs corroboration from runtime or structure.
@@ -77,7 +83,94 @@ enum Mp4TagParser {
         ).flatMap(seriesPart(in:))
         tags.asin = freeformOf("asin", "product_id").flatMap(identifier(in:))
         tags.isbn = freeformOf("isbn", "isbn13", "isbn_13").flatMap(identifier(in:))
+        // Long description first: `ldes` holds the full synopsis where `©des` is often a
+        // one-line summary, and a comment is the last resort because tagging tools put
+        // encoder notes there.
+        tags.synopsis = synopsis(
+            in: standardOf("ldes", "\u{00A9}des", "desc", "\u{00A9}cmt")
+                ?? freeformOf("description", "synopsis", "long_description")
+        )
         return tags
+    }
+
+    /// The shortest text worth calling a synopsis.
+    private static let minimumSynopsisLength = 40
+
+    /// Rejects the encoder noise and single words that end up in description atoms.
+    private static func synopsis(in value: String?) -> String? {
+        guard let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines),
+              trimmed.count >= minimumSynopsisLength else { return nil }
+        // Converters write their own name into comment and description fields. Showing
+        // "Created by ..." where a listener expects the story is worse than showing nothing.
+        let lowered = trimmed.lowercased()
+        let toolNames = [
+            "lame", "ffmpeg", "itunes", "audible", "chapter and verse", "mp3tag",
+            "created by", "encoded by", "converted", "audiobookshelf", "libation"
+        ]
+        if toolNames.contains(where: { lowered.hasPrefix($0) }) { return nil }
+        return trimmed
+    }
+
+    /// Smaller than this is not an image, whatever the atom claims.
+    private static let minimumCoverBytes = 64
+    /// Audiobook covers are large but not unbounded.
+    private static let maximumCoverBytes = 6 * 1024 * 1024
+
+    /// The embedded cover image, from the `covr` atom in the same metadata list.
+    ///
+    /// The import already falls back to scanning raw bytes for a JPEG or PNG signature,
+    /// which works but can pick up any image the file happens to contain. Reading the atom
+    /// names the cover exactly, so it is tried first and the scan stays as a last resort.
+    ///
+    /// - Parameter payload: the raw contents of an `ilst` atom, header excluded.
+    static func coverArt(_ payload: [UInt8]) -> Data? {
+        var result: Data?
+        forEachAtom(payload, from: 0, to: payload.count) { type, bodyStart, bodyEnd in
+            guard type == "covr", result == nil else { return }
+            forEachAtom(payload, from: bodyStart, to: bodyEnd) { childType, dataStart, dataEnd in
+                // A `data` atom is four bytes of version and type flags, four reserved
+                // locale bytes, then the image itself.
+                guard childType == "data", result == nil, dataStart + 8 <= dataEnd else { return }
+                let imageStart = dataStart + 8
+                let length = dataEnd - imageStart
+                guard length >= minimumCoverBytes, length <= maximumCoverBytes else { return }
+                result = Data(payload[imageStart..<dataEnd])
+            }
+        }
+        return result
+    }
+
+    /// The runtime stated by a movie header (`mvhd`) atom, in seconds.
+    ///
+    /// The header carries a timescale and a duration counted in those units, so this is the
+    /// container's own answer rather than an estimate.
+    ///
+    /// - Parameter payload: the raw contents of an `mvhd` atom, header excluded.
+    static func durationSeconds(_ payload: [UInt8]) -> Double? {
+        guard payload.count >= 4 else { return nil }
+        // A full box: one version byte then three flag bytes. Version 1 widened the creation
+        // and modification times to 64 bits, moving everything after them.
+        let version = payload[0]
+        let timescaleOffset = version == 1 ? 20 : 12
+        let durationOffset = timescaleOffset + 4
+        let durationBytes = version == 1 ? 8 : 4
+        guard durationOffset + durationBytes <= payload.count else { return nil }
+
+        let timescale = uint32(payload, timescaleOffset)
+        guard timescale > 0 else { return nil }
+        let duration: UInt64
+        if version == 1 {
+            var value: UInt64 = 0
+            for index in 0..<8 { value = (value << 8) | UInt64(payload[durationOffset + index]) }
+            duration = value
+        } else {
+            duration = UInt64(uint32(payload, durationOffset))
+        }
+        // Some converters leave this at zero. Reporting it would show the book as
+        // instantaneous, which reads as a corrupt import rather than a missing field.
+        guard duration > 0 else { return nil }
+        let seconds = Double(duration) / Double(timescale)
+        return seconds.isFinite && seconds > 0 ? seconds : nil
     }
 
     /// Dates arrive as bare years and as full ISO timestamps.
@@ -217,20 +310,80 @@ enum Mp4TagParser {
     }
 }
 
-/// Locates `moov/udta/meta/ilst` in an MP4-family container.
+/// What the container itself can tell us, independent of AVFoundation.
+struct ContainerMetadata: Equatable {
+    var tags = AudioEditionTags()
+    var coverBytes: Data?
+    var durationSeconds: Double?
+}
+
+/// Locates `moov/udta/meta/ilst` and `moov/mvhd` in an MP4-family container.
 struct Mp4TagReader {
     /// The metadata list also holds embedded artwork, so it is not small. This bound
     /// keeps a corrupt size field from becoming a huge allocation while still admitting
     /// real audiobook covers.
-    private static let maximumIlstBytes: UInt64 = 8 * 1024 * 1024
+    ///
+    /// Generous on purpose: overshooting it drops every tag in the file, not just the
+    /// artwork, so a book with a large cover would lose its title and author too.
+    private static let maximumIlstBytes: UInt64 = 24 * 1024 * 1024
+    /// A movie header is a fixed ~100 bytes; anything larger is a corrupt size field.
+    private static let maximumMvhdBytes: UInt64 = 4096
     private static let containerAtoms: Set<String> = ["moov", "udta", "meta"]
 
-    func read(fileURL: URL) -> AudioEditionTags {
-        guard let handle = try? FileHandle(forReadingFrom: fileURL) else { return AudioEditionTags() }
+    func read(fileURL: URL) -> AudioEditionTags { readContainer(fileURL: fileURL).tags }
+
+    /// Everything this reader can get from the container in one open.
+    ///
+    /// Artwork and runtime used to come only from AVFoundation, which returns nothing for
+    /// files whose metadata it cannot map onto its own common keys. This reader seeks the
+    /// atoms directly, so it keeps working on those files and AVFoundation becomes one
+    /// source among several rather than the only one.
+    func readContainer(fileURL: URL) -> ContainerMetadata {
+        guard let handle = try? FileHandle(forReadingFrom: fileURL) else { return ContainerMetadata() }
         defer { try? handle.close() }
         let size = (try? handle.seekToEnd()) ?? 0
-        guard let payload = findIlst(handle, from: 0, to: size) else { return AudioEditionTags() }
-        return Mp4TagParser.parseIlst(payload)
+        let ilst = findIlst(handle, from: 0, to: size)
+        return ContainerMetadata(
+            tags: ilst.map(Mp4TagParser.parseIlst) ?? AudioEditionTags(),
+            coverBytes: ilst.flatMap(Mp4TagParser.coverArt),
+            durationSeconds: findDurationSeconds(handle, from: 0, to: size)
+        )
+    }
+
+    /// Reads the runtime from `moov/mvhd`, which every MP4-family file has.
+    private func findDurationSeconds(
+        _ handle: FileHandle, from start: UInt64, to end: UInt64
+    ) -> Double? {
+        var position = start
+        while position + 8 <= end {
+            guard let header = read(handle, at: position, count: 16), header.count >= 8 else { return nil }
+            var size = UInt64(be32(header, 0))
+            var headerSize: UInt64 = 8
+            guard let type = String(bytes: header[4..<8], encoding: .isoLatin1) else { return nil }
+            if size == 1 {
+                guard header.count >= 16 else { return nil }
+                size = be64(header, 8)
+                headerSize = 16
+            }
+            if size == 0 { size = end - position }
+            guard size >= headerSize, position + size <= end else { return nil }
+            let payloadStart = position + headerSize
+            let payloadSize = size - headerSize
+
+            if type == "mvhd", payloadSize > 0, payloadSize <= Self.maximumMvhdBytes {
+                // Locating the atom is this type's job; interpreting it belongs with the
+                // rest of the parsing, where it can be tested without a file.
+                return read(handle, at: payloadStart, count: Int(payloadSize))
+                    .flatMap(Mp4TagParser.durationSeconds)
+            }
+            // `mvhd` sits directly inside `moov`, so only that needs descending into.
+            if type == "moov",
+               let found = findDurationSeconds(handle, from: payloadStart, to: position + size) {
+                return found
+            }
+            position += size
+        }
+        return nil
     }
 
     private func findIlst(_ handle: FileHandle, from start: UInt64, to end: UInt64) -> [UInt8]? {

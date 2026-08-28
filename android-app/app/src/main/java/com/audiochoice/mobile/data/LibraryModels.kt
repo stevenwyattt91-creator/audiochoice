@@ -20,6 +20,13 @@ data class LibraryBookUpsertRequest(
     val sourceFingerprint: BookFingerprint? = null,
     /** Identity evidence read from the file's own tags and chapter marks. */
     val signature: EditionSignature? = null,
+    /**
+     * The publisher's synopsis, as carried by this file's own description tags.
+     *
+     * Stored against the edition, so a well-tagged copy gives every other owner of that
+     * recording a real description in Explore instead of none.
+     */
+    val description: String? = null,
 )
 
 /**
@@ -47,6 +54,18 @@ data class EditionSignatureReportRequest(
     val fingerprint: BookFingerprint,
     val signature: EditionSignature,
     val sourceFingerprint: BookFingerprint? = null,
+)
+
+/**
+ * Reports the synopsis carried by a file already in the library.
+ *
+ * Separate from the upsert because that overwrites the stored title, which would revert a
+ * correction on a book the listener had already renamed.
+ */
+@Serializable
+data class EditionDescriptionReportRequest(
+    val fingerprint: BookFingerprint,
+    val description: String,
 )
 
 /**

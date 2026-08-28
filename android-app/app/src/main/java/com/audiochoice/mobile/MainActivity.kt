@@ -52,7 +52,7 @@ class MainActivity : ComponentActivity() {
             applicationContext,
         )
     }
-    private val libraryViewModel by viewModels<LibraryViewModel> { LibraryViewModel.Factory(api, localAudio) }
+    private val libraryViewModel by viewModels<LibraryViewModel> { LibraryViewModel.Factory(this, api, localAudio) }
     private val playerViewModel by viewModels<PlayerViewModel> { PlayerViewModel.Factory(this, api, localAudio) }
     private val supportViewModel by viewModels<SupportViewModel> { SupportViewModel.Factory(api) }
 

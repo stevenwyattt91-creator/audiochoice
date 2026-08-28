@@ -443,7 +443,8 @@ public sealed class PostgresScanCatalog(NpgsqlDataSource dataSource) : IScanCata
                    (count(se.id) filter (where nullif(se.aggregate_key, '') is null)
                     + count(distinct nullif(se.aggregate_key, '')))::int,
                    coalesce(array_agg(distinct se.group_id) filter (where se.group_id is not null), array[]::uuid[]),
-                   e.cover_image is not null
+                   e.cover_image is not null,
+                   e.description
             from audiobook_editions e
             join lateral (
                 select id, scanned_at, scanner_version from scan_results
@@ -466,7 +467,11 @@ public sealed class PostgresScanCatalog(NpgsqlDataSource dataSource) : IScanCata
                     Guid.Empty, index, index, Guid.Empty, groupID, Guid.Empty, 0)).ToArray(),
                 reader.GetFieldValue<DateTimeOffset>(12),
                 reader.GetString(13));
-            var item = ExploreCatalog.Create(fingerprint, result, reader.GetBoolean(17));
+            var item = ExploreCatalog.Create(
+                fingerprint,
+                result,
+                reader.GetBoolean(17),
+                reader.IsDBNull(18) ? null : reader.GetString(18));
             values.Add(item with { EventCount = reader.GetInt32(15) });
         }
         return ExploreCatalog.Deduplicate(values);
@@ -485,6 +490,25 @@ public sealed class PostgresScanCatalog(NpgsqlDataSource dataSource) : IScanCata
         AddFingerprintKey(command, fingerprint);
         command.Parameters.AddWithValue(imageBytes);
         command.Parameters.AddWithValue(contentType);
+        return command.ExecuteNonQuery() > 0;
+    }
+
+    public bool SaveEditionDescription(BookFingerprint fingerprint, string description)
+    {
+        var normalized = ExploreCatalog.NormalizeDescription(description);
+        if (normalized is null) return false;
+        using var connection = dataSource.OpenConnection();
+        // `description is null` makes the first writer win: any listener who owns the
+        // recording can report one, and a later import carrying a poorer tag must not
+        // displace a synopsis that is already good.
+        using var command = new NpgsqlCommand("""
+            update audiobook_editions
+            set description = $4
+            where fingerprint_version = $1 and lower(sha256) = $2 and file_size = $3
+              and description is null;
+            """, connection);
+        AddFingerprintKey(command, fingerprint);
+        command.Parameters.AddWithValue(normalized);
         return command.ExecuteNonQuery() > 0;
     }
 

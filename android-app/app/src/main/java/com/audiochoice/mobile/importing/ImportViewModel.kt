@@ -738,6 +738,8 @@ class ImportViewModel(
                 coverImageContentType = audio.coverBytes?.let(::coverContentType),
                 sourceFingerprint = sourceFingerprint,
                 signature = editionSignature,
+                // The file's own synopsis, which is what Explore shows for this edition.
+                description = audio.tags.synopsis,
             ),
         )
         // Persist the embedded artwork against the canonical full fingerprint.

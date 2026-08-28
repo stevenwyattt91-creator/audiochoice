@@ -31,6 +31,15 @@ struct LibraryBookRecord: Identifiable, Codable {
     /// Identity evidence the server cannot gather for itself, because it only ever
     /// sees decoded audio and never the container tags.
     var editionSignature: EditionSignature? = nil
+    /// The publisher's synopsis, read from the file's own description tags.
+    ///
+    /// Kept on the record so it can be reported to the server on the next library sync
+    /// rather than only at the moment of import, which would miss every book already
+    /// imported. Nil for files that carry no usable description.
+    var synopsis: String? = nil
+    /// Whether the synopsis has been reported, so it is sent once rather than on every
+    /// library sync.
+    var synopsisReported: Bool = false
     var localFileName: String?
     var artworkFileName: String?
     var fileSize: Int64
@@ -53,6 +62,7 @@ struct LibraryBookRecord: Identifiable, Codable {
         isFinished: Bool = false,
         narrator: String? = nil,
         editionSignature: EditionSignature? = nil,
+        synopsis: String? = nil,
         localFileName: String?,
         artworkFileName: String?,
         fileSize: Int64,
@@ -70,6 +80,7 @@ struct LibraryBookRecord: Identifiable, Codable {
         self.isFinished = isFinished
         self.narrator = narrator
         self.editionSignature = editionSignature
+        self.synopsis = synopsis
         self.localFileName = localFileName
         self.artworkFileName = artworkFileName
         self.fileSize = fileSize
@@ -98,6 +109,8 @@ struct LibraryBookRecord: Identifiable, Codable {
         isFinished = try values.decodeIfPresent(Bool.self, forKey: .isFinished) ?? false
         narrator = try values.decodeIfPresent(String.self, forKey: .narrator)
         editionSignature = try values.decodeIfPresent(EditionSignature.self, forKey: .editionSignature)
+        synopsis = try values.decodeIfPresent(String.self, forKey: .synopsis)
+        synopsisReported = try values.decodeIfPresent(Bool.self, forKey: .synopsisReported) ?? false
         localFileName = try values.decodeIfPresent(String.self, forKey: .localFileName)
         artworkFileName = try values.decodeIfPresent(String.self, forKey: .artworkFileName)
         fileSize = try values.decodeIfPresent(Int64.self, forKey: .fileSize) ?? 0

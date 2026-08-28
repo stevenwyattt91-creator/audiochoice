@@ -71,7 +71,7 @@ if [ "$area" = "all" ] || [ "$area" = "ios" ]; then
   run "iOS build" ios_build
   # The iOS target has no test bundle, so the logic that decides what gets filtered, what a
   # report says and how the reader aligns is checked by compiling those files for the host.
-  for harness in filters library reader explore reports profiles; do
+  for harness in filters library reader explore reports profiles metadata; do
     run "iOS $harness checks" "$repository_root/scripts/verify-ios-$harness.sh"
   done
 fi

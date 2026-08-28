@@ -849,6 +849,45 @@ Assert(ExploreCatalog.Deduplicate([
     ]).Select(value => value.CatalogID).SequenceEqual(["1", "2"]),
     "De-duplication reordered a catalogue that had no duplicates.");
 
+// The Explore synopsis. This is shown to listeners under "About this audiobook", so the
+// property that matters is that it is either the story or nothing at all: it used to be a
+// generated line about AudioChoice's own features, which does not describe the book.
+var synopsis = "Twenty-year-old Violet Sorrengail was supposed to enter the Scribe " +
+    "Quadrant, living a quiet life among books and history.";
+var describedFingerprint = new BookFingerprint(
+    3, new string('d', 64), 900_000, 3600, "m4b", "The Deal", "Elle Kennedy",
+    null, null, null, null, null);
+var describedResult = new ScanResult([], DateTimeOffset.UnixEpoch, "v1");
+Assert(
+    ExploreCatalog.Create(describedFingerprint, describedResult).Description is null,
+    "A book with no stored synopsis was still given a description.");
+Assert(
+    ExploreCatalog.Create(describedFingerprint, describedResult, false, synopsis).Description
+        == synopsis,
+    "The stored synopsis was not used as the Explore description.");
+Assert(
+    ExploreCatalog.Create(describedFingerprint, describedResult, false, "Fantasy").Description
+        is null,
+    "A value too short to be a synopsis was presented as one.");
+Assert(
+    ExploreCatalog.Create(describedFingerprint, describedResult, false,
+        new string('x', 5000)).Description!.Length == 4000,
+    "An oversized synopsis was not clamped to the stored column width.");
+
+// Round-trip through the catalogue, which is what the library upsert drives.
+var descriptionCatalog = new InMemoryScanCatalog(Path.Combine(Path.GetTempPath(),
+    $"audiochoice-descriptions-{Guid.NewGuid():N}"));
+Assert(descriptionCatalog.SaveEditionDescription(describedFingerprint, synopsis),
+    "A valid synopsis was refused.");
+Assert(!descriptionCatalog.SaveEditionDescription(describedFingerprint, "Fantasy"),
+    "A value too short to be a synopsis was accepted.");
+// Any owner of the recording can report one, so a later import carrying a worse tag must
+// not replace a good synopsis that is already stored.
+Assert(
+    !descriptionCatalog.SaveEditionDescription(
+        describedFingerprint, "A completely different and equally long replacement text."),
+    "A second report overwrote a synopsis that was already stored.");
+
 Console.WriteLine("AudioChoice backend contract tests passed.");
 
 static ExploreCatalogBook Catalogued(

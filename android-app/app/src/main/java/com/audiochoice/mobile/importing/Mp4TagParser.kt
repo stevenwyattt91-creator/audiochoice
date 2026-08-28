@@ -22,6 +22,14 @@ data class AudioEditionTags(
     /** Audible's product identifier. */
     val asin: String? = null,
     val isbn: String? = null,
+    /**
+     * The publisher's synopsis, when the file carries one.
+     *
+     * Audiobooks routinely ship with the back-cover text in `ldes` or `©des`. It is the
+     * only description of the story available without asking an outside service, and it
+     * came with the file the listener already owns.
+     */
+    val synopsis: String? = null,
 ) {
     /**
      * A retail product identifier names one specific published edition, so it can
@@ -97,7 +105,35 @@ object Mp4TagParser {
             )?.let(::seriesPartOf),
             asin = freeformOf("asin", "product_id")?.let(::identifierOf),
             isbn = freeformOf("isbn", "isbn13", "isbn_13")?.let(::identifierOf),
+            // Long description first: `ldes` holds the full synopsis where `©des` is often
+            // a one-line summary, and a comment is the last resort because tagging tools
+            // put encoder notes there.
+            synopsis = synopsisOf(
+                standardOf("ldes", "\u00A9des", "desc", "\u00A9cmt")
+                    ?: freeformOf("description", "synopsis", "long_description"),
+            ),
         )
+    }
+
+    /** The shortest text worth calling a synopsis. */
+    private const val MINIMUM_SYNOPSIS_LENGTH = 40
+
+    /** Converters write their own name into description and comment fields. */
+    private val TOOL_NAME_PREFIXES = listOf(
+        "lame", "ffmpeg", "itunes", "audible", "chapter and verse", "mp3tag",
+        "created by", "encoded by", "converted", "audiobookshelf", "libation",
+    )
+
+    /**
+     * Rejects the encoder noise and stray single words that end up in description atoms.
+     *
+     * Showing "Created by ..." where a listener expects the story is worse than showing
+     * nothing at all, so anything that looks like a tool credit is dropped.
+     */
+    private fun synopsisOf(value: String?): String? {
+        val trimmed = value?.trim()?.takeIf { it.length >= MINIMUM_SYNOPSIS_LENGTH } ?: return null
+        val lowered = trimmed.lowercase()
+        return trimmed.takeIf { TOOL_NAME_PREFIXES.none(lowered::startsWith) }
     }
 
     /**

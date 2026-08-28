@@ -145,6 +145,17 @@ struct LibraryBookUpsertRequest: Codable {
     /// artifacts stored under the local file's hash.
     var sourceFingerprint: BookFingerprint? = nil
     var signature: EditionSignature? = nil
+    /// The publisher's synopsis, as read from this file's own description tags.
+    ///
+    /// Stored against the edition, so a well-tagged copy gives every other owner of that
+    /// recording a real description in Explore instead of none.
+    var description: String? = nil
+}
+
+/// Reports the synopsis for a book already in the library.
+struct EditionDescriptionReportRequest: Codable {
+    let fingerprint: BookFingerprint
+    let description: String
 }
 
 struct PlaybackProgressRequest: Codable {

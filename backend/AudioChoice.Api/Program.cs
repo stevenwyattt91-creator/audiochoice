@@ -1330,11 +1330,25 @@ app.MapPut("/v1/library", (
     LibraryBookUpsertRequest request,
     HttpContext context,
     IUserLibraryStore library,
+    IScanCatalog catalog,
     IEditionAliasStore editionAliases,
     IEditionSignatureStore editionSignatures) =>
 {
     var user = CurrentUser(context);
     if (user is null) return Results.Unauthorized();
+    // The synopsis the file carries, which is what Explore shows under "About this
+    // audiobook". Stored against the edition because it describes the recording, so one
+    // listener's well-tagged copy gives every other owner of that edition a real
+    // description. Rejected values are ignored rather than failing the import: a book
+    // still belongs in the library when its description tag is unusable.
+    if (!string.IsNullOrWhiteSpace(request.Description))
+    {
+        catalog.SaveEditionDescription(request.Fingerprint, request.Description);
+        if (request.SourceFingerprint is not null)
+        {
+            catalog.SaveEditionDescription(request.SourceFingerprint, request.Description);
+        }
+    }
 
     // Record the divergence while the client still knows about it. Without this the
     // link can only be rediscovered by comparing metadata, which needs a runtime and
@@ -1407,6 +1421,27 @@ app.MapPost("/v1/editions/signatures", (
         editionAliases.Link(request.Fingerprint, request.SourceFingerprint);
         editionSignatures.Record(request.SourceFingerprint, request.Signature);
     }
+    return Results.NoContent();
+});
+
+app.MapPost("/v1/editions/descriptions", (
+    EditionDescriptionReportRequest request,
+    HttpContext context,
+    IUserLibraryStore library,
+    IScanCatalog catalog) =>
+{
+    var user = CurrentUser(context);
+    if (user is null) return Results.Unauthorized();
+    // Restricted to editions the caller actually holds, matching signature reporting. This
+    // text is shown to other listeners, so it must not be an open write against arbitrary
+    // editions.
+    var owned = library.List(user.ID).Any(book =>
+        InMemoryScanCatalog.FingerprintKey(book.Fingerprint) ==
+        InMemoryScanCatalog.FingerprintKey(request.Fingerprint));
+    if (!owned) return Results.NotFound(new { error = "That audiobook is not in your library." });
+    // A rejected description is not an error the client can act on: the file simply does
+    // not carry a usable one, and the first report for an edition has already won.
+    catalog.SaveEditionDescription(request.Fingerprint, request.Description);
     return Results.NoContent();
 });
 
