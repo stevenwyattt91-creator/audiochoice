@@ -233,3 +233,39 @@ struct FilterReportRequest: Codable, Equatable {
     let scanEventID: UUID?
     let categoryID: UUID?
 }
+
+/// One switched-off filter inside a saved profile.
+///
+/// The server's shape predates the per-book model, so it is generic: a key, whether it is
+/// on, and two descriptive strings. Only `key` and `enabled` carry meaning here. Whether a
+/// key names a category or a group is not stored, because the taxonomy already knows -- and
+/// storing it would create a second source of truth that could disagree.
+struct FilterRule: Codable, Equatable {
+    let key: String
+    let enabled: Bool
+    let action: String
+    let severity: String
+
+    /// Everything is filtered unless a profile says otherwise, so a profile only ever
+    /// records what was switched off.
+    static func disabled(_ key: String) -> FilterRule {
+        FilterRule(key: key, enabled: false, action: "skip", severity: "all")
+    }
+}
+
+struct FilterProfileUpsertRequest: Codable {
+    let name: String
+    let isActive: Bool
+    let rules: [FilterRule]
+    let customWords: [String]
+}
+
+struct FilterProfile: Codable, Identifiable, Equatable {
+    let id: UUID
+    let name: String
+    let isActive: Bool
+    let rules: [FilterRule]
+    let customWords: [String]
+    let createdAt: Date
+    let updatedAt: Date
+}

@@ -17,6 +17,23 @@ struct BookFiltersScreen: View {
     @State private var showingPinPrompt = false
     @State private var enteredPin = ""
     @State private var pinError: String?
+    @State private var showingSaveProfile = false
+    @State private var profileName = ""
+
+    private var suggestedProfileName: String {
+        let off = settings.disabledCategoryIDs.count + settings.disabledGroupIDs.count
+        return "My filters (\(off) off)"
+    }
+
+    private func saveProfile() {
+        let name = profileName.trimmingCharacters(in: .whitespacesAndNewlines)
+        profileName = ""
+        guard !name.isEmpty else { return }
+        let saved = settings
+        Task {
+            await FilterProfileStore.shared.save(name: name, settings: saved, makeActive: true)
+        }
+    }
 
     private var hierarchy: [PlaybackFilterCategory] {
         PlaybackFilterTaxonomy.available(record.scanResult?.events ?? [])
@@ -94,6 +111,23 @@ struct BookFiltersScreen: View {
         .background(ACTheme.background)
         .navigationTitle("Playback Filters")
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            // Only offered once there is something to save. A profile of "filters
+            // everything" is what every book already does.
+            if settings.hasExceptions && !isLocked {
+                Button("Save as Profile", systemImage: "square.and.arrow.down") {
+                    profileName = suggestedProfileName
+                    showingSaveProfile = true
+                }
+            }
+        }
+        .alert("Save as profile", isPresented: $showingSaveProfile) {
+            TextField("Profile name", text: $profileName)
+            Button("Save") { saveProfile() }
+            Button("Cancel", role: .cancel) { profileName = "" }
+        } message: {
+            Text("Saves the categories and groups you switched off, and starts new books that way. This book keeps its own settings, and so does every other book you have already adjusted.")
+        }
         .task {
             pinIsSet = ParentalPinStore.isSet
             settings = await BookFilterSettingsStore.refresh(

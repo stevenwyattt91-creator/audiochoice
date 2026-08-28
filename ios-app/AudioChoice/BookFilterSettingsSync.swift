@@ -38,15 +38,29 @@ extension BookFilterSettingsStore {
     /// network failure can never quietly switch a filter off.
     @discardableResult
     static func refresh(bookID: UUID, accountLibraryID: UUID?) async -> BookFilterSettings {
+        let hasOwnChoices = hasStoredSettings(bookID)
         let local = load(bookID)
-        guard let accountLibraryID else { return local }
-        guard let client = try? CloudScanClient.configured(),
-              let remote = try? await client.bookFilterSettings(bookID: accountLibraryID)
-        else { return local }
 
-        let settings = BookFilterSettings(remote)
-        save(settings, bookID: bookID)
-        return settings
+        if let accountLibraryID,
+           let client = try? CloudScanClient.configured(),
+           let remote = try? await client.bookFilterSettings(bookID: accountLibraryID) {
+            let settings = BookFilterSettings(remote)
+            save(settings, bookID: bookID)
+            return settings
+        }
+
+        // Nothing stored anywhere for this book, so the listener's saved profile decides
+        // where it starts. Checked against having *stored* choices rather than against
+        // having any disabled: someone who deliberately left everything filtered must not
+        // have a profile applied over that.
+        if !hasOwnChoices, let seeded = await MainActor.run(body: {
+            FilterProfileStore.defaultSettings()
+        }) {
+            save(seeded, bookID: bookID)
+            return seeded
+        }
+
+        return local
     }
 
     /// Saves locally, then mirrors to the account.

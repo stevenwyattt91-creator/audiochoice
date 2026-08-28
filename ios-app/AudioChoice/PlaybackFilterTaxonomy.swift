@@ -109,6 +109,24 @@ enum PlaybackFilterTaxonomy {
         definitions[event.groupID.uuidString.lowercased()] != nil
     }
 
+    /// Every group the app has a switch for.
+    ///
+    /// Used to check a saved profile's keys, so a profile can never switch off something the
+    /// listener has no control for.
+    static var knownGroupIDs: Set<String> { Set(definitions.keys) }
+
+    /// Every category the app has a switch for.
+    ///
+    /// Derived from the group identifiers rather than listed again. The scanner builds both
+    /// from the same category digit, and a second hand-written list is how the two would come
+    /// to disagree.
+    static var knownCategoryIDs: Set<String> {
+        Set(definitions.keys.compactMap { groupID in
+            guard let digit = groupID.first else { return nil }
+            return "\(digit)0000000-0000-0000-0000-000000000001"
+        })
+    }
+
     /// The categories, groups and controls present in this book, whether or not the
     /// listener has since switched any of them off.
     ///

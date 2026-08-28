@@ -177,6 +177,14 @@ enum BookFilterSettingsStore {
         return value
     }
 
+    /// Whether this book has choices of its own.
+    ///
+    /// Distinct from loading and finding nothing disabled: a listener who deliberately left
+    /// everything on must not have a saved profile applied over the top of that decision.
+    static func hasStoredSettings(_ bookID: UUID) -> Bool {
+        UserDefaults.standard.object(forKey: key(bookID)) != nil
+    }
+
     static func save(_ settings: BookFilterSettings, bookID: UUID) {
         guard let data = try? JSONEncoder().encode(settings) else { return }
         UserDefaults.standard.set(data, forKey: key(bookID))

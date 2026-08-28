@@ -161,6 +161,29 @@ struct CloudScanClient {
             path: "v1/library/\(bookID.uuidString)/progress")
     }
 
+    func filterProfiles() async throws -> [FilterProfile] {
+        try await get(path: "v1/filter-profiles")
+    }
+
+    func createFilterProfile(_ value: FilterProfileUpsertRequest) async throws -> FilterProfile {
+        try await post(value, path: "v1/filter-profiles")
+    }
+
+    func updateFilterProfile(
+        id: UUID,
+        _ value: FilterProfileUpsertRequest
+    ) async throws -> FilterProfile {
+        try await put(value, path: "v1/filter-profiles/\(id.uuidString)")
+    }
+
+    func deleteFilterProfile(id: UUID) async throws {
+        var request = URLRequest(url: endpoint("v1/filter-profiles/\(id.uuidString)"))
+        request.httpMethod = "DELETE"
+        addAPIHeaders(to: &request)
+        let (data, response) = try await session.data(for: request)
+        try validate(response: response, data: data)
+    }
+
     /// Tells the server that filtering was wrong at a particular moment.
     ///
     /// The response is discarded: nothing in the app depends on the stored report, and the

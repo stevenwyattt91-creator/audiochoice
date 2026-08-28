@@ -61,6 +61,8 @@ struct ProfileScreen: View {
                 Text("Profile").font(.largeTitle.bold())
                 accountCard
                 ACCard { VStack(spacing: 0) {
+                    profileLink("Filter Profiles", "Set what you never want to hear once", "slider.horizontal.3", FilterProfilesScreen())
+                    Divider().overlay(ACTheme.secondaryText.opacity(0.25))
                     profileLink("Parental Controls", "Protect audiobook filters with a PIN", "lock", ParentalControlsScreen())
                     Divider().overlay(ACTheme.secondaryText.opacity(0.25))
                     profileLink("FAQs", "Answers about importing, privacy, and filters", "questionmark.circle", FAQScreen())
