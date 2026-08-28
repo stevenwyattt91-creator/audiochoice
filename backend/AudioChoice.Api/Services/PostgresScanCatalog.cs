@@ -4,7 +4,14 @@ using Npgsql;
 
 namespace AudioChoice.Api.Services;
 
-public sealed class PostgresScanCatalog(NpgsqlDataSource dataSource) : IScanCatalog
+/// <param name="editionSignatures">
+/// Supplies the retail product identifier for an edition, which is what makes an Explore
+/// entry link to an exact Audible listing rather than a search. Signatures are reported by
+/// clients and held outside the database, so they cannot be joined in SQL.
+/// </param>
+public sealed class PostgresScanCatalog(
+    NpgsqlDataSource dataSource,
+    IEditionSignatureStore editionSignatures) : IScanCatalog
 {
     private const string FingerprintSelect = """
         e.fingerprint_version, e.sha256, e.file_size, e.duration_seconds,
@@ -454,6 +461,15 @@ public sealed class PostgresScanCatalog(NpgsqlDataSource dataSource) : IScanCata
             where e.work_title is not null and btrim(e.work_title) <> ''
               and e.explore_published = true
               and lower(e.work_title) not like '%iron flame%'
+              -- An entry advertises a reusable scan, so the scan has to have finished. The
+              -- lateral join above already requires a result row, but a result can also be
+              -- written for an edition whose job later failed or is still running, and those
+              -- must not be offered. The in-memory catalogue has always required this; the
+              -- two now agree.
+              and exists (
+                  select 1 from scan_jobs j
+                  where j.edition_id = e.id and j.status = 'completed'
+              )
             group by e.id, r.id, r.scanned_at, r.scanner_version
             order by e.work_title;
             """, connection);
@@ -471,7 +487,8 @@ public sealed class PostgresScanCatalog(NpgsqlDataSource dataSource) : IScanCata
                 fingerprint,
                 result,
                 reader.GetBoolean(17),
-                reader.IsDBNull(18) ? null : reader.GetString(18));
+                reader.IsDBNull(18) ? null : reader.GetString(18),
+                editionSignatures.Find(fingerprint)?.ProductIdentifier);
             values.Add(item with { EventCount = reader.GetInt32(15) });
         }
         return ExploreCatalog.Deduplicate(values);

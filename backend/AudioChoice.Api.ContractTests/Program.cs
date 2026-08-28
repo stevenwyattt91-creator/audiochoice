@@ -888,6 +888,42 @@ Assert(
         describedFingerprint, "A completely different and equally long replacement text."),
     "A second report overwrote a synopsis that was already stored.");
 
+// Where the buy button goes. Every Explore entry points at Audible now, and the link has to
+// be an exact listing whenever the file told us its product identifier, because sending a
+// listener to a search result for a book they asked to buy is how they buy the wrong edition.
+var audibleFingerprint = new BookFingerprint(
+    3, new string('e', 64), 800_000, 3600, "m4b", "Fourth Wing", "Rebecca Yarros",
+    null, null, null, null, null);
+var audibleResult = new ScanResult([], DateTimeOffset.UnixEpoch, "v1");
+var searchEntry = ExploreCatalog.Create(audibleFingerprint, audibleResult);
+Assert(searchEntry.PurchaseProvider == "Audible",
+    "Explore offered a provider other than Audible.");
+Assert(searchEntry.PurchaseURL.Host.EndsWith("audible.com", StringComparison.Ordinal),
+    "The purchase link did not point at Audible.");
+Assert(!searchEntry.PurchaseVerified,
+    "A search link was reported as a verified listing.");
+Assert(searchEntry.PurchaseURL.AbsoluteUri.Contains("Fourth+Wing") ||
+    searchEntry.PurchaseURL.AbsoluteUri.Contains("Fourth%20Wing"),
+    "The Audible search did not carry the title.");
+
+var asinEntry = ExploreCatalog.Create(
+    audibleFingerprint, audibleResult, false, null, "B0BW2CCVQ2");
+Assert(asinEntry.PurchaseURL.AbsoluteUri == "https://www.audible.com/pd/B0BW2CCVQ2",
+    "An ASIN did not produce a direct Audible product link.");
+Assert(asinEntry.PurchaseVerified,
+    "A direct product link was not reported as verified.");
+
+// An ISBN is not an ASIN. Putting one in an Audible product path resolves to nothing, so
+// these have to fall back to a search rather than produce a dead link.
+var isbnEntry = ExploreCatalog.Create(
+    audibleFingerprint, audibleResult, false, null, "9781098765432");
+Assert(isbnEntry.PurchaseURL.AbsoluteUri.Contains("/search?"),
+    "An ISBN was used as though it were an Audible product identifier.");
+Assert(!isbnEntry.PurchaseVerified, "An ISBN link was reported as a verified listing.");
+Assert(!ExploreCatalog.IsAudibleProductIdentifier("B0BW2CCVQ"), "A nine-character identifier was accepted.");
+Assert(!ExploreCatalog.IsAudibleProductIdentifier(null), "A missing identifier was accepted.");
+Assert(ExploreCatalog.IsAudibleProductIdentifier("B0BW2CCVQ2"), "A valid ASIN was rejected.");
+
 Console.WriteLine("AudioChoice backend contract tests passed.");
 
 static ExploreCatalogBook Catalogued(

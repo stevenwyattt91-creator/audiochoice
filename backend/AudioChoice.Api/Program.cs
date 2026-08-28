@@ -118,8 +118,10 @@ if (databaseOptions.Enabled)
 }
 else
 {
-    builder.Services.AddSingleton<IScanCatalog>(
-        new InMemoryScanCatalog(dataPaths.Catalog));
+    builder.Services.AddSingleton<IScanCatalog>(services =>
+        new InMemoryScanCatalog(
+            dataPaths.Catalog,
+            services.GetRequiredService<IEditionSignatureStore>()));
 }
 if (databaseOptions.Enabled)
 {

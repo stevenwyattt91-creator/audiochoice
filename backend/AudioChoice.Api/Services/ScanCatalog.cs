@@ -99,11 +99,21 @@ public sealed class InMemoryScanCatalog : IScanCatalog
     private readonly string? _storagePath;
     private readonly object _persistenceLock = new();
 
-    public InMemoryScanCatalog(string? storagePath = null)
+    /// <param name="editionSignatures">
+    /// Supplies the retail product identifier for an edition, so an Explore entry can link
+    /// to an exact Audible listing. Optional: without it entries fall back to a search,
+    /// which is what tests and the no-database mode get.
+    /// </param>
+    public InMemoryScanCatalog(
+        string? storagePath = null,
+        IEditionSignatureStore? editionSignatures = null)
     {
         _storagePath = storagePath;
+        _editionSignatures = editionSignatures;
         Load();
     }
+
+    private readonly IEditionSignatureStore? _editionSignatures;
 
     public ScanResult? FindResult(BookFingerprint fingerprint) =>
         _results.GetValueOrDefault(FingerprintKey(fingerprint));
@@ -371,7 +381,8 @@ public sealed class InMemoryScanCatalog : IScanCatalog
             _exploreCovers.ContainsKey(CatalogIDOf(value.Fingerprint)),
             _editionDescriptions.TryGetValue(CatalogIDOf(value.Fingerprint), out var description)
                 ? description
-                : null))
+                : null,
+            _editionSignatures?.Find(value.Fingerprint)?.ProductIdentifier))
         .Where(value => !_hiddenExploreBooks.ContainsKey(value.CatalogID))
         .OrderBy(value => value.Title);
 
@@ -637,10 +648,35 @@ public static class ExploreCatalog
     private static string Normalize(string? value) =>
         System.Text.RegularExpressions.Regex.Replace(value ?? "", @"[^a-z0-9]+", " ", System.Text.RegularExpressions.RegexOptions.IgnoreCase).Trim().ToLowerInvariant();
 
-    private const string AcotarPart1URL = "https://www.graphicaudio.net/a-court-of-thorns-and-roses-1-a-court-of-thorns-and-roses-1-of-2.html";
-    private const string AcotarPart2URL = "https://www.graphicaudio.net/a-court-of-thorns-and-roses-1-a-court-of-thorns-and-roses-2-of-2.html";
-    private const string IronFlamePart2URL = "https://www.graphicaudio.net/the-empyrean-2-iron-flame-2-of-2.html";
-    private const string FourthWingPart1URL = "https://www.graphicaudio.net/the-empyrean-1-fourth-wing-1-of-2.html";
+    /// Every Explore entry now points at Audible.
+    public const string PurchaseProviderName = "Audible";
+
+    /// <summary>
+    /// Where to buy this recording on Audible.
+    /// </summary>
+    /// <remarks>
+    /// A product identifier gives an exact listing; without one the best that can be
+    /// offered is a search, because guessing at a product URL from a title would send
+    /// listeners to a page for the wrong recording.
+    /// </remarks>
+    public static Uri AudiblePurchaseURL(string query, string? productIdentifier) =>
+        new(IsAudibleProductIdentifier(productIdentifier)
+            ? $"https://www.audible.com/pd/{productIdentifier!.ToUpperInvariant()}"
+            : $"https://www.audible.com/search?keywords={Uri.EscapeDataString(query)}");
+
+    /// <summary>
+    /// Whether an identifier is an Audible ASIN rather than an ISBN.
+    /// </summary>
+    /// <remarks>
+    /// Files carry either, and the two are not interchangeable here: an ISBN in an
+    /// Audible product path resolves to nothing. ASINs are ten characters and the
+    /// audiobook ones begin with B, which is what separates them.
+    /// </remarks>
+    public static bool IsAudibleProductIdentifier(string? value) =>
+        value is { Length: 10 } &&
+        (value[0] is 'B' or 'b') &&
+        value.All(char.IsLetterOrDigit);
+
     private const string FourthWingDescription = """
 Twenty-year-old Violet Sorrengail was supposed to enter the Scribe Quadrant and live a quiet life among books and history. Instead, her mother orders her to compete for a place among Navarre's elite dragon riders.
 
@@ -712,7 +748,8 @@ Carl and his ex-girlfriend's cat, Princess Donut, are forced into a planet-spann
         BookFingerprint fingerprint,
         ScanResult result,
         bool hasCover = false,
-        string? storedDescription = null)
+        string? storedDescription = null,
+        string? productIdentifier = null)
     {
         var title = EditionTitleFormatter.Format(fingerprint);
         var query = string.Join(' ', new[] { title, fingerprint.Author }.Where(value => !string.IsNullOrWhiteSpace(value)));
@@ -722,27 +759,10 @@ Carl and his ex-girlfriend's cat, Princess Donut, are forced into a planet-spann
         var isIronFlamePart2 = isIronFlame && title.Contains("Part 2 of 2", StringComparison.OrdinalIgnoreCase);
         var isFourthWing = title.Contains("Fourth Wing", StringComparison.OrdinalIgnoreCase);
         var isFourthWingPart1 = isFourthWing && title.Contains("Part 1 of 2", StringComparison.OrdinalIgnoreCase);
-        var isKnownGraphicAudioTitle = title.Contains("A Court of Thorns and Roses", StringComparison.OrdinalIgnoreCase) ||
-            isAcotarMistAndFury ||
-            isIronFlamePart2 || isFourthWingPart1;
-        var isGraphicAudio = isKnownGraphicAudioTitle ||
-            fingerprint.EditionType?.Contains("dramatized", StringComparison.OrdinalIgnoreCase) == true ||
-            fingerprint.EditionType?.Contains("graphic audio", StringComparison.OrdinalIgnoreCase) == true ||
-            fingerprint.EditionType?.Contains("graphicaudio", StringComparison.OrdinalIgnoreCase) == true;
         var isAcotar = title.Contains("A Court of Thorns and Roses", StringComparison.OrdinalIgnoreCase);
         var isDungeonCrawlerCarl = title.Contains("Dungeon Crawler Carl", StringComparison.OrdinalIgnoreCase) &&
             fingerprint.Author?.Contains("Matt Dinniman", StringComparison.OrdinalIgnoreCase) == true;
-        var isAcotarPart1 = isAcotar && title.Contains("Part 1 of 2", StringComparison.OrdinalIgnoreCase);
-        var isAcotarPart2 = isAcotar && title.Contains("Part 2 of 2", StringComparison.OrdinalIgnoreCase);
-        var provider = isGraphicAudio ? "GraphicAudio" : "Libro.fm";
-        var verifiedPurchaseURL = isIronFlamePart2 ? IronFlamePart2URL
-            : isFourthWingPart1 ? FourthWingPart1URL
-            : isAcotarPart1 ? AcotarPart1URL
-            : isAcotarPart2 ? AcotarPart2URL
-            : null;
-        var purchaseURL = new Uri(verifiedPurchaseURL ?? (isGraphicAudio
-            ? $"https://www.graphicaudio.net/catalogsearch/result/?q={Uri.EscapeDataString(query)}"
-            : $"https://libro.fm/search?q={Uri.EscapeDataString(query)}"));
+        var purchaseURL = AudiblePurchaseURL(query, productIdentifier);
         return new ExploreCatalogBook(
             catalogID,
             title,
@@ -766,8 +786,10 @@ Carl and his ex-girlfriend's cat, Princess Donut, are forced into a planet-spann
                 // specific dramatised editions, so they stay ahead of the file's own tag.
                 : NormalizeDescription(storedDescription),
             purchaseURL,
-            provider,
-            verifiedPurchaseURL is not null);
+            PurchaseProviderName,
+            // "Verified" means the link is known to be this exact recording, which is only
+            // true when the file told us its product identifier. A search result is a guess.
+            IsAudibleProductIdentifier(productIdentifier));
     }
 
     private static int FilterControlCount(IReadOnlyList<ScanEvent> events) =>

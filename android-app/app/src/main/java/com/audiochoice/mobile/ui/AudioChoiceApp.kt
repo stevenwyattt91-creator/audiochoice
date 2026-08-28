@@ -824,10 +824,6 @@ private fun ExploreBookDetails(
     onDismiss: () -> Unit,
     onAction: () -> Unit,
 ) {
-    var showGraphicAudioInstructions by rememberSaveable { mutableStateOf(false) }
-    // Explore purchases currently route through Audible while the catalog
-    // provider migration is in progress.
-    val requiresGraphicAudioInstructions = false
     androidx.compose.ui.window.Dialog(onDismissRequest = onDismiss) {
         Surface(
             Modifier.fillMaxWidth().fillMaxHeight(.92f),
@@ -887,41 +883,13 @@ private fun ExploreBookDetails(
                         }
                     }
                     Spacer(Modifier.height(24.dp))
-                    if (!owned && item.purchaseProvider.equals("GraphicAudio", ignoreCase = true)) {
-                        Card(
-                            colors = CardDefaults.cardColors(containerColor = ChoiceSurface),
-                            shape = RoundedCornerShape(15.dp),
-                        ) {
-                            Row(
-                                Modifier.fillMaxWidth().padding(16.dp),
-                                verticalAlignment = Alignment.Top,
-                            ) {
-                                Icon(Icons.Outlined.Info, null, tint = ChoiceGreen)
-                                Spacer(Modifier.width(11.dp))
-                                Column {
-                                    Text("Buying for AudioChoice", fontWeight = FontWeight.SemiBold)
-                                    Spacer(Modifier.height(5.dp))
-                                    Text(
-                                        "Choose M4B Zip Download on GraphicAudio. After purchasing, download and unzip it, then import the .m4b file into AudioChoice. The Access App and Browser Player option alone does not include an importable file.",
-                                        color = ChoiceMuted,
-                                        fontSize = 12.sp,
-                                        lineHeight = 18.sp,
-                                    )
-                                }
-                            }
-                        }
-                        Spacer(Modifier.height(12.dp))
-                    }
                     if (!owned && item.purchaseVerified) {
                         Text("Verified ${item.purchaseProvider} listing", color = ChoiceGreen, fontSize = 12.sp)
                         Spacer(Modifier.height(8.dp))
                     }
                 }
                 Button(
-                    onClick = {
-                        if (requiresGraphicAudioInstructions) showGraphicAudioInstructions = true
-                        else onAction()
-                    },
+                    onClick = onAction,
                     modifier = Modifier.fillMaxWidth().padding(18.dp).height(54.dp),
                     shape = RoundedCornerShape(14.dp),
                 ) {
@@ -931,28 +899,6 @@ private fun ExploreBookDetails(
                 }
             }
         }
-    }
-    if (showGraphicAudioInstructions) {
-        AlertDialog(
-            onDismissRequest = { showGraphicAudioInstructions = false },
-            icon = { Icon(Icons.Outlined.Download, null, tint = ChoiceGreen) },
-            title = { Text("Choose M4B Zip Download") },
-            text = {
-                Text(
-                    "On GraphicAudio, select M4B Zip Download—not Access App and Browser Player alone. After purchasing, download and unzip the file, then import the .m4b file into AudioChoice.",
-                    lineHeight = 20.sp,
-                )
-            },
-            confirmButton = {
-                Button(onClick = {
-                    showGraphicAudioInstructions = false
-                    onAction()
-                }) { Text("Continue to GraphicAudio") }
-            },
-            dismissButton = {
-                TextButton(onClick = { showGraphicAudioInstructions = false }) { Text("Cancel") }
-            },
-        )
     }
 }
 
