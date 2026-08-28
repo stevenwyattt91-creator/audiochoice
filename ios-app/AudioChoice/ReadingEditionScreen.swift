@@ -60,6 +60,12 @@ struct ReadingEditionScreen: View {
 
     // MARK: - Header
 
+    /// Three columns, with the outer two sharing the leftover width equally.
+    ///
+    /// The close button was previously placed between two Spacers, which only divides the
+    /// space the title does not use — so it drifted right as the title grew and never
+    /// actually sat where the player's open-book button is. Equal-weight side columns put
+    /// it on the real centre line whatever the title's length.
     private var header: some View {
         HStack(spacing: 8) {
             VStack(alignment: .leading, spacing: 1) {
@@ -70,32 +76,34 @@ struct ReadingEditionScreen: View {
                 Text(subtitle)
                     .font(.system(size: 11))
                     .foregroundStyle(palette.mutedInk)
-                    .lineLimit(2)
+                    .lineLimit(1)
             }
-            Spacer(minLength: 0)
-            // Centred so it lands where the player's open-book button sits, keeping the
-            // icon still when toggling between the two rather than making it jump.
+            .frame(maxWidth: .infinity, alignment: .leading)
+
             Button(action: onClose) {
                 Image(systemName: "book.closed.fill")
                     .foregroundStyle(ACTheme.accent)
             }
             .accessibilityLabel("Close reading edition")
-            Spacer(minLength: 0)
+
             Button { showSettings = true } label: {
                 Image(systemName: "textformat.size")
                     .foregroundStyle(ACTheme.accent)
             }
             .accessibilityLabel("Reading settings")
+            .frame(maxWidth: .infinity, alignment: .trailing)
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
     }
 
+    /// Kept to one short line so it cannot crowd the centred close button.
+    ///
+    /// The removed-passage count used to appear here. Every filtered passage is already
+    /// marked in the text where it happens, so the running total added width without
+    /// telling the reader anything the page does not.
     private var subtitle: String {
         if let message = reader.syncMessage, reader.timings.isEmpty { return message }
-        if reader.removedPassageCount > 0 {
-            return "Reading edition · \(reader.removedPassageCount) filtered passages removed"
-        }
         return "Reading edition"
     }
 

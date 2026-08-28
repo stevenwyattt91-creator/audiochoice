@@ -234,9 +234,12 @@ private struct LegacyPlayerScreen: View {
                 Slider(
                     value: Binding(
                         get: { playback.position },
-                        set: { playback.seek(to: $0) }
+                        set: { playback.updateScrub(to: $0) }
                     ),
-                    in: 0...max(playback.duration, 1)
+                    in: 0...max(playback.duration, 1),
+                    onEditingChanged: { isEditing in
+                        if isEditing { playback.beginScrubbing() } else { playback.endScrubbing() }
+                    }
                 )
                 HStack {
                     Text(time(playback.position))
@@ -420,7 +423,16 @@ struct PlayerScreen: View {
                     .padding(.horizontal)
 
                 VStack(spacing: 4) {
-                    Slider(value: Binding(get: { playback.position }, set: playback.seek(to:)), in: 0...max(playback.duration, 1))
+                    Slider(
+                        value: Binding(
+                            get: { playback.position },
+                            set: { playback.updateScrub(to: $0) }
+                        ),
+                        in: 0...max(playback.duration, 1),
+                        onEditingChanged: { isEditing in
+                            if isEditing { playback.beginScrubbing() } else { playback.endScrubbing() }
+                        }
+                    )
                         .tint(ACTheme.accent)
                     HStack {
                         Text(time(playback.position))

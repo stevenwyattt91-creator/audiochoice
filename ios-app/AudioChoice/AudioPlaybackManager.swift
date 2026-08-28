@@ -259,6 +259,40 @@ final class AudioPlaybackManager: ObservableObject {
         applyContentFilter()
     }
 
+    // MARK: - Scrubbing
+    //
+    // A slider bound straight to `seek` asked AVPlayer for a new position on every drag
+    // delta, dozens a second, each one an asynchronous seek that also persisted the
+    // position, recalculated the chapter and re-ran the filter planner. Meanwhile the time
+    // observer kept overwriting `position` twice a second from wherever the player had
+    // actually got to, so the thumb was pulled back against the finger. That combination
+    // is what made the bar feel choppy.
+    //
+    // While a drag is in progress the position is moved on its own, and the player is only
+    // asked to seek once, on release.
+
+    private(set) var isScrubbing = false
+
+    func beginScrubbing() {
+        isScrubbing = true
+    }
+
+    /// Moves the displayed position without touching the player.
+    func updateScrub(to seconds: Double) {
+        guard isScrubbing else { return }
+        position = duration > 0 ? min(max(seconds, 0), duration) : max(seconds, 0)
+        updateChapter()
+    }
+
+    func endScrubbing() {
+        guard isScrubbing else { return }
+        isScrubbing = false
+        // Filtering is deliberately evaluated only now. Running it mid-drag would seek out
+        // of a flagged range while the listener was still choosing where to land.
+        seek(to: position)
+        updateNowPlaying()
+    }
+
     private func setPosition(_ target: Double) {
         player?.seek(to: CMTime(seconds: target, preferredTimescale: 600))
         position = target
@@ -295,6 +329,9 @@ final class AudioPlaybackManager: ObservableObject {
         ) { [weak self] time in
             Task { @MainActor in
                 guard let self else { return }
+                // The listener's finger owns the position during a drag. Without this the
+                // observed value fights it and the thumb stutters backwards.
+                guard !self.isScrubbing else { return }
                 self.position = max(time.seconds, 0)
                 self.persistPosition()
                 self.updateChapter()
