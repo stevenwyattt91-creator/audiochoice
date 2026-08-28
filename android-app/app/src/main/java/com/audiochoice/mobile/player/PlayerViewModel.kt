@@ -477,6 +477,18 @@ class PlayerViewModel(
                     "open ADOPTED position=${active.currentPosition} playing=${active.isPlaying} " +
                         "state=${active.playbackState}",
                 )
+                // Adopting exists so reopening the app never interrupts audio that is
+                // still playing in the background. It must not also adopt a position
+                // from a player that is merely loaded and sitting idle: that is how a
+                // resume position issued by an earlier open() got discarded, leaving
+                // the book to play from the start.
+                if (!active.isPlaying) {
+                    val resumeMs = resumePositionMs(book)
+                    if (resumeMs > active.currentPosition + ADOPTED_POSITION_TOLERANCE_MS) {
+                        active.seekTo(resumeMs)
+                        trace(book.id, "open ADOPTED corrected to=$resumeMs")
+                    }
+                }
                 if (active.isPlaying) hasStartedPlayback = true
                 mutableState.value = mutableState.value.copy(
                     isPlaying = active.isPlaying,
@@ -486,11 +498,16 @@ class PlayerViewModel(
                 )
                 return@launch
             }
-            active.setMediaItem(mediaItemFor(book, uri, coverPath))
-            active.prepare()
+            // The start position is handed to setMediaItem rather than issued as a
+            // separate seekTo. A MediaController forwards commands to the service over
+            // IPC, so a seek after prepare() leaves a window in which the player still
+            // reports 0 -- and a second open() arriving inside that window adopts the
+            // 0 and plays from the beginning. Supplying it here makes the resume
+            // position part of preparing, with no in-flight seek to lose.
             val resumeMs = resumePositionMs(book)
-            active.seekTo(resumeMs)
-            trace(book.id, "open loaded seekTo=$resumeMs after=${active.currentPosition}")
+            active.setMediaItem(mediaItemFor(book, uri, coverPath), resumeMs)
+            active.prepare()
+            trace(book.id, "open loaded startAt=$resumeMs after=${active.currentPosition}")
             // Filter state is loaded before the player becomes ready. Resuming,
             // scrubbing, chapter jumps and skip buttons therefore cannot begin
             // playback from inside an enabled filter window.
@@ -1188,6 +1205,13 @@ class PlayerViewModel(
         const val FILTER_LOOK_AHEAD_SECONDS = 0.25
         const val FILTER_EXIT_PADDING_SECONDS = 0.20
         const val FILTER_SEEK_TOLERANCE_MS = 25L
+
+        /**
+         * How far behind the saved position an idle adopted player may sit before the
+         * resume position is reapplied. Wide enough not to fight a listener who nudged
+         * the scrubber, narrow enough to catch a discarded resume.
+         */
+        const val ADOPTED_POSITION_TOLERANCE_MS = 5_000L
         val LAST_BOOK_ID_KEY = PlaybackProgressKeys.LAST_BOOK_ID
     }
 
