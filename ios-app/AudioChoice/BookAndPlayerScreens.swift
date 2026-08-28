@@ -5,20 +5,25 @@ struct BookDetailScreen: View {
     @State private var isFavorite = false
     @State private var bookmarkCount = 0
     @State private var showingBookmarks = false
+    /// Held in state rather than re-read on every access, so renaming and marking a book
+    /// complete show immediately instead of after leaving and returning.
+    @State private var record: LibraryBookRecord?
+    @State private var showingRename = false
+    @State private var draftTitle = ""
 
-    private var record: LibraryBookRecord? {
-        AudiobookLibraryStore.load().first { $0.id == book.id }
-    }
+    /// The record's title wins, because it is the one renaming updates.
+    private var shownTitle: String { record?.book.title ?? book.title }
+    private var isFinished: Bool { record?.isFinished ?? false }
 
     var body: some View {
         ScrollView {
             VStack(spacing: 20) {
-                BookCover(title: book.title, artworkFileName: record?.artworkFileName)
+                BookCover(title: shownTitle, artworkFileName: record?.artworkFileName, isFinished: isFinished)
                     .frame(width: 220, height: 290)
                     .shadow(color: .black.opacity(0.45), radius: 18, y: 10)
 
                 VStack(spacing: 5) {
-                    Text(book.title).font(.title2.bold())
+                    Text(shownTitle).font(.title2.bold())
                     Text(book.author).foregroundStyle(ACTheme.secondaryText)
                     Text(book.edition)
                         .font(.caption)
@@ -32,6 +37,12 @@ struct BookDetailScreen: View {
                     metric("timer", book.runtime, "Runtime")
                     metric("list.bullet.rectangle", "\(book.chapters)", "Chapters")
                     metric("checkmark.shield", record?.scanResult == nil ? "Pending" : "Verified", "Scan")
+                }
+
+                if isFinished {
+                    Label("Finished", systemImage: "checkmark.circle.fill")
+                        .font(.footnote.weight(.semibold))
+                        .foregroundStyle(ACTheme.accent)
                 }
 
                 HStack {
@@ -92,10 +103,36 @@ struct BookDetailScreen: View {
                 UserLibraryStore.toggleFavorite(book.id)
                 isFavorite = UserLibraryStore.isFavorite(book.id)
             }
+            if let record {
+                Menu("More", systemImage: "ellipsis.circle") {
+                    Button(
+                        isFinished ? "Mark as Not Finished" : "Mark as Finished",
+                        systemImage: isFinished ? "arrow.uturn.backward.circle" : "checkmark.circle"
+                    ) {
+                        let target = !isFinished
+                        Task {
+                            let updated = await BookCompletionService.setFinished(target, for: record)
+                            if let updated { self.record = updated }
+                        }
+                    }
+                    Button("Edit Title", systemImage: "pencil") {
+                        draftTitle = shownTitle
+                        showingRename = true
+                    }
+                }
+            }
         }
         .onAppear {
+            record = AudiobookLibraryStore.load().first { $0.id == book.id }
             isFavorite = UserLibraryStore.isFavorite(book.id)
             bookmarkCount = UserLibraryStore.bookmarks(for: book.id).count
+        }
+        .alert("Edit title", isPresented: $showingRename) {
+            TextField("Title", text: $draftTitle)
+            Button("Save") { rename() }
+            Button("Cancel", role: .cancel) { draftTitle = "" }
+        } message: {
+            Text("Changes what this book is called on your devices. Its scan and filters are matched by the audio itself, so renaming it will not affect them.")
         }
         .sheet(isPresented: $showingBookmarks, onDismiss: {
             bookmarkCount = UserLibraryStore.bookmarks(for: book.id).count
@@ -103,6 +140,24 @@ struct BookDetailScreen: View {
             if let record {
                 BookmarkSheet(record: record, currentPosition: AudioPlaybackManager.savedPosition(for: record.id))
             }
+        }
+    }
+
+    /// Saves the new title locally first, then tells the account.
+    ///
+    /// Local first because the rename should hold even with no network, and because the
+    /// server treats these details as display only: identification keeps working from the
+    /// file's own metadata whatever the book is called.
+    private func rename() {
+        let trimmed = draftTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+        draftTitle = ""
+        guard !trimmed.isEmpty, trimmed != shownTitle,
+              let updated = AudiobookLibraryStore.rename(trimmed, for: book.id) else { return }
+        record = updated
+        guard let accountID = updated.accountLibraryID else { return }
+        Task {
+            guard let client = try? CloudScanClient.configured() else { return }
+            _ = try? await client.updateBookDetails(bookID: accountID, title: trimmed)
         }
     }
 

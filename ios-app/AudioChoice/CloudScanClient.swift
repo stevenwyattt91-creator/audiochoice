@@ -150,10 +150,27 @@ struct CloudScanClient {
         try await put(value, path: "v1/library")
     }
 
-    func saveProgress(bookID: UUID, position: Double, isFinished: Bool = false) async throws -> AccountLibraryBook {
+    /// Saves position and completion together.
+    ///
+    /// `isFinished` has no default on purpose. The server assigns whatever is sent, so a
+    /// default of false would let any ordinary position save quietly un-finish a book the
+    /// listener had already completed.
+    func saveProgress(bookID: UUID, position: Double, isFinished: Bool) async throws -> AccountLibraryBook {
         try await put(
             PlaybackProgressRequest(positionSeconds: position, isFinished: isFinished),
             path: "v1/library/\(bookID.uuidString)/progress")
+    }
+
+    /// Corrects how a book is labelled for this account.
+    ///
+    /// Title only from here. Author and narrator are read from the file's tags and are
+    /// used as identity evidence, so letting them be typed over would start steering which
+    /// recording the book is taken to be.
+    func updateBookDetails(bookID: UUID, title: String) async throws -> AccountLibraryBook {
+        try await put(
+            LibraryBookDetailsRequest(title: title),
+            path: "v1/library/\(bookID.uuidString)/details"
+        )
     }
 
     /// This book's filter choices as stored for the account, or nil if none are stored.

@@ -24,6 +24,9 @@ final class AudioPlaybackManager: ObservableObject {
     /// The open book's filter choices, held here rather than read from storage on every
     /// tick. Kept current by `load` and by the filter screen's change notification.
     @Published private(set) var filterSettings: BookFilterSettings = .everythingFiltered
+    /// Whether the open book is finished. Published so the player and library update as
+    /// soon as it changes.
+    @Published private(set) var isFinished: Bool = false
 
     private var player: AVPlayer?
     private var timeObserver: Any?
@@ -165,9 +168,14 @@ final class AudioPlaybackManager: ObservableObject {
         persistPosition()
         let previousRecord = currentRecord
         let previousPosition = position
+        // Carries the outgoing book's own completion state, not the incoming one's, and
+        // not a default: this save would otherwise clear a book finished moments earlier.
+        let previousIsFinished = isFinished
         if let accountID = previousRecord?.accountLibraryID {
             Task {
-                try? await CloudScanClient.configured().saveProgress(bookID: accountID, position: previousPosition)
+                try? await CloudScanClient.configured().saveProgress(
+                    bookID: accountID, position: previousPosition, isFinished: previousIsFinished
+                )
             }
         }
         removeTimeObserver()
@@ -178,6 +186,7 @@ final class AudioPlaybackManager: ObservableObject {
         self.activeFilterEvent = nil
         self.skippedEventCount = 0
         self.filterAvailability = FilterAvailability.of(record)
+        self.isFinished = record.isFinished
         // Read synchronously from local storage so the first skip decision is already
         // correct. The account copy is adopted a moment later if it differs.
         self.filterSettings = BookFilterSettingsStore.load(record.id)
@@ -290,6 +299,7 @@ final class AudioPlaybackManager: ObservableObject {
                 self.persistPosition()
                 self.updateChapter()
                 self.applyContentFilter()
+                self.markFinishedIfAtEnd()
                 self.updateNowPlaying()
             }
         }
@@ -329,7 +339,39 @@ final class AudioPlaybackManager: ObservableObject {
 
     func syncCurrentProgressToAccount() async {
         guard let record = currentRecord, let accountID = record.accountLibraryID else { return }
-        try? await CloudScanClient.configured().saveProgress(bookID: accountID, position: position)
+        try? await CloudScanClient.configured().saveProgress(
+            bookID: accountID, position: position, isFinished: isFinished
+        )
+    }
+
+    /// Marks the open book finished once playback reaches the end.
+    ///
+    /// Called from the time observer, so it has to stay cheap and must not repeat work:
+    /// the guard on `isFinished` is what stops a request every half second for the rest of
+    /// the outro.
+    private func markFinishedIfAtEnd() {
+        guard !isFinished,
+              BookCompletion.isComplete(position: position, duration: duration) else { return }
+        setFinished(true)
+    }
+
+    /// Records completion, both on the device and for the account.
+    ///
+    /// Also used by the listener marking a book by hand, which is the only way to finish a
+    /// book they chose to stop before the end of.
+    func setFinished(_ value: Bool) {
+        guard let id = currentBookID else { return }
+        isFinished = value
+        let updated = AudiobookLibraryStore.setFinished(value, for: id)
+        if let updated { record = updated; currentRecord = updated }
+        guard let accountID = updated?.accountLibraryID ?? currentRecord?.accountLibraryID else {
+            return
+        }
+        Task { [position] in
+            try? await CloudScanClient.configured().saveProgress(
+                bookID: accountID, position: position, isFinished: value
+            )
+        }
     }
 
     private func positionKey(_ id: UUID) -> String { "playbackPosition.\(id.uuidString)" }

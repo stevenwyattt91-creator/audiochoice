@@ -9,7 +9,7 @@ import SwiftUI
 struct BookFiltersScreen: View {
     let record: LibraryBookRecord
 
-    @AppStorage("parentalPin") private var parentalPin = ""
+    @State private var pinIsSet = ParentalPinStore.isSet
     @State private var settings: BookFilterSettings = .everythingFiltered
     @State private var expandedCategory: String?
     @State private var expandedGroup: String?
@@ -28,7 +28,7 @@ struct BookFiltersScreen: View {
     /// controls are on. Here they can be unlocked, because Parental Controls and the FAQ
     /// both tell the listener they will be asked for the PIN before changes are made, and
     /// offering no way to enter it would make the app's own description wrong.
-    private var isLocked: Bool { !parentalPin.isEmpty && !unlocked }
+    private var isLocked: Bool { pinIsSet && !unlocked }
 
     var body: some View {
         ScrollView {
@@ -95,6 +95,7 @@ struct BookFiltersScreen: View {
         .navigationTitle("Playback Filters")
         .navigationBarTitleDisplayMode(.inline)
         .task {
+            pinIsSet = ParentalPinStore.isSet
             settings = await BookFilterSettingsStore.refresh(
                 bookID: record.id,
                 accountLibraryID: record.accountLibraryID
@@ -103,7 +104,7 @@ struct BookFiltersScreen: View {
         .alert("Enter parental PIN", isPresented: $showingPinPrompt) {
             SecureField("PIN", text: $enteredPin).keyboardType(.numberPad)
             Button("Unlock") {
-                if enteredPin == parentalPin {
+                if ParentalPinStore.verify(enteredPin) {
                     unlocked = true
                     pinError = nil
                 } else {

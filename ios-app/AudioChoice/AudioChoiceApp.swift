@@ -7,6 +7,12 @@ struct AudioChoiceApp: App {
     @StateObject private var authSession = AuthSession.shared
     @StateObject private var companionTransfers = CompanionTransferCoordinator.shared
 
+    init() {
+        // Runs before any screen can read the lock, so a PIN set by an earlier build keeps
+        // working and its plaintext copy stops existing.
+        ParentalPinStore.migrateLegacyPinIfNeeded()
+    }
+
     var body: some Scene {
         WindowGroup {
             Group {

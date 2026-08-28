@@ -195,3 +195,11 @@ struct RemoteBookFilterSettings: Codable {
     let disabledAggregateKeys: [String]
     let updatedAt: Date
 }
+
+/// A correction to how a book is labelled. Display only: the server deliberately keeps
+/// these out of edition identification, which works from the file's own metadata.
+struct LibraryBookDetailsRequest: Codable {
+    let title: String
+    var author: String? = nil
+    var narrator: String? = nil
+}
