@@ -888,14 +888,159 @@ Assert(
         describedFingerprint, "A completely different and equally long replacement text."),
     "A second report overwrote a synopsis that was already stored.");
 
+// What reaches the catalogue at all. Explore is a store front, so an entry has to name a
+// book: every edition anyone scans is published by default, which put files that were never
+// identified into the catalogue as "Imported audiobook".
+static BookFingerprint Edition(string? title, string? author = "Elle Kennedy") =>
+    new(3, new string('f', 64), 700_000, 3600, "m4b", title, author,
+        null, null, null, null, null);
+Assert(ExploreCatalog.IsPublishable(Edition("The Deal")),
+    "An identified book was kept out of the catalogue.");
+Assert(!ExploreCatalog.IsPublishable(Edition("Imported audiobook")),
+    "A file that was never identified was published to the catalogue.");
+Assert(!ExploreCatalog.IsPublishable(Edition("Untitled Audiobook")),
+    "A placeholder title was published to the catalogue.");
+Assert(!ExploreCatalog.IsPublishable(Edition("imported audiobook!")),
+    "A placeholder title escaped by way of punctuation.");
+Assert(!ExploreCatalog.IsPublishable(Edition(null)),
+    "An edition with no title was published to the catalogue.");
+Assert(!ExploreCatalog.IsPublishable(Edition("   ")),
+    "A blank title was published to the catalogue.");
+Assert(!ExploreCatalog.IsPublishable(Edition("track 1")),
+    "A track placeholder was published to the catalogue.");
+Assert(!ExploreCatalog.IsPublishable(Edition("12345")),
+    "A numeric filename was published as a title.");
+// An author is the cheapest evidence the title came from the file's tags rather than a
+// filename, and an entry without one cannot be presented as a catalogue row anyway.
+Assert(!ExploreCatalog.IsPublishable(Edition("The Deal", null)),
+    "A book with no author was published to the catalogue.");
+
+// One row per recording. Titles cannot deliver that alone, because the same edition arrives
+// spelled differently depending on who tagged the file.
+Assert(ExploreCatalog.Deduplicate([
+        Catalogued("a", "The Deal", "Elle Kennedy", identifier: "B00SWZQZ4E"),
+        Catalogued("b", "The Deal: Off-Campus Book 1", "Elle Kennedy", identifier: "B00SWZQZ4E")
+    ]).Count == 1,
+    "Two spellings of one recording did not merge on a shared product identifier.");
+Assert(ExploreCatalog.Deduplicate([
+        Catalogued("a", "The Deal", "Elle Kennedy", identifier: "B00SWZQZ4E"),
+        Catalogued("b", "The Mistake", "Elle Kennedy", identifier: "B0112BOSKQ")
+    ]).Count == 2,
+    "Two books with different product identifiers were merged.");
+Assert(ExploreCatalog.Deduplicate([
+        Catalogued("a", "The Deal", "Elle Kennedy", duration: 39_600),
+        Catalogued("b", "the deal 3112r", "Elle Kennedy", duration: 39_601)
+    ]).Count == 1,
+    "One recording under two titles did not merge on author and runtime.");
+Assert(ExploreCatalog.Deduplicate([
+        Catalogued("a", "Some Book", "Elle Kennedy", duration: 39_600),
+        Catalogued("b", "A Different Book", "Rebecca Yarros", duration: 39_600)
+    ]).Count == 2,
+    "Two books sharing a runtime were merged despite different authors.");
+Assert(ExploreCatalog.Deduplicate([
+        Catalogued("a", "Some Book", null, duration: 39_600),
+        Catalogued("b", "A Different Book", null, duration: 39_600)
+    ]).Count == 2,
+    "Two books sharing a runtime were merged with no author to corroborate it.");
+// A different narrator reads at a different pace, so a runtime that disagrees means the scan
+// describes different audio and must not be served for this entry.
+Assert(ExploreCatalog.Deduplicate([
+        Catalogued("a", "The Deal", "Elle Kennedy", duration: 39_600),
+        Catalogued("b", "The Deal", "Elle Kennedy", duration: 28_800)
+    ]).Count == 2,
+    "Two different readings of one title were merged.");
+
+// Curating the catalogue. Hiding has to be reversible and has to leave the scan alone: the
+// entry comes off the store front, but a listener who owns that file keeps its filter
+// results, and putting it back must not need a database edit.
+var curated = new InMemoryScanCatalog(Path.Combine(Path.GetTempPath(),
+    $"audiochoice-curation-{Guid.NewGuid():N}"));
+var curatedFingerprint = new BookFingerprint(
+    3, new string('c', 64), 650_000, 39_600, "m4b", "The Deal", "Elle Kennedy",
+    null, null, null, null, null);
+var curatedCatalogID = new string('c', 24);
+var curationOwner = Guid.NewGuid();
+var curatedUpload = curated.CreateUpload(
+    curationOwner,
+    new CloudUploadAuthorizationRequest(curatedFingerprint, "the-deal.m4b", "audio/mp4", 650_000),
+    DateTimeOffset.UtcNow.AddHours(1),
+    "curation-token");
+Assert(curated.MarkUploaded(curatedUpload.ID, "/private/curation.m4b"),
+    "The curation fixture's upload was not recorded.");
+var curatedJob = curated.CreateJob(curationOwner, curatedUpload.ID, curatedFingerprint);
+Assert(curatedJob is not null, "The curation fixture's scan job was not created.");
+Assert(curated.CompleteJob(curatedJob!.ID, new ScanResult([], DateTimeOffset.UnixEpoch, "v1")),
+    "The curation fixture's scan did not complete.");
+Assert(curated.ListExploreBooks().Any(book => book.CatalogID == curatedCatalogID),
+    "A completed, identified scan did not reach the catalogue.");
+
+Assert(curated.HideExploreBook(curatedCatalogID), "Hiding a catalogue entry failed.");
+Assert(!curated.ListExploreBooks().Any(book => book.CatalogID == curatedCatalogID),
+    "A hidden entry was still shown to listeners.");
+// The whole point of hiding rather than deleting: the scan survives, so the listener who owns
+// this file still gets their filters.
+Assert(curated.FindResult(curatedFingerprint) is not null,
+    "Hiding an entry destroyed the scan result.");
+// An administrator has to be able to see a hidden entry, or it cannot be found to restore.
+var hiddenEntry = curated.ListExploreCatalog()
+    .SingleOrDefault(entry => entry.Book.CatalogID == curatedCatalogID);
+Assert(hiddenEntry is not null, "A hidden entry was invisible to administrators too.");
+Assert(!hiddenEntry!.IsPublished, "A hidden entry was reported as published.");
+Assert(hiddenEntry.WithheldReason is not null, "A hidden entry gave no reason.");
+
+Assert(curated.RestoreExploreBook(curatedCatalogID), "Restoring a hidden entry failed.");
+Assert(curated.ListExploreBooks().Any(book => book.CatalogID == curatedCatalogID),
+    "A restored entry did not come back to the catalogue.");
+Assert(!curated.RestoreExploreBook(curatedCatalogID),
+    "Restoring an entry that was never hidden reported success.");
+Assert(!curated.RestoreExploreBook("nosuchcatalogid"),
+    "Restoring an unknown catalog ID reported success.");
+
+// Where the buy button goes. Every Explore entry points at Audible now, and the link has to
+// be an exact listing whenever the file told us its product identifier, because sending a
+// listener to a search result for a book they asked to buy is how they buy the wrong edition.
+var audibleFingerprint = new BookFingerprint(
+    3, new string('e', 64), 800_000, 3600, "m4b", "Fourth Wing", "Rebecca Yarros",
+    null, null, null, null, null);
+var audibleResult = new ScanResult([], DateTimeOffset.UnixEpoch, "v1");
+var searchEntry = ExploreCatalog.Create(audibleFingerprint, audibleResult);
+Assert(searchEntry.PurchaseProvider == "Audible",
+    "Explore offered a provider other than Audible.");
+Assert(searchEntry.PurchaseURL.Host.EndsWith("audible.com", StringComparison.Ordinal),
+    "The purchase link did not point at Audible.");
+Assert(!searchEntry.PurchaseVerified,
+    "A search link was reported as a verified listing.");
+Assert(searchEntry.PurchaseURL.AbsoluteUri.Contains("Fourth+Wing") ||
+    searchEntry.PurchaseURL.AbsoluteUri.Contains("Fourth%20Wing"),
+    "The Audible search did not carry the title.");
+
+var asinEntry = ExploreCatalog.Create(
+    audibleFingerprint, audibleResult, false, null, "B0BW2CCVQ2");
+Assert(asinEntry.PurchaseURL.AbsoluteUri == "https://www.audible.com/pd/B0BW2CCVQ2",
+    "An ASIN did not produce a direct Audible product link.");
+Assert(asinEntry.PurchaseVerified,
+    "A direct product link was not reported as verified.");
+
+// An ISBN is not an ASIN. Putting one in an Audible product path resolves to nothing, so
+// these have to fall back to a search rather than produce a dead link.
+var isbnEntry = ExploreCatalog.Create(
+    audibleFingerprint, audibleResult, false, null, "9781098765432");
+Assert(isbnEntry.PurchaseURL.AbsoluteUri.Contains("/search?"),
+    "An ISBN was used as though it were an Audible product identifier.");
+Assert(!isbnEntry.PurchaseVerified, "An ISBN link was reported as a verified listing.");
+Assert(!ExploreCatalog.IsAudibleProductIdentifier("B0BW2CCVQ"), "A nine-character identifier was accepted.");
+Assert(!ExploreCatalog.IsAudibleProductIdentifier(null), "A missing identifier was accepted.");
+Assert(ExploreCatalog.IsAudibleProductIdentifier("B0BW2CCVQ2"), "A valid ASIN was rejected.");
+
 Console.WriteLine("AudioChoice backend contract tests passed.");
 
 static ExploreCatalogBook Catalogued(
     string id, string title, string? author = null, string? editionType = null,
-    int eventCount = 10, string? cover = null) =>
-    new(id, title, author, null, null, editionType, 3600, "m4b",
+    int eventCount = 10, string? cover = null, double? duration = 3600,
+    string? identifier = null) =>
+    new(id, title, author, null, null, editionType, duration, "m4b",
         DateTimeOffset.UnixEpoch, "v1", eventCount, [], cover, null,
-        new Uri("https://example.com"), "example", false);
+        new Uri("https://example.com"), "example", false, identifier);
 
 static string Base64Url(byte[] value) =>
     Convert.ToBase64String(value).TrimEnd('=').Replace('+', '-').Replace('/', '_');

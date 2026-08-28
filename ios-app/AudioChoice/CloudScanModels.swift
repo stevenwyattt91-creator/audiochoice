@@ -185,6 +185,12 @@ struct ExploreCatalogBook: Codable, Identifiable {
     let description: String?
     let purchaseURL: URL
     let purchaseProvider: String
+    /// The retail product identifier, when the recording's is known.
+    ///
+    /// Lets two copies of one recording be recognised as the same catalogue entry, which
+    /// titles cannot do on their own: the same edition arrives spelled several ways
+    /// depending on who tagged the file.
+    var productIdentifier: String? = nil
 }
 
 /// A book's filter choices as the server stores them.

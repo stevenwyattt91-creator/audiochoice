@@ -74,6 +74,23 @@ public interface IScanCatalog
     bool SaveEditionDescription(BookFingerprint fingerprint, string description);
     (byte[] Bytes, string ContentType)? FindExploreCover(string catalogID);
     bool HideExploreBook(string catalogID);
+    /// <summary>
+    /// Puts a hidden edition back in the catalogue.
+    /// </summary>
+    /// <remarks>
+    /// Hiding was a one-way door, so a mistake could only be undone by editing the database
+    /// by hand.
+    /// </remarks>
+    bool RestoreExploreBook(string catalogID);
+    /// <summary>
+    /// Every scanned edition with its catalogue status, for administration.
+    /// </summary>
+    /// <remarks>
+    /// Unlike <see cref="ListExploreBooks"/> this withholds nothing and does not merge
+    /// duplicates, because the entries an administrator needs to act on are precisely the
+    /// ones the listener-facing view removes.
+    /// </remarks>
+    IReadOnlyList<ExploreCatalogAdminEntry> ListExploreCatalog();
     IReadOnlyList<BookFingerprint> ListFingerprints();
     bool UpdateEditionMetadata(AdminEditionMetadataRequest request);
 }
@@ -99,11 +116,21 @@ public sealed class InMemoryScanCatalog : IScanCatalog
     private readonly string? _storagePath;
     private readonly object _persistenceLock = new();
 
-    public InMemoryScanCatalog(string? storagePath = null)
+    /// <param name="editionSignatures">
+    /// Supplies the retail product identifier for an edition, so an Explore entry can link
+    /// to an exact Audible listing. Optional: without it entries fall back to a search,
+    /// which is what tests and the no-database mode get.
+    /// </param>
+    public InMemoryScanCatalog(
+        string? storagePath = null,
+        IEditionSignatureStore? editionSignatures = null)
     {
         _storagePath = storagePath;
+        _editionSignatures = editionSignatures;
         Load();
     }
+
+    private readonly IEditionSignatureStore? _editionSignatures;
 
     public ScanResult? FindResult(BookFingerprint fingerprint) =>
         _results.GetValueOrDefault(FingerprintKey(fingerprint));
@@ -365,13 +392,17 @@ public sealed class InMemoryScanCatalog : IScanCatalog
         .Select(group => group.OrderByDescending(value => value.Result!.ScanDate).First())
         .Where(value => !string.IsNullOrWhiteSpace(value.Fingerprint.WorkTitle))
         .Where(value => !value.Fingerprint.WorkTitle!.Contains("Iron Flame", StringComparison.OrdinalIgnoreCase))
+        // A catalogue entry has to name a book. Anything still called "Imported audiobook"
+        // was never identified and is not something another listener can look up or buy.
+        .Where(value => ExploreCatalog.IsPublishable(value.Fingerprint))
         .Select(value => ExploreCatalog.Create(
             value.Fingerprint,
             value.Result!,
             _exploreCovers.ContainsKey(CatalogIDOf(value.Fingerprint)),
             _editionDescriptions.TryGetValue(CatalogIDOf(value.Fingerprint), out var description)
                 ? description
-                : null))
+                : null,
+            _editionSignatures?.Find(value.Fingerprint)?.ProductIdentifier))
         .Where(value => !_hiddenExploreBooks.ContainsKey(value.CatalogID))
         .OrderBy(value => value.Title);
 
@@ -406,6 +437,28 @@ public sealed class InMemoryScanCatalog : IScanCatalog
         _hiddenExploreBooks[catalogID.Trim().ToLowerInvariant()] = 0;
         return true;
     }
+
+    public bool RestoreExploreBook(string catalogID) =>
+        !string.IsNullOrWhiteSpace(catalogID) &&
+        _hiddenExploreBooks.TryRemove(catalogID.Trim().ToLowerInvariant(), out _);
+
+    public IReadOnlyList<ExploreCatalogAdminEntry> ListExploreCatalog() => _jobs.Values
+        .Where(value => value.Status == CloudScanStatus.Completed && value.Result is not null)
+        .GroupBy(value => FingerprintKey(value.Fingerprint))
+        .Select(group => group.OrderByDescending(value => value.Result!.ScanDate).First())
+        .Select(value => ExploreCatalog.AdminEntry(
+            ExploreCatalog.Create(
+                value.Fingerprint,
+                value.Result!,
+                _exploreCovers.ContainsKey(CatalogIDOf(value.Fingerprint)),
+                _editionDescriptions.TryGetValue(CatalogIDOf(value.Fingerprint), out var description)
+                    ? description
+                    : null,
+                _editionSignatures?.Find(value.Fingerprint)?.ProductIdentifier),
+            value.Fingerprint,
+            !_hiddenExploreBooks.ContainsKey(CatalogIDOf(value.Fingerprint))))
+        .OrderBy(value => value.Book.Title)
+        .ToArray();
 
     public IReadOnlyList<BookFingerprint> ListFingerprints() =>
         _uploads.Values
@@ -498,10 +551,21 @@ public static class ExploreCatalog
         IEnumerable<ExploreCatalogBook> books)
     {
         var clusters = new List<List<ExploreCatalogBook>>();
+        // A product identifier names one published recording outright, so two copies sharing
+        // one are the same catalogue entry however their titles are spelled. Consulted first
+        // because it is the only signal here that cannot be mistaken.
+        var byIdentifier = new Dictionary<string, int>(StringComparer.Ordinal);
         var byKey = new Dictionary<string, List<int>>(StringComparer.Ordinal);
 
         foreach (var book in books)
         {
+            var identifier = book.ProductIdentifier;
+            if (identifier is not null && byIdentifier.TryGetValue(identifier, out var known))
+            {
+                clusters[known].Add(book);
+                continue;
+            }
+
             var key = GroupKey(book);
             if (!byKey.TryGetValue(key, out var indexes))
             {
@@ -509,23 +573,92 @@ public static class ExploreCatalog
                 byKey[key] = indexes;
             }
 
-            var placed = false;
+            var placed = -1;
             foreach (var index in indexes)
             {
                 if (!IsSameBook(clusters[index][0], book)) continue;
                 clusters[index].Add(book);
-                placed = true;
+                placed = index;
                 break;
             }
-            if (placed) continue;
 
-            clusters.Add([book]);
-            indexes.Add(clusters.Count - 1);
+            // Same author, same part, same runtime to the second: one recording whose title
+            // is written two ways. Only reached when the titles disagree, since a matching
+            // title would have been caught above.
+            if (placed < 0)
+            {
+                for (var index = 0; index < clusters.Count; index++)
+                {
+                    if (!IsSameRecording(clusters[index][0], book)) continue;
+                    clusters[index].Add(book);
+                    placed = index;
+                    break;
+                }
+            }
+
+            if (placed < 0)
+            {
+                clusters.Add([book]);
+                placed = clusters.Count - 1;
+                indexes.Add(placed);
+            }
+
+            // Remember the identifier against whichever cluster this joined, so a later copy
+            // carrying the same one lands in the same place.
+            if (identifier is not null) byIdentifier.TryAdd(identifier, placed);
         }
 
         // Incoming order is preserved, so the caller's sort still holds.
         return clusters.Select(Best).ToArray();
     }
+
+    /// <summary>
+    /// Whether two entries are the same recording judged on runtime rather than title.
+    /// </summary>
+    /// <remarks>
+    /// The last resort for copies that carry no product identifier, where one was tagged by
+    /// hand and the other named from a filename. Runtime is the discriminating signal: two
+    /// different recordings of the same book run to different lengths, because a different
+    /// narrator reads at a different pace.
+    ///
+    /// Requires an author on both sides. Without one this would merge on runtime alone, and
+    /// two unrelated books that happen to run the same length are not the same book.
+    /// </remarks>
+    private static bool IsSameRecording(ExploreCatalogBook left, ExploreCatalogBook right)
+    {
+        // Two identifiers that disagree are evidence of two different recordings, and that
+        // outranks a runtime coincidence. Equal identifiers never reach here, having already
+        // merged above, so anything left carrying one on both sides is genuinely two books.
+        if (left.ProductIdentifier is not null && right.ProductIdentifier is not null) return false;
+        if (left.Duration is not > 0 || right.Duration is not > 0) return false;
+        if (Math.Abs(left.Duration.Value - right.Duration.Value) > RuntimeMatchSeconds) return false;
+        if (PartMarker(left.Title) != PartMarker(right.Title)) return false;
+        if (Normalize(left.EditionType) != Normalize(right.EditionType)) return false;
+        var leftAuthor = Normalize(left.Author);
+        var rightAuthor = Normalize(right.Author);
+        return leftAuthor.Length > 0 && leftAuthor == rightAuthor;
+    }
+
+    /// <summary>
+    /// Whether two runtimes are close enough to be the same recording.
+    /// </summary>
+    /// <remarks>
+    /// An unknown runtime counts as agreement rather than a mismatch, because an untagged
+    /// file is one of the differences being reconciled here.
+    /// </remarks>
+    private static bool RuntimesAgree(double? left, double? right) =>
+        left is not > 0 || right is not > 0 ||
+        Math.Abs(left.Value - right.Value) <= RuntimeMatchSeconds;
+
+    /// <summary>
+    /// How far two runtimes may differ and still be the same recording.
+    /// </summary>
+    /// <remarks>
+    /// Converting a file re-encodes it, which shifts the reported length by a fraction of a
+    /// second, and a container's runtime is rounded. Two seconds absorbs that without being
+    /// wide enough to merge an abridged reading with an unabridged one.
+    /// </remarks>
+    private const double RuntimeMatchSeconds = 2;
 
     /// <summary>
     /// Which entry survives: a cover first, since a missing one is the visible symptom,
@@ -573,6 +706,10 @@ public static class ExploreCatalog
         if (NormalizedTitle(left.Title) != NormalizedTitle(right.Title)) return false;
         if (PartMarker(left.Title) != PartMarker(right.Title)) return false;
         if (Normalize(left.EditionType) != Normalize(right.EditionType)) return false;
+        // Two runtimes that disagree are two different readings of one book, whatever the
+        // edition type says: a different narrator, or an abridgement. Merging them would show
+        // one entry's scan for audio it does not describe.
+        if (!RuntimesAgree(left.Duration, right.Duration)) return false;
 
         var leftAuthor = Normalize(left.Author);
         var rightAuthor = Normalize(right.Author);
@@ -637,10 +774,100 @@ public static class ExploreCatalog
     private static string Normalize(string? value) =>
         System.Text.RegularExpressions.Regex.Replace(value ?? "", @"[^a-z0-9]+", " ", System.Text.RegularExpressions.RegexOptions.IgnoreCase).Trim().ToLowerInvariant();
 
-    private const string AcotarPart1URL = "https://www.graphicaudio.net/a-court-of-thorns-and-roses-1-a-court-of-thorns-and-roses-1-of-2.html";
-    private const string AcotarPart2URL = "https://www.graphicaudio.net/a-court-of-thorns-and-roses-1-a-court-of-thorns-and-roses-2-of-2.html";
-    private const string IronFlamePart2URL = "https://www.graphicaudio.net/the-empyrean-2-iron-flame-2-of-2.html";
-    private const string FourthWingPart1URL = "https://www.graphicaudio.net/the-empyrean-1-fourth-wing-1-of-2.html";
+    /// Every Explore entry now points at Audible.
+    public const string PurchaseProviderName = "Audible";
+
+    /// <summary>
+    /// Titles that mean "this file was never identified" rather than naming a book.
+    /// </summary>
+    /// <remarks>
+    /// Both clients and the server substitute one of these when a file carries no title
+    /// tag. They are compared after normalisation, so punctuation and casing do not matter.
+    /// </remarks>
+    private static readonly string[] PlaceholderTitles =
+    [
+        "imported audiobook", "untitled audiobook", "untitled", "audiobook",
+        "unknown", "unknown title", "unknown album", "track 1", "audio", "book"
+    ];
+
+    /// <summary>
+    /// Whether an edition belongs in Explore at all.
+    /// </summary>
+    /// <remarks>
+    /// Explore is a catalogue of recordings other listeners can look up, so an entry has to
+    /// name a book. Every edition anyone scans is published by default, which meant a file
+    /// with no tags arrived as "Imported audiobook" and sat in the catalogue as an entry
+    /// nobody could identify or buy.
+    ///
+    /// An author is required for the same reason. It is also the cheapest evidence that the
+    /// title came from the file's own tags rather than being guessed from a filename: a
+    /// tagged audiobook essentially always names its author, and a bare download rarely
+    /// does. That is a proxy rather than a proof, and the cost of it being wrong is a
+    /// correctly-titled book waiting for one listener with a properly tagged copy.
+    /// </remarks>
+    public static bool IsPublishable(BookFingerprint fingerprint) =>
+        UnpublishableReason(fingerprint) is null;
+
+    /// <summary>
+    /// Why an edition is being withheld from the catalogue, or null when it is fit to list.
+    /// </summary>
+    /// <remarks>
+    /// Returned to administrators so a missing book can be explained rather than guessed at.
+    /// </remarks>
+    public static string? UnpublishableReason(BookFingerprint fingerprint)
+    {
+        var title = Normalize(EditionTitleFormatter.Format(fingerprint));
+        if (title.Length == 0) return "The edition has no title.";
+        if (PlaceholderTitles.Contains(title, StringComparer.Ordinal))
+        {
+            return "The title is a placeholder, so this file was never identified.";
+        }
+        // A title that is only digits, or a single character, names nothing.
+        if (title.Length < 2) return "The title is too short to name a book.";
+        if (title.All(char.IsDigit)) return "The title is only digits, so it is a filename.";
+        return string.IsNullOrWhiteSpace(fingerprint.Author)
+            ? "The edition has no author, so its title was probably guessed from a filename."
+            : null;
+    }
+
+    /// <summary>Builds the administrative view of one edition.</summary>
+    public static ExploreCatalogAdminEntry AdminEntry(
+        ExploreCatalogBook book, BookFingerprint fingerprint, bool isPublished)
+    {
+        var reason = UnpublishableReason(fingerprint);
+        return new ExploreCatalogAdminEntry(
+            book,
+            isPublished,
+            reason is null,
+            isPublished ? reason : "An administrator hid this edition.");
+    }
+
+    /// <summary>
+    /// Where to buy this recording on Audible.
+    /// </summary>
+    /// <remarks>
+    /// A product identifier gives an exact listing; without one the best that can be
+    /// offered is a search, because guessing at a product URL from a title would send
+    /// listeners to a page for the wrong recording.
+    /// </remarks>
+    public static Uri AudiblePurchaseURL(string query, string? productIdentifier) =>
+        new(IsAudibleProductIdentifier(productIdentifier)
+            ? $"https://www.audible.com/pd/{productIdentifier!.ToUpperInvariant()}"
+            : $"https://www.audible.com/search?keywords={Uri.EscapeDataString(query)}");
+
+    /// <summary>
+    /// Whether an identifier is an Audible ASIN rather than an ISBN.
+    /// </summary>
+    /// <remarks>
+    /// Files carry either, and the two are not interchangeable here: an ISBN in an
+    /// Audible product path resolves to nothing. ASINs are ten characters and the
+    /// audiobook ones begin with B, which is what separates them.
+    /// </remarks>
+    public static bool IsAudibleProductIdentifier(string? value) =>
+        value is { Length: 10 } &&
+        (value[0] is 'B' or 'b') &&
+        value.All(char.IsLetterOrDigit);
+
     private const string FourthWingDescription = """
 Twenty-year-old Violet Sorrengail was supposed to enter the Scribe Quadrant and live a quiet life among books and history. Instead, her mother orders her to compete for a place among Navarre's elite dragon riders.
 
@@ -712,7 +939,8 @@ Carl and his ex-girlfriend's cat, Princess Donut, are forced into a planet-spann
         BookFingerprint fingerprint,
         ScanResult result,
         bool hasCover = false,
-        string? storedDescription = null)
+        string? storedDescription = null,
+        string? productIdentifier = null)
     {
         var title = EditionTitleFormatter.Format(fingerprint);
         var query = string.Join(' ', new[] { title, fingerprint.Author }.Where(value => !string.IsNullOrWhiteSpace(value)));
@@ -722,27 +950,10 @@ Carl and his ex-girlfriend's cat, Princess Donut, are forced into a planet-spann
         var isIronFlamePart2 = isIronFlame && title.Contains("Part 2 of 2", StringComparison.OrdinalIgnoreCase);
         var isFourthWing = title.Contains("Fourth Wing", StringComparison.OrdinalIgnoreCase);
         var isFourthWingPart1 = isFourthWing && title.Contains("Part 1 of 2", StringComparison.OrdinalIgnoreCase);
-        var isKnownGraphicAudioTitle = title.Contains("A Court of Thorns and Roses", StringComparison.OrdinalIgnoreCase) ||
-            isAcotarMistAndFury ||
-            isIronFlamePart2 || isFourthWingPart1;
-        var isGraphicAudio = isKnownGraphicAudioTitle ||
-            fingerprint.EditionType?.Contains("dramatized", StringComparison.OrdinalIgnoreCase) == true ||
-            fingerprint.EditionType?.Contains("graphic audio", StringComparison.OrdinalIgnoreCase) == true ||
-            fingerprint.EditionType?.Contains("graphicaudio", StringComparison.OrdinalIgnoreCase) == true;
         var isAcotar = title.Contains("A Court of Thorns and Roses", StringComparison.OrdinalIgnoreCase);
         var isDungeonCrawlerCarl = title.Contains("Dungeon Crawler Carl", StringComparison.OrdinalIgnoreCase) &&
             fingerprint.Author?.Contains("Matt Dinniman", StringComparison.OrdinalIgnoreCase) == true;
-        var isAcotarPart1 = isAcotar && title.Contains("Part 1 of 2", StringComparison.OrdinalIgnoreCase);
-        var isAcotarPart2 = isAcotar && title.Contains("Part 2 of 2", StringComparison.OrdinalIgnoreCase);
-        var provider = isGraphicAudio ? "GraphicAudio" : "Libro.fm";
-        var verifiedPurchaseURL = isIronFlamePart2 ? IronFlamePart2URL
-            : isFourthWingPart1 ? FourthWingPart1URL
-            : isAcotarPart1 ? AcotarPart1URL
-            : isAcotarPart2 ? AcotarPart2URL
-            : null;
-        var purchaseURL = new Uri(verifiedPurchaseURL ?? (isGraphicAudio
-            ? $"https://www.graphicaudio.net/catalogsearch/result/?q={Uri.EscapeDataString(query)}"
-            : $"https://libro.fm/search?q={Uri.EscapeDataString(query)}"));
+        var purchaseURL = AudiblePurchaseURL(query, productIdentifier);
         return new ExploreCatalogBook(
             catalogID,
             title,
@@ -766,8 +977,19 @@ Carl and his ex-girlfriend's cat, Princess Donut, are forced into a planet-spann
                 // specific dramatised editions, so they stay ahead of the file's own tag.
                 : NormalizeDescription(storedDescription),
             purchaseURL,
-            provider,
-            verifiedPurchaseURL is not null);
+            PurchaseProviderName,
+            // "Verified" means the link is known to be this exact recording, which is only
+            // true when the file told us its product identifier. A search result is a guess.
+            IsAudibleProductIdentifier(productIdentifier),
+            NormalizedIdentifier(productIdentifier));
+    }
+
+    /// <summary>An identifier reduced so two spellings of one value compare equal.</summary>
+    private static string? NormalizedIdentifier(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value)) return null;
+        var cleaned = new string(value.Where(char.IsLetterOrDigit).ToArray()).ToUpperInvariant();
+        return cleaned.Length == 0 ? null : cleaned;
     }
 
     private static int FilterControlCount(IReadOnlyList<ScanEvent> events) =>
