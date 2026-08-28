@@ -23,6 +23,11 @@ data class LibraryUiState(
 )
 
 class LibraryViewModel(
+    /**
+     * The application context, for reading tags back out of stored files. Deliberately not
+     * an activity, which a view model outlives.
+     */
+    private val context: android.content.Context,
     private val api: AudioChoiceApi,
     private val localAudio: com.audiochoice.mobile.data.LocalAudioStore,
 ) : ViewModel() {
@@ -124,6 +129,7 @@ class LibraryViewModel(
                         }
                     }
                 }
+                reportMissingDescriptions(accessToken, serverBooks, initialExplore)
                 // Resolve catalog artwork before enriching the user's books. If this is
                 // the first import to supply artwork, every matching library record can
                 // receive the same permanent server URL during this load.
@@ -201,6 +207,44 @@ class LibraryViewModel(
                         mutableState.value = mutableState.value.copy(loading = false, loaded = true, error = null)
                     }
                 }
+        }
+    }
+
+    /**
+     * Sends up the synopsis for books whose Explore entry has none.
+     *
+     * Descriptions are read at import, so books added before that carry none on the server.
+     * Re-running the library upsert would supply one, but it also overwrites the stored
+     * title, which would revert a correction the listener had made, so this reports the
+     * description on its own.
+     *
+     * Only files still on the device can be read, and only editions the Explore catalogue
+     * is actually missing a description for are touched, so this costs nothing once every
+     * book the listener owns has one.
+     */
+    private suspend fun reportMissingDescriptions(
+        accessToken: String,
+        books: List<LibraryBook>,
+        catalog: List<ExploreCatalogBook>,
+    ) {
+        val describedCatalogIDs = catalog
+            .filter { !it.description.isNullOrBlank() }
+            .map { it.catalogID.lowercase() }
+            .toSet()
+        val reader = com.audiochoice.mobile.importing.Mp4TagReader(context.contentResolver)
+        books.forEach { book ->
+            if (book.fingerprint.sha256.take(24).lowercase() in describedCatalogIDs) return@forEach
+            val uri = localAudio.find(book.fingerprint.sha256) ?: return@forEach
+            val synopsis = runCatching { reader.read(uri).synopsis }.getOrNull() ?: return@forEach
+            runCatching {
+                api.reportEditionDescription(
+                    accessToken,
+                    com.audiochoice.mobile.data.EditionDescriptionReportRequest(
+                        book.fingerprint,
+                        synopsis,
+                    ),
+                )
+            }
         }
     }
 
@@ -310,10 +354,13 @@ class LibraryViewModel(
     }
 
     class Factory(
+        context: android.content.Context,
         private val api: AudioChoiceApi,
         private val localAudio: com.audiochoice.mobile.data.LocalAudioStore,
     ) : ViewModelProvider.Factory {
+        private val applicationContext = context.applicationContext
         @Suppress("UNCHECKED_CAST")
-        override fun <T : ViewModel> create(modelClass: Class<T>): T = LibraryViewModel(api, localAudio) as T
+        override fun <T : ViewModel> create(modelClass: Class<T>): T =
+            LibraryViewModel(applicationContext, api, localAudio) as T
     }
 }

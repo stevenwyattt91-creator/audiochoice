@@ -55,7 +55,16 @@ public static partial class DeterministicContentDetector
             ["self_harm_depiction"] = Cue(@"\b(?:cut her wrists|cut his wrists|cut my wrists|hanging himself|hanging herself|overdosed intentionally)\b")
         };
 
-    public static IReadOnlyList<DeterministicDetection> Detect(
+    /// <summary>
+    /// Exact profane words, matched literally.
+    /// </summary>
+    /// <remarks>
+    /// Reported at full confidence because there is no judgement involved: the word is
+    /// either present or it is not. This is also what lets the apps group every occurrence
+    /// of one word under a single switch, which needs the word itself rather than a
+    /// model's paraphrase of it.
+    /// </remarks>
+    public static IReadOnlyList<DeterministicDetection> DetectProfanity(
         IReadOnlyList<TranscriptSegment> segments)
     {
         var detections = new List<DeterministicDetection>();
@@ -73,7 +82,31 @@ public static partial class DeterministicContentDetector
                     "Profanity detected",
                     word));
             }
+        }
+        return detections;
+    }
 
+    /// <summary>
+    /// Cheap keyword cues, for deciding what deserves model review.
+    /// </summary>
+    /// <remarks>
+    /// These are guesses, not findings, and they are wrong constantly: "high above the
+    /// wall" matches intoxication, "a pot of coffee" matches a drug reference, and a single
+    /// "bloody" matches graphic violence. They were previously emitted as user-facing
+    /// events at 0.35 confidence, which nothing downstream ever checked, so a listener saw
+    /// "Graphic violence described" on the strength of one word — and Luna's careful
+    /// instruction to ignore ordinary conflict was bypassed entirely.
+    ///
+    /// They are only a defensible source of events where nothing else looks at the passage,
+    /// which is the Lambda-first mode. Whenever Luna reads the whole transcript, its
+    /// judgement supersedes these outright.
+    /// </remarks>
+    public static IReadOnlyList<DeterministicDetection> DetectCategoryCues(
+        IReadOnlyList<TranscriptSegment> segments)
+    {
+        var detections = new List<DeterministicDetection>();
+        foreach (var segment in segments)
+        {
             foreach (var cue in CategoryCues)
             {
                 if (!cue.Value.IsMatch(segment.Text)) continue;

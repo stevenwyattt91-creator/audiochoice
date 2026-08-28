@@ -8,6 +8,11 @@
     <DefineConstants>$(DefineConstants);POSTGRES;GOOGLEAUTH</DefineConstants>
   </PropertyGroup>
   <ItemGroup>
+    <!-- The contract tests assert that the generated prompt still covers every
+         allowed label, which needs the generated text rather than a copy of it. -->
+    <InternalsVisibleTo Include="AudioChoice.Api.ContractTests" />
+  </ItemGroup>
+  <ItemGroup>
     <Content Include="../Database/Migrations/**/*.sql" Link="Database/Migrations/%(RecursiveDir)%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
   <ItemGroup Condition="'$(EnablePostgres)' == 'true'">

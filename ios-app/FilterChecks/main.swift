@@ -191,6 +191,72 @@ check("choices survive a reload", BookFilterSettingsStore.load(bookID) == indivi
 check("an unknown book filters everything",
       BookFilterSettingsStore.load(UUID()) == .everythingFiltered)
 
+print("The taxonomy matches the shared contract")
+// This table is the fourth hand-written copy of the taxonomy: the contract file declares it,
+// the backend implements it, and each client mirrors it. A group missing here is a filter the
+// listener has no switch for, and a group named differently is a control they cannot
+// recognise, so drift is checked rather than trusted.
+if let path = ProcessInfo.processInfo.environment["AUDIOCHOICE_TAXONOMY_CONTRACT"],
+   let data = FileManager.default.contents(atPath: path),
+   let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+   let categories = root["categories"] as? [[String: Any]] {
+
+    var declaredGroupIDs: Set<String> = []
+    var declaredCategoryIDs: Set<String> = []
+    var declaredNames: [String: String] = [:]
+    for category in categories {
+        guard let digit = category["digit"] as? Int,
+              let categoryID = category["categoryID"] as? String,
+              let groups = category["groups"] as? [[String: Any]] else { continue }
+        var anyEnforced = false
+        for group in groups {
+            guard let index = group["index"] as? Int,
+                  let name = group["name"] as? String,
+                  group["enforced"] as? Bool == true else { continue }
+            anyEnforced = true
+            let groupID = String(format: "%d1000000-0000-0000-0000-%012d", digit, index)
+            declaredGroupIDs.insert(groupID)
+            declaredNames[groupID] = name
+        }
+        if anyEnforced { declaredCategoryIDs.insert(categoryID.lowercased()) }
+    }
+
+    check("every enforced group has a switch",
+          declaredGroupIDs.subtracting(PlaybackFilterTaxonomy.knownGroupIDs).isEmpty)
+    // The reverse matters just as much: a group here that the contract does not enforce means
+    // playback could remove something the scanner is no longer allowed to report.
+    check("no switch exists for a group the contract does not enforce",
+          PlaybackFilterTaxonomy.knownGroupIDs.subtracting(declaredGroupIDs).isEmpty)
+    check("the derived categories agree",
+          PlaybackFilterTaxonomy.knownCategoryIDs == declaredCategoryIDs)
+    check("no unenforced violence group has a switch",
+          !PlaybackFilterTaxonomy.knownGroupIDs.contains("31000000-0000-0000-0000-000000000001"))
+
+    let hierarchy = PlaybackFilterTaxonomy.available(
+        declaredGroupIDs.sorted().enumerated().map { offset, groupID in
+            let category = String(groupID.prefix(1))
+            return ScanEvent(
+                id: UUID(), startTime: Double(offset), endTime: Double(offset) + 1,
+                categoryID: UUID(uuidString: "\(category)0000000-0000-0000-0000-000000000001")!,
+                groupID: UUID(uuidString: groupID)!, eventID: UUID(), confidence: 0.9,
+                stableKey: "k\(offset)", safeDescription: "d", aggregateKey: nil,
+                aggregateDisplay: nil
+            )
+        }
+    )
+    var mismatched: [String] = []
+    for category in hierarchy {
+        for group in category.groups where declaredNames[group.id] != group.label {
+            mismatched.append("\(group.id): contract '\(declaredNames[group.id] ?? "?")' vs app '\(group.label)'")
+        }
+    }
+    check("every group is named as the contract names it", mismatched.isEmpty)
+    if !mismatched.isEmpty { for line in mismatched { print("       \(line)") } }
+} else {
+    print("  FAIL could not read the taxonomy contract")
+    failures += 1
+}
+
 print("")
 if failures == 0 {
     print("All filter checks passed.")

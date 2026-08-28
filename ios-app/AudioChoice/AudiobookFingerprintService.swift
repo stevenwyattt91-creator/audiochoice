@@ -36,13 +36,19 @@ struct AudiobookFingerprintService {
                 hasher.update(data: data)
             }
             let digest = hasher.finalize().map { String(format: "%02X", $0) }.joined()
-            let duration = try? await AVURLAsset(url: fileURL).load(.duration).seconds
 
             // The container's own tags, which is where the edition is actually named.
             // Previously every one of these fields was sent as nil and the title was
             // taken from the filename, so the server had nothing to identify an
             // edition by beyond a byte hash that any conversion invalidates.
-            let tags = Mp4TagReader().read(fileURL: fileURL)
+            let container = Mp4TagReader().readContainer(fileURL: fileURL)
+            let tags = container.tags
+            // Runtime is part of the fingerprint, so a missing one weakens edition matching.
+            // The container states it directly when AVFoundation declines to.
+            let assetDuration = try? await AVURLAsset(url: fileURL).load(.duration).seconds
+            let duration = assetDuration?.isFinite == true && (assetDuration ?? 0) > 0
+                ? assetDuration
+                : container.durationSeconds
             let taggedTitle = tags.title
             let filenameTitle = AudiobookTitleFormatter.cleanFilename(
                 fileURL.deletingPathExtension().lastPathComponent

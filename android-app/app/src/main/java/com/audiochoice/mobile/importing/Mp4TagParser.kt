@@ -22,6 +22,14 @@ data class AudioEditionTags(
     /** Audible's product identifier. */
     val asin: String? = null,
     val isbn: String? = null,
+    /**
+     * The publisher's synopsis, when the file carries one.
+     *
+     * Audiobooks routinely ship with the back-cover text in `ldes` or `©des`. It is the
+     * only description of the story available without asking an outside service, and it
+     * came with the file the listener already owns.
+     */
+    val synopsis: String? = null,
 ) {
     /**
      * A retail product identifier names one specific published edition, so it can
@@ -46,6 +54,12 @@ object Mp4TagParser {
     private const val TYPE_UTF16 = 2L
     private const val TYPE_SIGNED_INT = 21L
     private const val TYPE_UNSIGNED_INT = 22L
+
+    /** Smaller than this is not an image, whatever the atom claims. */
+    private const val MINIMUM_COVER_BYTES = 64
+
+    /** Audiobook covers are large but not unbounded. */
+    private const val MAXIMUM_COVER_BYTES = 6 * 1024 * 1024
 
     /**
      * @param payload the raw contents of an `ilst` atom, header excluded.
@@ -91,7 +105,104 @@ object Mp4TagParser {
             )?.let(::seriesPartOf),
             asin = freeformOf("asin", "product_id")?.let(::identifierOf),
             isbn = freeformOf("isbn", "isbn13", "isbn_13")?.let(::identifierOf),
+            // Long description first: `ldes` holds the full synopsis where `©des` is often
+            // a one-line summary, and a comment is the last resort because tagging tools
+            // put encoder notes there.
+            synopsis = synopsisOf(
+                standardOf("ldes", "\u00A9des", "desc", "\u00A9cmt")
+                    ?: freeformOf("description", "synopsis", "long_description"),
+            ),
         )
+    }
+
+    /** The shortest text worth calling a synopsis. */
+    private const val MINIMUM_SYNOPSIS_LENGTH = 40
+
+    /** Converters write their own name into description and comment fields. */
+    private val TOOL_NAME_PREFIXES = listOf(
+        "lame", "ffmpeg", "itunes", "audible", "chapter and verse", "mp3tag",
+        "created by", "encoded by", "converted", "audiobookshelf", "libation",
+    )
+
+    /**
+     * Rejects the encoder noise and stray single words that end up in description atoms.
+     *
+     * Showing "Created by ..." where a listener expects the story is worse than showing
+     * nothing at all, so anything that looks like a tool credit is dropped.
+     */
+    private fun synopsisOf(value: String?): String? {
+        val trimmed = value?.trim()?.takeIf { it.length >= MINIMUM_SYNOPSIS_LENGTH } ?: return null
+        val lowered = trimmed.lowercase()
+        return trimmed.takeIf { TOOL_NAME_PREFIXES.none(lowered::startsWith) }
+    }
+
+    /**
+     * The embedded cover image, read from the `covr` atom in the same metadata list.
+     *
+     * MediaMetadataRetriever exposes artwork through `embeddedPicture`, but it needs a
+     * seekable data source and gives nothing at all when it cannot open one — which is how a
+     * book imports with its title, author, narrator and chapters intact and no cover, since
+     * those come from this parser instead. Reading the atom directly means artwork survives
+     * wherever the rest of the tags do.
+     *
+     * @param payload the raw contents of an `ilst` atom, header excluded.
+     */
+    fun coverArt(payload: ByteArray): ByteArray? {
+        var result: ByteArray? = null
+        forEachAtom(payload, 0, payload.size) { type, bodyStart, bodyEnd ->
+            if (type != "covr" || result != null) return@forEachAtom
+            forEachAtom(payload, bodyStart, bodyEnd) { childType, dataStart, dataEnd ->
+                // A `data` atom is four bytes of version and type flags, then four reserved
+                // locale bytes, then the image itself.
+                if (childType != "data" || result != null || dataStart + 8 > dataEnd) {
+                    return@forEachAtom
+                }
+                val imageStart = dataStart + 8
+                val length = dataEnd - imageStart
+                // Keeps a corrupt size field from becoming a large allocation, and refuses
+                // anything too small to be an image.
+                if (length in MINIMUM_COVER_BYTES..MAXIMUM_COVER_BYTES) {
+                    result = payload.copyOfRange(imageStart, dataEnd)
+                }
+            }
+        }
+        return result
+    }
+
+    /**
+     * The runtime stated by a movie header (`mvhd`) atom, in seconds.
+     *
+     * The header carries a timescale and a duration counted in those units, so this is what
+     * the container says about itself rather than an estimate from the file size or bitrate.
+     *
+     * @param payload the raw contents of an `mvhd` atom, header excluded.
+     */
+    fun durationSeconds(payload: ByteArray): Double? {
+        if (payload.size < 4) return null
+        // A full box: one version byte, then three flag bytes. Version 1 widened the creation
+        // and modification times to 64 bits, which moves everything after them.
+        val version = payload[0].toInt() and 0xFF
+        val timescaleOffset = if (version == 1) 20 else 12
+        val durationOffset = timescaleOffset + 4
+        val durationBytes = if (version == 1) 8 else 4
+        if (durationOffset + durationBytes > payload.size) return null
+
+        val timescale = uint32(payload, timescaleOffset)
+        if (timescale <= 0L) return null
+        val duration = if (version == 1) {
+            var value = 0L
+            for (index in 0 until 8) {
+                value = (value shl 8) or (payload[durationOffset + index].toLong() and 0xFF)
+            }
+            value
+        } else {
+            uint32(payload, durationOffset)
+        }
+        // A duration of zero means the header was written without one, which some converters
+        // do; treating that as a real runtime would show a book as zero seconds long.
+        if (duration <= 0L) return null
+        val seconds = duration.toDouble() / timescale
+        return seconds.takeIf { it.isFinite() && it > 0 }
     }
 
     /** Dates arrive as bare years or as full ISO timestamps. */

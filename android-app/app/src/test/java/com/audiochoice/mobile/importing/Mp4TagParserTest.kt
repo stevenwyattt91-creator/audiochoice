@@ -148,6 +148,55 @@ class Mp4TagParserTest {
 
     // ---- atom builders ----
 
+    /**
+     * The synopsis is what the Explore screen shows under "About this audiobook", so a
+     * wrong value here is prose a listener reads and believes.
+     */
+    @Test
+    fun `reads the publisher synopsis from the long description atom`() {
+        val tags = Mp4TagParser.parseIlst(ilst(textTag("ldes", LONG_SYNOPSIS)))
+        assertEquals(LONG_SYNOPSIS, tags.synopsis)
+    }
+
+    @Test
+    fun `prefers the long description over the short one`() {
+        val tags = Mp4TagParser.parseIlst(
+            ilst(
+                textTag("\u00A9des", "A dragon rider goes to war. She may not survive it."),
+                textTag("ldes", LONG_SYNOPSIS),
+            ),
+        )
+        assertEquals(LONG_SYNOPSIS, tags.synopsis)
+    }
+
+    @Test
+    fun `falls back to a freeform description atom`() {
+        val tags = Mp4TagParser.parseIlst(ilst(freeformTag("description", LONG_SYNOPSIS)))
+        assertEquals(LONG_SYNOPSIS, tags.synopsis)
+    }
+
+    /**
+     * Converters write their own name into these atoms. Presenting that as the story is
+     * worse than presenting nothing, because the screen says "About this audiobook".
+     */
+    @Test
+    fun `rejects an encoder credit masquerading as a synopsis`() {
+        val tags = Mp4TagParser.parseIlst(
+            ilst(textTag("\u00A9cmt", "Created by Libation, the Audible library exporter tool")),
+        )
+        assertNull(tags.synopsis)
+    }
+
+    @Test
+    fun `rejects a description too short to be a synopsis`() {
+        assertNull(Mp4TagParser.parseIlst(ilst(textTag("ldes", "Fantasy"))).synopsis)
+    }
+
+    @Test
+    fun `reports no synopsis when the file carries none`() {
+        assertNull(Mp4TagParser.parseIlst(ilst(textTag("\u00A9nam", "King Sorrow"))).synopsis)
+    }
+
     private fun ilst(vararg atoms: ByteArray): ByteArray =
         ByteArrayOutputStream().apply { atoms.forEach(::write) }.toByteArray()
 
@@ -203,4 +252,11 @@ class Mp4TagParserTest {
         (value ushr 8).toByte(),
         value.toByte(),
     )
+
+    private companion object {
+        const val LONG_SYNOPSIS =
+            "Enter the brutal and elite world of a war college for dragon riders. " +
+                "Twenty-year-old Violet Sorrengail was supposed to enter the Scribe " +
+                "Quadrant, living a quiet life among books and history."
+    }
 }

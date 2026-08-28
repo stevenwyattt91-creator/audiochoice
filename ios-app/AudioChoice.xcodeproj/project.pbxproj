@@ -192,7 +192,7 @@
 				AUDIOCHOICE_API_BASE_URL = "https://audiochoice-stg-api.grayocean-b35d4bf9.eastus.azurecontainerapps.io";
 				CODE_SIGN_ENTITLEMENTS = AudioChoice/AudioChoice.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 14;
+				CURRENT_PROJECT_VERSION = 15;
 				DEVELOPMENT_TEAM = 8M67MANZ4S;
 				GENERATE_INFOPLIST_FILE = NO;
 				GOOGLE_IOS_CLIENT_ID = "105248861745-hikuiqttbh10okeksf972rk5osdf4d0c.apps.googleusercontent.com";
@@ -224,7 +224,7 @@
 				AUDIOCHOICE_API_BASE_URL = "https://audiochoice-stg-api.grayocean-b35d4bf9.eastus.azurecontainerapps.io";
 				CODE_SIGN_ENTITLEMENTS = AudioChoice/AudioChoice.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 14;
+				CURRENT_PROJECT_VERSION = 15;
 				DEVELOPMENT_TEAM = 8M67MANZ4S;
 				GENERATE_INFOPLIST_FILE = NO;
 				GOOGLE_IOS_CLIENT_ID = "105248861745-hikuiqttbh10okeksf972rk5osdf4d0c.apps.googleusercontent.com";

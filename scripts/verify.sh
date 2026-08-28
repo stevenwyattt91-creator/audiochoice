@@ -39,6 +39,12 @@ backend() {
   export PATH="$HOME/.dotnet:$PATH"
   # The API has to build before its contract tests mean anything.
   ( cd backend && dotnet build AudioChoice.Api/AudioChoice.Api.csproj -v q --nologo ) || return 1
+  # And it has to build the way the deploy builds it. EnablePostgres switches on the
+  # POSTGRES and GOOGLEAUTH constants, so every Postgres store and the Google auth path are
+  # excluded from a plain build -- which meant a compile error in any of them stayed hidden
+  # locally and surfaced only in the deployment pipeline. Both Dockerfiles pass this flag.
+  ( cd backend && dotnet build AudioChoice.Api/AudioChoice.Api.csproj \
+      -v q --nologo -p:EnablePostgres=true ) || return 1
   ( cd backend && dotnet run \
       --project AudioChoice.Api.ContractTests/AudioChoice.Api.ContractTests.csproj \
       -v q --nologo )
@@ -65,7 +71,7 @@ if [ "$area" = "all" ] || [ "$area" = "ios" ]; then
   run "iOS build" ios_build
   # The iOS target has no test bundle, so the logic that decides what gets filtered, what a
   # report says and how the reader aligns is checked by compiling those files for the host.
-  for harness in filters library reader explore reports profiles; do
+  for harness in filters library reader explore reports profiles metadata; do
     run "iOS $harness checks" "$repository_root/scripts/verify-ios-$harness.sh"
   done
 fi

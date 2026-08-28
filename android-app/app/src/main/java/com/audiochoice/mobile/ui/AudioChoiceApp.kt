@@ -858,18 +858,23 @@ private fun ExploreBookDetails(
                         ExploreStat("Edition", item.editionType ?: item.fileType.uppercase(), Modifier.weight(1f))
                         ExploreStat("Controls", "${item.eventCount}", Modifier.weight(1f))
                     }
-                    Spacer(Modifier.height(20.dp))
-                    Card(colors = CardDefaults.cardColors(containerColor = ChoiceSurface), shape = RoundedCornerShape(15.dp)) {
-                        Column(Modifier.fillMaxWidth().padding(16.dp)) {
-                            Text("About this audiobook", fontWeight = FontWeight.SemiBold)
-                            Spacer(Modifier.height(8.dp))
-                            Text(
-                                item.description ?: localExploreDescription(item.title, item.author)
-                                    ?: "A synopsis is not available yet for this audiobook edition.",
-                                color = ChoiceMuted,
-                                fontSize = 13.sp,
-                                lineHeight = 19.sp,
-                            )
+                    // Only shown when there is a real synopsis. The server now sends the
+                    // publisher's own text, read from the file's description tags, and sends
+                    // nothing at all rather than the generated line about AudioChoice's
+                    // features that every uncurated book used to get under this heading.
+                    item.description?.trim()?.takeIf { it.isNotEmpty() }?.let { synopsis ->
+                        Spacer(Modifier.height(20.dp))
+                        Card(colors = CardDefaults.cardColors(containerColor = ChoiceSurface), shape = RoundedCornerShape(15.dp)) {
+                            Column(Modifier.fillMaxWidth().padding(16.dp)) {
+                                Text("About this audiobook", fontWeight = FontWeight.SemiBold)
+                                Spacer(Modifier.height(8.dp))
+                                Text(
+                                    synopsis,
+                                    color = ChoiceMuted,
+                                    fontSize = 13.sp,
+                                    lineHeight = 19.sp,
+                                )
+                            }
                         }
                     }
                     Spacer(Modifier.height(14.dp))
@@ -1906,11 +1911,6 @@ private fun formatDuration(seconds: Double?): String {
     val value = seconds.toLong(); return "%dh %02dm".format(value / 3600, (value % 3600) / 60)
 }
 
-private fun localExploreDescription(title: String, author: String?): String? =
-    if (title.contains("Dungeon Crawler Carl", ignoreCase = true) &&
-        author?.contains("Matt Dinniman", ignoreCase = true) == true) {
-        "Carl and Princess Donut are forced into a planet-spanning dungeon crawl after Earth becomes a deadly televised game. Staying alive means surviving bizarre levels, building unlikely alliances, and keeping an audience entertained."
-    } else null
 
 private fun com.audiochoice.mobile.player.PlayerUiState.resultVersion(): String = when {
     // Never report "Clean" when the scan simply could not be loaded -- that

@@ -13,7 +13,22 @@ public static class SceneEventPostProcessor
 {
     private const double MergeGapSeconds = 45;
     private const double SafetyPaddingSeconds = 8;
-    private const double MinimumCompleteSceneSeconds = 60;
+
+    /// <summary>
+    /// The shortest merged range still worth a scene-level skip.
+    /// </summary>
+    /// <remarks>
+    /// This was 60 seconds, set when the first pass proposed scenes on its own and the
+    /// threshold was the only thing stopping a single explicit sentence becoming a
+    /// minute-long skip. Every scene now clears Terra and Sol at 0.85 confidence first, so
+    /// the threshold is guarding against far less than it used to while still discarding
+    /// genuine short scenes: a verified forty-second encounter kept no scene skip at all.
+    ///
+    /// Lowered rather than removed. Half a minute of narration is still more likely one
+    /// explicit sentence and its surroundings than a scene, and the narrower
+    /// explicit-activity events continue to cover those moments regardless.
+    /// </remarks>
+    private const double MinimumCompleteSceneSeconds = 30;
 
     public static IReadOnlyList<ScanEvent> Process(
         IReadOnlyList<ScanEvent> events,

@@ -9,7 +9,11 @@ public sealed class ScanPipeline(
     IContentAnalysisProvider analysisProvider,
     IPrivateTranscriptStore transcriptStore,
     OpenAIProcessingOptions options,
-    ConcurrentChunkTranscriber? concurrentTranscriber = null) : IScanPipeline
+    ConcurrentChunkTranscriber? concurrentTranscriber = null,
+    // Optional so the contract tests can construct a pipeline without one. Incomplete
+    // coverage is reported through it, and that is worth saying out loud rather than
+    // inferring later from a transcript that looks finished.
+    ILogger<ScanPipeline>? logger = null) : IScanPipeline
 {
     public async Task<ScanResult> Process(
         UploadRecord upload,
@@ -169,11 +173,33 @@ public sealed class ScanPipeline(
         {
             completedThrough = existingTranscript.Segments.Max(segment => segment.EndTime);
         }
-        var pending = chunks.Where(chunk =>
-            chunk.EndTime > completedThrough + 0.001 &&
-            chunk.EndTime <= options.MaximumAudioDurationSeconds).ToArray();
-        if (pending.Length != chunks.Count)
-            foreach (var skipped in chunks.Where(chunk => !pending.Contains(chunk))) skipped.DisposeFile();
+        // Refuse a book that runs past the paid-processing limit rather than scanning the
+        // part that fits. This path used to filter those chunks out and then mark the
+        // transcript complete, so a 35-hour book was scanned as though it ended at hour 30
+        // and reported success -- and because a complete transcript is reused verbatim, every
+        // later rescan inherited the same truncation without ever re-reading the audio. The
+        // streaming path has always thrown here; the two now agree.
+        var overLimit = chunks.Where(chunk =>
+            chunk.EndTime > options.MaximumAudioDurationSeconds).ToArray();
+        if (overLimit.Length > 0)
+        {
+            foreach (var chunk in chunks) chunk.DisposeFile();
+            throw new InvalidOperationException(
+                $"The audiobook runs to {chunks.Max(chunk => chunk.EndTime):F0} seconds, " +
+                $"above the configured paid-processing limit of " +
+                $"{options.MaximumAudioDurationSeconds:F0} seconds.");
+        }
+        if (chunks.Count > options.MaximumChunksPerJob)
+        {
+            foreach (var chunk in chunks) chunk.DisposeFile();
+            throw new InvalidOperationException(
+                $"The audiobook produced {chunks.Count} chunks, above the configured limit " +
+                $"of {options.MaximumChunksPerJob}.");
+        }
+
+        var pending = chunks.Where(chunk => chunk.EndTime > completedThrough + 0.001).ToArray();
+        // Anything already transcribed on an earlier attempt still has a materialized file.
+        foreach (var skipped in chunks.Where(chunk => !pending.Contains(chunk))) skipped.DisposeFile();
         if (concurrentTranscriber is null)
             throw new InvalidOperationException("Concurrent transcription is not configured.");
         var segments = existingTranscript?.Segments.ToList() ?? [];
@@ -213,33 +239,80 @@ public sealed class ScanPipeline(
         {
             result.Chunk.DisposeFile();
         }
+
+        // Only claim completeness when every chunk of the materialized audio has a completed
+        // checkpoint. This used to be an unconditional `true`, which is how a transcript
+        // missing a section could become the authoritative copy: the reuse shortcut then
+        // trusts it forever and the audio is never read again. Marking it incomplete instead
+        // costs one re-transcription of the missing chunks and keeps the gap recoverable.
+        var completedEndTimes = checkpoints
+            .Where(checkpoint => string.Equals(
+                checkpoint.Status, "completed", StringComparison.OrdinalIgnoreCase))
+            .Select(checkpoint => checkpoint.EndTime)
+            .ToArray();
+        var covered = chunks.All(chunk =>
+            completedEndTimes.Any(end => Math.Abs(end - chunk.EndTime) <= 0.01));
+        if (!covered)
+        {
+            logger?.LogError(
+                "Transcript for {Sha256} covers {CheckpointCount} of {ChunkCount} chunks; " +
+                "saving it as incomplete so the missing audio is transcribed on the next attempt.",
+                upload.Fingerprint.Sha256, completedEndTimes.Length, chunks.Count);
+        }
+
         var normalized = NormalizeSegments(segments);
         await transcriptStore.Save(upload.Fingerprint,
             new PrivateTranscript("1.0", "en", transcriptionProvider.ModelName,
                 existingTranscript?.CreatedAt ?? DateTimeOffset.UtcNow,
-                normalized, true, checkpoints.ToArray()), cancellationToken);
+                normalized, covered, checkpoints.ToArray()), cancellationToken);
+        if (!covered)
+        {
+            throw new InvalidOperationException(
+                $"Transcription completed {completedEndTimes.Length} of {chunks.Count} chunks. " +
+                "The partial transcript was saved for resumption and the job will be retried.");
+        }
         return normalized;
     }
 
+    /// <summary>
+    /// Drops the duplicate lines that chunk overlap produces, keeping the earliest copy.
+    /// </summary>
+    /// <remarks>
+    /// Chunks are cut with two seconds of overlap so no word is lost at a boundary, which
+    /// means the same line is transcribed twice. Only overlapping ranges are treated as
+    /// duplicates, so a line that genuinely recurs later in the book is kept.
+    ///
+    /// Indexed by text rather than scanned. This ran once per completed chunk and compared
+    /// every segment against every segment kept so far, so the cost was quadratic in
+    /// transcript length and paid again on every chunk -- billions of string comparisons on a
+    /// long book, on the same host doing the transcription. Grouping by text first means each
+    /// segment is only compared against the handful that share its exact text.
+    /// </remarks>
     private static IReadOnlyList<TranscriptSegment> NormalizeSegments(
         IEnumerable<TranscriptSegment> segments)
     {
         var normalized = new List<TranscriptSegment>();
+        var keptByText = new Dictionary<string, List<TranscriptSegment>>(
+            StringComparer.OrdinalIgnoreCase);
 
         foreach (var segment in segments.OrderBy(item => item.StartTime))
         {
-            var duplicate = normalized.Any(existing =>
-                string.Equals(
-                    existing.Text,
-                    segment.Text,
-                    StringComparison.OrdinalIgnoreCase) &&
-                existing.StartTime < segment.EndTime &&
-                segment.StartTime < existing.EndTime);
-
-            if (!duplicate)
+            if (!keptByText.TryGetValue(segment.Text, out var sameText))
             {
-                normalized.Add(segment);
+                sameText = [];
+                keptByText[segment.Text] = sameText;
             }
+
+            // The whole group is scanned rather than stopping early. Segments arrive in start
+            // order but not in end order, so a long earlier copy can still overlap this one
+            // after a shorter later copy has ended. A group only ever holds the few segments
+            // sharing this exact text, so there is nothing to gain from being clever here.
+            var duplicate = sameText.Any(existing =>
+                existing.StartTime < segment.EndTime && segment.StartTime < existing.EndTime);
+
+            if (duplicate) continue;
+            sameText.Add(segment);
+            normalized.Add(segment);
         }
 
         return normalized;

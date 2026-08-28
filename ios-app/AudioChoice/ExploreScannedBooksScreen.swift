@@ -160,11 +160,18 @@ struct ScannedBookDetailScreen: View {
                     detailStat(book.fileType, "Edition")
                     detailStat("\(book.eventCount)", "Controls")
                 }
-                ACCard {
-                    VStack(alignment: .leading, spacing: 12) {
-                        Text("About this audiobook").font(.title3.bold())
-                        Text(book.description ?? "A synopsis for this audiobook is being prepared.")
-                            .foregroundStyle(ACTheme.secondaryText).lineSpacing(4)
+                // Only shown when there is a real synopsis to show. This used to promise one
+                // was "being prepared", which was not true of any book: nothing was
+                // preparing them, and every book without curated prose was given a
+                // generated line about AudioChoice's own features instead of the story.
+                if let synopsis = book.description?.trimmingCharacters(in: .whitespacesAndNewlines),
+                   !synopsis.isEmpty {
+                    ACCard {
+                        VStack(alignment: .leading, spacing: 12) {
+                            Text("About this audiobook").font(.title3.bold())
+                            Text(synopsis)
+                                .foregroundStyle(ACTheme.secondaryText).lineSpacing(4)
+                        }
                     }
                 }
                 if let localRecord {

@@ -248,10 +248,14 @@ struct LibraryScreen: View {
                 author: loaded[index].book.author,
                 narrator: loaded[index].narrator,
                 coverImageURL: nil,
-                signature: loaded[index].editionSignature
+                signature: loaded[index].editionSignature,
+                // The file's own synopsis, which is what Explore shows for this edition.
+                description: loaded[index].synopsis
             )
             if let remote = try? await client.saveLibraryBook(request) {
                 loaded[index].accountLibraryID = remote.id
+                // The upsert carried the description, so there is nothing left to report.
+                loaded[index].synopsisReported = loaded[index].synopsis != nil
                 AudioPlaybackManager.applyRemotePosition(
                     remote.playbackPositionSeconds,
                     updatedAt: remote.updatedAt,
@@ -259,6 +263,33 @@ struct LibraryScreen: View {
                 )
                 AudiobookLibraryStore.update(loaded[index])
             }
+        }
+        // Books already on the account when descriptions started being read. Reported
+        // separately because re-running the upsert would overwrite a title the listener
+        // had corrected.
+        for index in loaded.indices where !loaded[index].synopsisReported {
+            guard let fingerprint = loaded[index].fingerprint,
+                  loaded[index].accountLibraryID != nil else { continue }
+            // Imported before descriptions were read, so the file has not been asked yet.
+            if loaded[index].synopsis == nil {
+                loaded[index].synopsis = AudiobookImportService().synopsis(for: loaded[index])
+            }
+            guard let synopsis = loaded[index].synopsis else {
+                // This file carries none. Recorded as settled so the whole library is not
+                // re-parsed on every sync.
+                loaded[index].synopsisReported = true
+                AudiobookLibraryStore.update(loaded[index])
+                continue
+            }
+            do {
+                try await client.reportDescription(
+                    EditionDescriptionReportRequest(fingerprint: fingerprint, description: synopsis)
+                )
+                loaded[index].synopsisReported = true
+            } catch {
+                // Left unsettled so the next sync tries again.
+            }
+            AudiobookLibraryStore.update(loaded[index])
         }
         records = AudiobookLibraryStore.load()
         remoteBooks = (try? await client.library()) ?? remoteBooks

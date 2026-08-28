@@ -24,7 +24,16 @@ public sealed record LibraryBookUpsertRequest(
     /// Identity evidence read from the file's own tags. Only the client can see this,
     /// and it is what lets a converted copy be recognised as the same recording.
     /// </summary>
-    EditionSignature? Signature = null);
+    EditionSignature? Signature = null,
+    /// <summary>
+    /// The publisher's synopsis, as carried by the file's own description tags.
+    /// </summary>
+    /// <remarks>
+    /// Only the client can read this, and it is the one source of a real synopsis that
+    /// needs no outside metadata service. It is stored against the edition rather than
+    /// the library row because it describes the recording, not this listener's copy.
+    /// </remarks>
+    string? Description = null);
 
 /// <summary>
 /// Reports identity evidence for an audiobook already in the caller's library.
@@ -54,6 +63,19 @@ public sealed record EditionSignatureReportRequest(
     BookFingerprint Fingerprint,
     EditionSignature Signature,
     BookFingerprint? SourceFingerprint = null);
+
+/// <summary>
+/// Reports the synopsis carried by a file already in the caller's library.
+/// </summary>
+/// <remarks>
+/// The library upsert also accepts a description, but it only runs for a book being added
+/// for the first time, and re-running it would overwrite a title the listener had
+/// corrected. Books imported before descriptions were read need a way to contribute one
+/// without that, which is what this is for.
+/// </remarks>
+public sealed record EditionDescriptionReportRequest(
+    BookFingerprint Fingerprint,
+    string Description);
 
 public sealed record LibraryBook(
     Guid ID,

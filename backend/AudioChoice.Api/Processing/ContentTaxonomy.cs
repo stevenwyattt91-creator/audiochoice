@@ -62,6 +62,40 @@ public static class ContentTaxonomy
                 Guid.Parse("41100000-0000-0000-0000-000000000001"))
         };
 
+    /// <summary>
+    /// The labels the analysis model is allowed to return.
+    /// </summary>
+    /// <remarks>
+    /// The single source for both the response schema's enum and the allowed-labels list in
+    /// the prompt. Those were each written out by hand, so a label could be added to one and
+    /// not the others -- and a label the model emits that the taxonomy does not know is
+    /// dropped, previously without a word in the log.
+    ///
+    /// Excludes the three broad violence labels. They exist as mappings so scans made before
+    /// the narrow-violence policy still resolve, but the model must not produce new ones: the
+    /// Violence switch is reserved for graphic material, torture, and violence involving
+    /// children or animals.
+    /// </remarks>
+    public static readonly IReadOnlyList<string> EnforcedLabels =
+    [
+        "sexual_suggestive_dialogue", "sexual_references", "sexual_nudity",
+        "sexual_implied_activity", "sexual_explicit_activity", "sexual_complete_scene",
+        "profanity_mild", "profanity_strong", "profanity_sexual", "profanity_slur",
+        "violence_graphic", "violence_torture", "violence_children", "violence_animals",
+        "substance_alcohol_use", "substance_intoxication", "substance_drug_reference",
+        "substance_drug_use", "substance_abuse_overdose",
+        "blasphemy_religious_profanity", "blasphemy_statement",
+        "self_harm_reference", "self_harm_suicidal_thoughts",
+        "self_harm_suicide_attempt", "self_harm_depiction"
+    ];
+
+    /// <summary>Labels kept only so older scans still resolve; never emitted.</summary>
+    public static readonly IReadOnlyList<string> LegacyLabels =
+    [
+        "violence_mild", "violence_intense", "violence_death",
+        "sexual_explicit", "sexual_implied", "profanity", "graphic_violence", "self_harm"
+    ];
+
     private static TaxonomyMapping Map(int category, int group) => new(
         Guid.Parse($"{category}0000000-0000-0000-0000-000000000001"),
         Guid.Parse($"{category}1000000-0000-0000-0000-{group:D12}"),

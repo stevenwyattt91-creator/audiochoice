@@ -64,6 +64,14 @@ public interface IScanCatalog
     IReadOnlyList<ExploreCatalogBook> ListExploreBooks();
     bool SaveExploreCover(string catalogID, byte[] imageBytes, string contentType, bool replaceExisting = false);
     bool SaveEditionCover(BookFingerprint fingerprint, byte[] imageBytes, string contentType, bool replaceExisting = false);
+    /// <summary>
+    /// Stores the synopsis a client read out of the file's own description tags.
+    /// </summary>
+    /// <remarks>
+    /// First writer wins. Any listener who owns the recording can supply this, so a
+    /// later import with a worse tag must not overwrite a good synopsis already held.
+    /// </remarks>
+    bool SaveEditionDescription(BookFingerprint fingerprint, string description);
     (byte[] Bytes, string ContentType)? FindExploreCover(string catalogID);
     bool HideExploreBook(string catalogID);
     IReadOnlyList<BookFingerprint> ListFingerprints();
@@ -84,6 +92,8 @@ public sealed class InMemoryScanCatalog : IScanCatalog
     private readonly ConcurrentDictionary<Guid, ScanJobRecord> _jobs = new();
     private readonly ConcurrentDictionary<Guid, ScanProgress> _progress = new();
     private readonly ConcurrentDictionary<string, byte> _hiddenExploreBooks = new();
+    /// Keyed by catalog ID, matching how covers are keyed.
+    private readonly ConcurrentDictionary<string, string> _editionDescriptions = new();
     private readonly ConcurrentDictionary<Guid, HashSet<Guid>> _jobSubscribers = new();
     private readonly object _subscriberLock = new();
     private readonly string? _storagePath;
@@ -358,9 +368,15 @@ public sealed class InMemoryScanCatalog : IScanCatalog
         .Select(value => ExploreCatalog.Create(
             value.Fingerprint,
             value.Result!,
-            _exploreCovers.ContainsKey(value.Fingerprint.Sha256[..Math.Min(24, value.Fingerprint.Sha256.Length)].ToLowerInvariant())))
+            _exploreCovers.ContainsKey(CatalogIDOf(value.Fingerprint)),
+            _editionDescriptions.TryGetValue(CatalogIDOf(value.Fingerprint), out var description)
+                ? description
+                : null))
         .Where(value => !_hiddenExploreBooks.ContainsKey(value.CatalogID))
         .OrderBy(value => value.Title);
+
+    private static string CatalogIDOf(BookFingerprint fingerprint) =>
+        fingerprint.Sha256[..Math.Min(24, fingerprint.Sha256.Length)].ToLowerInvariant();
 
     public bool SaveExploreCover(string catalogID, byte[] imageBytes, string contentType, bool replaceExisting = false)
     {
@@ -371,6 +387,15 @@ public sealed class InMemoryScanCatalog : IScanCatalog
 
     public bool SaveEditionCover(BookFingerprint fingerprint, byte[] imageBytes, string contentType, bool replaceExisting = false) =>
         SaveExploreCover(fingerprint.Sha256[..Math.Min(24, fingerprint.Sha256.Length)], imageBytes, contentType, replaceExisting);
+
+    public bool SaveEditionDescription(BookFingerprint fingerprint, string description)
+    {
+        var normalized = ExploreCatalog.NormalizeDescription(description);
+        if (normalized is null) return false;
+        // First writer wins, so a later import carrying a poorer tag cannot displace a
+        // synopsis already stored for this edition.
+        return _editionDescriptions.TryAdd(CatalogIDOf(fingerprint), normalized);
+    }
 
     public (byte[] Bytes, string ContentType)? FindExploreCover(string catalogID) =>
         _exploreCovers.TryGetValue(catalogID.Trim().ToLowerInvariant(), out var cover) ? cover : null;
@@ -656,11 +681,38 @@ Carl and his ex-girlfriend's cat, Princess Donut, are forced into a planet-spann
     Written by Matt Dinniman and narrated by Jeff Hays.
 """;
 
-    private static string DefaultDescription(string title, string? author, string? editionType) =>
-        $"{title}{(string.IsNullOrWhiteSpace(author) ? "" : $" by {author}")} is available as a private AudioChoice scan. " +
-        $"This {(string.IsNullOrWhiteSpace(editionType) ? "audiobook edition" : editionType.ToLowerInvariant())} includes chapter-aware playback and personalized content controls.";
+    /// The shortest text worth presenting as a synopsis. Matches both clients.
+    private const int MinimumDescriptionLength = 40;
+    /// The stored column is varchar(4000).
+    private const int MaximumDescriptionLength = 4000;
 
-    public static ExploreCatalogBook Create(BookFingerprint fingerprint, ScanResult result, bool hasCover = false)
+    /// <summary>
+    /// Accepts a client-supplied synopsis, or rejects it.
+    /// </summary>
+    /// <remarks>
+    /// The clients already drop encoder credits out of the description atoms, but this
+    /// arrives over the network from a caller that can send anything, and it is shown to
+    /// other listeners under "About this audiobook". The length bound has to be enforced
+    /// here in any case, because the column is bounded.
+    /// </remarks>
+    public static string? NormalizeDescription(string? value)
+    {
+        var trimmed = value?.Trim();
+        if (string.IsNullOrEmpty(trimmed) || trimmed.Length < MinimumDescriptionLength) return null;
+        return trimmed.Length > MaximumDescriptionLength ? trimmed[..MaximumDescriptionLength] : trimmed;
+    }
+
+    /// <param name="storedDescription">
+    /// The synopsis read from the file's own tags, when one has been reported for this
+    /// edition. A book with neither this nor curated prose now gets no description at all,
+    /// because the heading above it reads "About this audiobook" and generated text about
+    /// AudioChoice's own features does not belong there.
+    /// </param>
+    public static ExploreCatalogBook Create(
+        BookFingerprint fingerprint,
+        ScanResult result,
+        bool hasCover = false,
+        string? storedDescription = null)
     {
         var title = EditionTitleFormatter.Format(fingerprint);
         var query = string.Join(' ', new[] { title, fingerprint.Author }.Where(value => !string.IsNullOrWhiteSpace(value)));
@@ -710,7 +762,9 @@ Carl and his ex-girlfriend's cat, Princess Donut, are forced into a planet-spann
                 : isAcotarMistAndFury ? AcotarMistAndFuryDescription
                 : isAcotar ? AcotarDescription
                 : isDungeonCrawlerCarl ? DungeonCrawlerCarlDescription
-                : DefaultDescription(title, fingerprint.Author, fingerprint.EditionType),
+                // These five are hand-written for the launch catalogue and describe the
+                // specific dramatised editions, so they stay ahead of the file's own tag.
+                : NormalizeDescription(storedDescription),
             purchaseURL,
             provider,
             verifiedPurchaseURL is not null);

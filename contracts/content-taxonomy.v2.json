@@ -1,0 +1,84 @@
+{
+  "version": "2.0",
+  "note": "The canonical registry of content categories, groups and their stable identifiers. Identifiers are derived, not arbitrary: for category digit C and group index G, categoryID is C0000000-0000-0000-0000-000000000001, groupID is C1000000-0000-0000-0000-<G padded to 12>, and eventID is C1100000-0000-0000-0000-<G padded to 12>. The backend asserts this file matches Processing/ContentTaxonomy.cs, and both mobile clients assert their own group tables match it, so a change in one place fails a check rather than drifting.",
+  "enforced": "Whether the analysis model may emit this label. Unenforced labels remain listed so scans made before the narrow-violence policy still resolve, but the Violence switch is reserved for graphic material, torture, and violence involving children or animals.",
+  "categories": [
+    {
+      "digit": 1,
+      "name": "Sexual Content",
+      "categoryID": "10000000-0000-0000-0000-000000000001",
+      "groups": [
+        { "index": 1, "label": "sexual_suggestive_dialogue", "name": "Suggestive dialogue", "enforced": true },
+        { "index": 2, "label": "sexual_references", "name": "Sexual references", "enforced": true },
+        { "index": 3, "label": "sexual_nudity", "name": "Nudity", "enforced": true },
+        { "index": 4, "label": "sexual_implied_activity", "name": "Implied sexual activity", "enforced": true },
+        { "index": 5, "label": "sexual_explicit_activity", "name": "Explicit sexual activity", "enforced": true },
+        { "index": 6, "label": "sexual_complete_scene", "name": "Complete sex scenes", "enforced": true }
+      ]
+    },
+    {
+      "digit": 2,
+      "name": "Profanity",
+      "categoryID": "20000000-0000-0000-0000-000000000001",
+      "groups": [
+        { "index": 1, "label": "profanity_mild", "name": "Mild profanity", "enforced": true },
+        { "index": 2, "label": "profanity_strong", "name": "Strong profanity", "enforced": true },
+        { "index": 3, "label": "profanity_sexual", "name": "Sexual profanity", "enforced": true },
+        { "index": 4, "label": "profanity_slur", "name": "Slurs / derogatory language", "enforced": true }
+      ]
+    },
+    {
+      "digit": 3,
+      "name": "Violence",
+      "categoryID": "30000000-0000-0000-0000-000000000001",
+      "groups": [
+        { "index": 1, "label": "violence_mild", "name": "Mild violence", "enforced": false },
+        { "index": 2, "label": "violence_intense", "name": "Intense violence", "enforced": false },
+        { "index": 3, "label": "violence_graphic", "name": "Graphic violence / gore", "enforced": true },
+        { "index": 4, "label": "violence_torture", "name": "Torture", "enforced": true },
+        { "index": 5, "label": "violence_death", "name": "Death", "enforced": false },
+        { "index": 6, "label": "violence_children", "name": "Violence involving children", "enforced": true },
+        { "index": 7, "label": "violence_animals", "name": "Violence involving animals", "enforced": true }
+      ]
+    },
+    {
+      "digit": 4,
+      "name": "Drugs & Alcohol",
+      "categoryID": "40000000-0000-0000-0000-000000000001",
+      "groups": [
+        { "index": 1, "label": "substance_alcohol_use", "name": "Alcohol use", "enforced": true },
+        { "index": 2, "label": "substance_intoxication", "name": "Intoxication", "enforced": true },
+        { "index": 3, "label": "substance_drug_reference", "name": "Drug references", "enforced": true },
+        { "index": 4, "label": "substance_drug_use", "name": "Drug use", "enforced": true },
+        { "index": 5, "label": "substance_abuse_overdose", "name": "Drug abuse / overdose", "enforced": true }
+      ]
+    },
+    {
+      "digit": 5,
+      "name": "Blasphemy",
+      "categoryID": "50000000-0000-0000-0000-000000000001",
+      "groups": [
+        { "index": 1, "label": "blasphemy_religious_profanity", "name": "Religious profanity", "enforced": true },
+        { "index": 2, "label": "blasphemy_statement", "name": "Blasphemous statements", "enforced": true }
+      ]
+    },
+    {
+      "digit": 6,
+      "name": "Self-Harm & Suicide",
+      "categoryID": "60000000-0000-0000-0000-000000000001",
+      "groups": [
+        { "index": 1, "label": "self_harm_reference", "name": "Self-harm references", "enforced": true },
+        { "index": 2, "label": "self_harm_suicidal_thoughts", "name": "Suicidal thoughts", "enforced": true },
+        { "index": 3, "label": "self_harm_suicide_attempt", "name": "Suicide attempt", "enforced": true },
+        { "index": 4, "label": "self_harm_depiction", "name": "Depiction of self-harm / suicide", "enforced": true }
+      ]
+    }
+  ],
+  "legacyLabels": [
+    { "label": "sexual_explicit", "categoryID": "10000000-0000-0000-0000-000000000001", "groupID": "11000000-0000-0000-0000-000000000001", "eventID": "11100000-0000-0000-0000-000000000001" },
+    { "label": "sexual_implied", "categoryID": "10000000-0000-0000-0000-000000000001", "groupID": "11000000-0000-0000-0000-000000000002", "eventID": "11100000-0000-0000-0000-000000000002" },
+    { "label": "profanity", "categoryID": "20000000-0000-0000-0000-000000000001", "groupID": "21000000-0000-0000-0000-000000000001", "eventID": "21100000-0000-0000-0000-000000000001" },
+    { "label": "graphic_violence", "categoryID": "30000000-0000-0000-0000-000000000001", "groupID": "31000000-0000-0000-0000-000000000001", "eventID": "31100000-0000-0000-0000-000000000001" },
+    { "label": "self_harm", "categoryID": "40000000-0000-0000-0000-000000000001", "groupID": "41000000-0000-0000-0000-000000000001", "eventID": "41100000-0000-0000-0000-000000000001" }
+  ]
+}

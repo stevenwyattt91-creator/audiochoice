@@ -150,6 +150,14 @@ struct CloudScanClient {
         try await put(value, path: "v1/library")
     }
 
+    /// Reports the synopsis for a book already in the library.
+    ///
+    /// Separate from the upsert because that overwrites the stored title, which would
+    /// revert a listener's correction on a book they had already renamed.
+    func reportDescription(_ value: EditionDescriptionReportRequest) async throws {
+        try await postWithoutResponse(value, path: "v1/editions/descriptions")
+    }
+
     /// Saves position and completion together.
     ///
     /// `isFinished` has no default on purpose. The server assigns whatever is sent, so a
@@ -346,6 +354,16 @@ struct CloudScanClient {
         addAPIHeaders(to: &request)
         request.httpBody = try Self.encoder.encode(value)
         return try await response(for: request)
+    }
+
+    /// For endpoints that answer 204, where decoding a body would fail.
+    private func postWithoutResponse<Input: Encodable>(_ value: Input, path: String) async throws {
+        var request = URLRequest(url: endpoint(path))
+        request.httpMethod = "POST"
+        addAPIHeaders(to: &request)
+        request.httpBody = try Self.encoder.encode(value)
+        let (data, response) = try await session.data(for: request)
+        try validate(response: response, data: data)
     }
 
     private func get<Output: Decodable>(path: String) async throws -> Output {

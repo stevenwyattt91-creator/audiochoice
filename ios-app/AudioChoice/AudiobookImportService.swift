@@ -120,6 +120,7 @@ struct AudiobookImportService {
                 ),
                 narrator: inspected.tags.narrator,
                 editionSignature: signature.isEmpty ? nil : signature,
+                synopsis: metadata.synopsis,
                 localFileName: fileName,
                 artworkFileName: artworkName,
                 fileSize: fingerprint.fileSize,
@@ -146,6 +147,17 @@ struct AudiobookImportService {
     static func artworkURL(fileName: String) -> URL {
         applicationSupportDirectory.appendingPathComponent(artworkFolder, isDirectory: true)
             .appendingPathComponent(fileName)
+    }
+
+    /// Reads the synopsis out of a book that was imported before descriptions were read.
+    ///
+    /// Only the tag list is parsed, not the artwork or the chapters, because this runs over
+    /// a whole library. Returns nil when the file is gone or carries no usable description.
+    func synopsis(for record: LibraryBookRecord) -> String? {
+        guard let localFileName = record.localFileName else { return nil }
+        let audioURL = Self.audioURL(fileName: localFileName)
+        guard FileManager.default.fileExists(atPath: audioURL.path) else { return nil }
+        return Mp4TagReader().read(fileURL: audioURL).synopsis
     }
 
     static func importedFileExtension(for url: URL) -> String {
@@ -186,9 +198,26 @@ struct AudiobookImportService {
         return updated
     }
 
-    private func metadata(for url: URL, fallback: String) async -> (title: String, author: String, duration: Double, artwork: Data?, chapters: [AudiobookChapter]) {
+    /// What an import could read out of one file.
+    struct ExtractedMetadata {
+        var title: String
+        var author: String
+        var duration: Double
+        var artwork: Data?
+        var chapters: [AudiobookChapter]
+        /// The publisher's synopsis, when the file carries one.
+        var synopsis: String?
+    }
+
+    private func metadata(for url: URL, fallback: String) async -> ExtractedMetadata {
         let asset = AVURLAsset(url: url)
-        let duration = (try? await asset.load(.duration).seconds) ?? 0
+        // The container read is the same one the fingerprint uses; it supplies the artwork
+        // and runtime for files AVFoundation cannot describe.
+        let container = Mp4TagReader().readContainer(fileURL: url)
+        let assetDuration = (try? await asset.load(.duration).seconds) ?? 0
+        let duration = assetDuration.isFinite && assetDuration > 0
+            ? assetDuration
+            : (container.durationSeconds ?? 0)
         let commonItems = (try? await asset.load(.commonMetadata)) ?? []
         let formatItems = (try? await asset.load(.metadata)) ?? []
         let items = commonItems + formatItems
@@ -207,16 +236,27 @@ struct AudiobookImportService {
                 break
             }
         }
+        // Ordered most to least trustworthy. The first two are the cover the file names,
+        // byte for byte. The MJPEG track has to be re-encoded, so it loses quality. The raw
+        // scan can return any image in the file, so it stays last.
+        if artwork == nil { artwork = container.coverBytes }
         // Many M4A/M4B audiobook tools store the cover as a one-frame MJPEG
         // attached-picture track instead of AVMetadataCommonKeyArtwork.
         if artwork == nil { artwork = await attachedArtwork(from: asset) }
         if artwork == nil { artwork = embeddedImageBytes(from: url) }
         let chapters = await chapters(for: asset, totalDuration: duration)
-        return (title?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty ?? fallback,
-                author?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty ?? "Unknown Author",
-                duration.isFinite ? duration : 0,
-                artwork,
-                chapters)
+        return ExtractedMetadata(
+            title: title?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
+                ?? container.tags.title?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
+                ?? fallback,
+            author: author?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
+                ?? container.tags.author?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
+                ?? "Unknown Author",
+            duration: duration.isFinite ? duration : 0,
+            artwork: artwork,
+            chapters: chapters,
+            synopsis: container.tags.synopsis
+        )
     }
 
     private func attachedArtwork(from asset: AVAsset) async -> Data? {

@@ -40,6 +40,19 @@ public sealed class OpenAIProcessingOptions
     public string ScannerVersion { get; init; } = "3.5";
     /// <summary>Only jobs in this lane may be claimed by this worker instance.</summary>
     public string ProcessingLane { get; init; } = ScanProcessingLanes.AzureOpenAI;
+    /// <summary>
+    /// The lowest confidence that may reach a listener as a filter event.
+    /// </summary>
+    /// <remarks>
+    /// The analysis prompt already tells the model to omit anything below 0.55, but that was
+    /// advisory: nothing enforced it, and no confidence threshold existed anywhere outside
+    /// the sexual-scene verifier. Enforcing the number the prompt already states means a
+    /// low-confidence guess cannot be presented with the same authority as a firm detection.
+    ///
+    /// Exact profanity word matches are exempt, because matching a literal word involves no
+    /// judgement and is reported at full confidence.
+    /// </remarks>
+    public double MinimumEventConfidence { get; init; } = .55;
     public int MaximumRetries { get; init; } = 3;
     public int MaximumJobAttempts { get; init; } = 3;
     public int MaximumSegmentsPerAnalysisRequest { get; init; } = 100;

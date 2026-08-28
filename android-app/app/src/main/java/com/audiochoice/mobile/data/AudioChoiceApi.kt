@@ -190,6 +190,17 @@ class AudioChoiceApi(private val json: Json) {
             accessToken,
         )
     }
+    suspend fun reportEditionDescription(
+        accessToken: String,
+        report: EditionDescriptionReportRequest,
+    ) {
+        request<Unit>(
+            "POST",
+            "/v1/editions/descriptions",
+            json.encodeToString(report),
+            accessToken,
+        )
+    }
 
     suspend fun saveProgress(accessToken: String, bookID: String, positionSeconds: Double, isFinished: Boolean): LibraryBook =
         request(
