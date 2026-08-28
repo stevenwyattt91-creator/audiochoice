@@ -65,7 +65,24 @@ xcodebuild -exportArchive -archivePath "$archive" -exportPath "$export_directory
   -exportOptionsPlist "$workspace/ExportOptions.plist" "${authentication[@]}"
 
 ipa="$export_directory/AudioChoice.ipa"
-echo "==> Signed by: $(codesign -dvvv "$ipa" 2>&1 | grep -m1 'Authority=Apple' || true)"
+
+# codesign cannot inspect an .ipa, which is a zip; the signature lives on the .app inside
+# it. Worth reporting, because a development-signed build validates far enough to look
+# fine and then cannot be distributed.
+#
+# errexit is lifted deliberately: this is a diagnostic, and an empty grep under pipefail
+# would otherwise abort a release that is actually fine.
+set +e +o pipefail
+unzip -o -q "$ipa" -d "$workspace/inspect" >/dev/null 2>&1
+signing_identity="$(codesign -dvvv "$workspace/inspect/Payload/"*.app 2>&1 |
+  sed -n 's/^Authority=\(Apple [^,]*\)/\1/p' | head -1)"
+set -e -o pipefail
+
+echo "==> Signed by: ${signing_identity:-could not be determined}"
+case "$signing_identity" in
+  "Apple Distribution"*) ;;
+  *) echo "    Note: expected an Apple Distribution identity for TestFlight." >&2 ;;
+esac
 
 # Validation catches a missing app record, a bundle id mismatch or a rejected
 # entitlement before anything is published.
