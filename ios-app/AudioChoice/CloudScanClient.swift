@@ -156,6 +156,19 @@ struct CloudScanClient {
             path: "v1/library/\(bookID.uuidString)/progress")
     }
 
+    /// Sends the reading edition's text up and gets timing ranges back.
+    ///
+    /// The EPUB text is used in memory to build the map and is never persisted server
+    /// side, and the response carries only offsets and times -- never transcript text.
+    /// That is what lets read-along work without the private transcript ever reaching a
+    /// device.
+    func createReaderAlignment(bookID: UUID, epubText: String) async throws -> ReaderAlignmentResponse {
+        try await post(
+            ReaderAlignmentRequest(libraryBookID: bookID, epubText: epubText),
+            path: "v1/reader/alignments"
+        )
+    }
+
     func exploreBooks() async throws -> [ExploreCatalogBook] {
         try await get(path: "v1/explore")
     }

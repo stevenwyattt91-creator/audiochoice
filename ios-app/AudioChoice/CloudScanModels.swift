@@ -108,6 +108,15 @@ struct AccountLibraryBook: Codable, Identifiable {
     let updatedAt: Date
 }
 
+struct ReaderAlignmentRequest: Codable {
+    let libraryBookID: UUID
+    let epubText: String
+}
+
+struct ReaderAlignmentResponse: Codable {
+    let ranges: [ReaderTimingRange]
+}
+
 /// Identity evidence about a recording that a file's byte hash cannot express.
 ///
 /// Only a client can read this, since the server never sees container tags. A matching

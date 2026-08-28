@@ -291,9 +291,15 @@ struct PlayerScreen: View {
     @State private var sleepTask: Task<Void, Never>?
     @State private var bookmarkSaved = false
     @State private var showingBookmarks = false
+    @State private var showingReader = false
+    @State private var importingEpub = false
 
     private var record: LibraryBookRecord? {
         AudiobookLibraryStore.load().first { $0.id == book.id }
+    }
+
+    private var hasReadingEdition: Bool {
+        record.map { ReaderStore.hasEpub(bookID: $0.id) } ?? false
     }
 
     var body: some View {
@@ -302,7 +308,21 @@ struct PlayerScreen: View {
                 HStack {
                     Image(systemName: "chevron.down").font(.title3.bold())
                     Spacer()
-                    Image(systemName: "waveform").font(.title2).foregroundStyle(ACTheme.accent)
+                    // An open book invites opening the reader; adding one invites attaching
+                    // an EPUB. The reader's own close button sits in this same position so
+                    // the icon does not jump when toggling between the two.
+                    if record != nil {
+                        Button {
+                            if hasReadingEdition { showingReader = true } else { importingEpub = true }
+                        } label: {
+                            Image(systemName: hasReadingEdition ? "book" : "book.badge.plus")
+                                .font(.title2)
+                                .foregroundStyle(ACTheme.accent)
+                        }
+                        .accessibilityLabel(hasReadingEdition ? "Open reading edition" : "Attach a reading edition")
+                    } else {
+                        Image(systemName: "waveform").font(.title2).foregroundStyle(ACTheme.accent)
+                    }
                     Spacer()
                     Menu {
                         Button("15 minutes") { setSleepTimer(minutes: 15) }
@@ -398,6 +418,23 @@ struct PlayerScreen: View {
         }
         .background(ACTheme.background.ignoresSafeArea())
         .navigationBarTitleDisplayMode(.inline)
+        .fullScreenCover(isPresented: $showingReader) {
+            if let record {
+                ReadingEditionScreen(record: record) { showingReader = false }
+            }
+        }
+        .fileImporter(
+            isPresented: $importingEpub,
+            allowedContentTypes: [.epub],
+            allowsMultipleSelection: false
+        ) { result in
+            guard let url = try? result.get().first, let record else { return }
+            Task {
+                await ReadingEditionManager.shared.attach(fileURL: url, record: record)
+                // Straight into the reader on success, since attaching one has no other purpose.
+                if ReadingEditionManager.shared.hasReadingEdition { showingReader = true }
+            }
+        }
         .task {
             if let record {
                 playback.load(record)
