@@ -46,11 +46,21 @@ final class FilterReportQueue: ObservableObject {
         Task { await flush() }
     }
 
-    /// Sends everything queued, keeping whatever fails.
+    /// Whether a status means this report can never succeed.
     ///
-    /// A rejected report is discarded rather than retried forever. The server refuses one
-    /// only when it is malformed, and re-sending it would occupy the queue indefinitely
-    /// while blocking nothing else of value.
+    /// Only a malformed report qualifies. Everything else that looks like a client error is
+    /// worth another attempt later, and one case matters in particular: an app released ahead
+    /// of the server gets 404 from an endpoint that does not exist yet. Treating that as a
+    /// refusal would quietly discard every report made before the server caught up -- exactly
+    /// the reports from the listeners who tried first.
+    private static func isPermanentRefusal(_ status: Int) -> Bool {
+        // 400 Bad Request and 422 Unprocessable Content are the server saying the report
+        // itself is wrong. 401 and 403 can pass once the session is renewed, 404 and 501 once
+        // the endpoint exists, 429 once the limit resets.
+        status == 400 || status == 422
+    }
+
+    /// Sends everything queued, keeping whatever fails.
     func flush() async {
         guard !isFlushing else { return }
         isFlushing = true
@@ -63,8 +73,8 @@ final class FilterReportQueue: ObservableObject {
         for report in pending {
             do {
                 try await client.reportFilter(report)
-            } catch CloudClientError.server(let status, _) where (400..<500).contains(status) {
-                // Refused, not lost in transit. Keeping it would retry forever.
+            } catch CloudClientError.server(let status, _) where Self.isPermanentRefusal(status) {
+                // The server will never accept this one, so keeping it would retry forever.
                 continue
             } catch {
                 remaining.append(report)

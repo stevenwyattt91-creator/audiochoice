@@ -36,9 +36,8 @@ class FilterReportQueue(
     /**
      * Sends everything queued, keeping whatever fails.
      *
-     * A refused report is discarded rather than retried forever. The server refuses one only
-     * when it is malformed, and re-sending it would occupy the queue indefinitely while
-     * achieving nothing.
+     * Only a report the server can never accept is discarded; anything else is worth another
+     * attempt later.
      */
     suspend fun flush(accessToken: String) {
         val pending = load()
@@ -47,12 +46,26 @@ class FilterReportQueue(
         for (report in pending) {
             val outcome = runCatching { api.reportFilter(accessToken, report) }
             outcome.onFailure { error ->
-                val refused = error is ApiException && error.statusCode in 400..499
-                if (!refused) remaining.add(report)
+                val permanent = error is ApiException && isPermanentRefusal(error.statusCode)
+                if (!permanent) remaining.add(report)
             }
         }
         save(remaining)
     }
+
+    /**
+     * Whether a status means this report can never succeed.
+     *
+     * Only a malformed report qualifies. One case matters in particular: an app released ahead
+     * of the server gets 404 from an endpoint that does not exist yet, and treating that as a
+     * refusal would quietly discard every report made before the server caught up -- exactly
+     * the reports from the listeners who tried first.
+     *
+     * 400 and 422 are the server saying the report itself is wrong. 401 and 403 can pass once
+     * the session is renewed, 404 and 501 once the endpoint exists, 429 once the limit resets.
+     */
+    private fun isPermanentRefusal(statusCode: Int): Boolean =
+        statusCode == 400 || statusCode == 422
 
     fun pendingCount(): Int = load().size
 
