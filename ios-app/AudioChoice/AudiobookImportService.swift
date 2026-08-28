@@ -39,7 +39,8 @@ struct AudiobookImportService {
             throw AudiobookImportError.aaxRequiresAuthorizedConversion
         }
 
-        let fingerprint = try await AudiobookFingerprintService().fingerprint(fileURL: sourceURL)
+        let inspected = try await AudiobookFingerprintService().inspect(fileURL: sourceURL)
+        let fingerprint = inspected.fingerprint
         if let existing = AudiobookLibraryStore.record(matching: fingerprint),
            existing.localFileName != nil {
             return existing
@@ -75,8 +76,25 @@ struct AudiobookImportService {
             guard !audioTracks.isEmpty, validatedDuration.isFinite, validatedDuration > 0 else {
                 throw AudiobookImportError.unsupportedAudio
             }
-            let metadata = await metadata(for: destination, fallback: sourceURL.deletingPathExtension().lastPathComponent)
+            // Cleaned, because a raw filename reaching the library verbatim is how
+            // "fourth wingggg (3112r)" becomes a book title.
+            let metadata = await metadata(
+                for: destination,
+                fallback: AudiobookTitleFormatter.cleanFilename(
+                    sourceURL.deletingPathExtension().lastPathComponent
+                )
+            )
             let artworkName = try saveArtwork(metadata.artwork, id: id)
+            // A lone chapter is just the whole file and distinguishes nothing.
+            let chapterOffsets: [Int]? = metadata.chapters.count > 1
+                ? metadata.chapters.map { Int(($0.startTime).rounded()) }
+                : nil
+            let signature = EditionSignature(
+                productIdentifier: inspected.tags.productIdentifier,
+                narrator: inspected.tags.narrator,
+                chapterOffsetSeconds: chapterOffsets
+            )
+
             let record = LibraryBookRecord(
                 id: id,
                 book: MobileBook(
@@ -94,6 +112,8 @@ struct AudiobookImportService {
                     chapters: metadata.chapters.count,
                     edition: sourceURL.pathExtension.uppercased()
                 ),
+                narrator: inspected.tags.narrator,
+                editionSignature: signature.isEmpty ? nil : signature,
                 localFileName: fileName,
                 artworkFileName: artworkName,
                 fileSize: fingerprint.fileSize,

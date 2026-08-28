@@ -30,6 +30,93 @@ final class AudioPlaybackManager: ObservableObject {
 
     private init() {
         configureRemoteCommands()
+        configureAudioSession()
+        observeAudioSession()
+    }
+
+    /// Configured once at startup rather than on the first play.
+    ///
+    /// Doing it inside togglePlayback meant the very first tap both configured the
+    /// session and started playback, and a throw there returned silently — so a
+    /// session failure looked like a dead button.
+    private func configureAudioSession() {
+        do {
+            try AVAudioSession.sharedInstance().setCategory(.playback, mode: .spokenAudio)
+        } catch {
+            playbackError = "This device would not allow background audio playback."
+        }
+    }
+
+    /// Audiobooks are listened to for hours, so interruptions are normal rather than
+    /// exceptional: calls, alarms, and headphones being unplugged. Without these the
+    /// player was left believing it was still playing after the system paused it.
+    private func observeAudioSession() {
+        let center = NotificationCenter.default
+        center.addObserver(
+            forName: AVAudioSession.interruptionNotification,
+            object: AVAudioSession.sharedInstance(),
+            queue: .main
+        ) { [weak self] notification in
+            Task { @MainActor in self?.handleInterruption(notification) }
+        }
+        center.addObserver(
+            forName: AVAudioSession.routeChangeNotification,
+            object: AVAudioSession.sharedInstance(),
+            queue: .main
+        ) { [weak self] notification in
+            Task { @MainActor in self?.handleRouteChange(notification) }
+        }
+        // Progress was otherwise only pushed on pause or when switching books, so
+        // leaving the app mid-chapter left the server behind and another device would
+        // resume somewhere the listener had already been.
+        center.addObserver(
+            forName: UIApplication.didEnterBackgroundNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in
+                guard let self else { return }
+                self.persistPosition()
+                await self.syncCurrentProgressToAccount()
+            }
+        }
+    }
+
+    private func handleInterruption(_ notification: Notification) {
+        guard let raw = notification.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt,
+              let type = AVAudioSession.InterruptionType(rawValue: raw) else { return }
+        switch type {
+        case .began:
+            player?.pause()
+            isPlaying = false
+            persistPosition()
+            updateNowPlaying()
+            Task { await syncCurrentProgressToAccount() }
+        case .ended:
+            // Only resume when the system says we may. Resuming otherwise fails
+            // silently and leaves the UI claiming to play.
+            let options = (notification.userInfo?[AVAudioSessionInterruptionOptionKey] as? UInt)
+                .map(AVAudioSession.InterruptionOptions.init(rawValue:)) ?? []
+            guard options.contains(.shouldResume) else { return }
+            try? AVAudioSession.sharedInstance().setActive(true)
+            player?.playImmediately(atRate: playbackRate)
+            isPlaying = true
+            updateNowPlaying()
+        @unknown default:
+            break
+        }
+    }
+
+    private func handleRouteChange(_ notification: Notification) {
+        guard let raw = notification.userInfo?[AVAudioSessionRouteChangeReasonKey] as? UInt,
+              let reason = AVAudioSession.RouteChangeReason(rawValue: raw),
+              reason == .oldDeviceUnavailable else { return }
+        // Headphones pulled out. Continuing aloud from a phone speaker is exactly what
+        // a listener using a filtering audiobook app does not want.
+        player?.pause()
+        isPlaying = false
+        persistPosition()
+        updateNowPlaying()
     }
 
     static func savedPosition(for bookID: UUID) -> Double {
@@ -112,11 +199,14 @@ final class AudioPlaybackManager: ObservableObject {
             Task { await syncCurrentProgressToAccount() }
         } else {
             do {
-                try AVAudioSession.sharedInstance().setCategory(.playback, mode: .spokenAudio)
+                // The category is set at startup; this only claims the session.
                 try AVAudioSession.sharedInstance().setActive(true)
                 player.playImmediately(atRate: playbackRate)
                 isPlaying = true
             } catch {
+                // Previously returned silently, so a refused session looked like the
+                // play button simply not working.
+                playbackError = "Another app is using audio right now. Try again in a moment."
                 return
             }
         }
@@ -133,7 +223,9 @@ final class AudioPlaybackManager: ObservableObject {
     private func setPosition(_ target: Double) {
         player?.seek(to: CMTime(seconds: target, preferredTimescale: 600))
         position = target
-        persistPosition()
+        // A deliberate seek is trusted even when it lands at the very start, unlike a
+        // zero observed from a player that has not finished loading.
+        persistPosition(allowingRestart: true)
         updateChapter()
         updateNowPlaying()
     }
@@ -181,11 +273,29 @@ final class AudioPlaybackManager: ObservableObject {
         isPlaying = false
     }
 
-    private func persistPosition() {
+    /// Records where the listener is, refusing values the player cannot vouch for.
+    ///
+    /// This runs twice a second from the time observer. An AVPlayer reports 0 while an
+    /// item is still loading and duration is still 0, so an unguarded write here can
+    /// replace a real bookmark with the start of the book — the same failure that took
+    /// four attempts to pin down on Android. A zero is only believed once the asset has
+    /// loaded, or when the listener seeks there deliberately.
+    private func persistPosition(allowingRestart: Bool = false) {
         guard let id = currentBookID else { return }
-        UserDefaults.standard.set(position, forKey: positionKey(id))
-        UserDefaults.standard.set(Date(), forKey: "playbackPositionUpdatedAt.\(id.uuidString)")
+        let defaults = UserDefaults.standard
+        if !allowingRestart, position < Self.minimumTrustedPosition, duration <= 0 {
+            return
+        }
+        let stored = defaults.double(forKey: positionKey(id))
+        if !allowingRestart, position < Self.minimumTrustedPosition, stored > Self.minimumTrustedPosition {
+            return
+        }
+        defaults.set(max(position, 0), forKey: positionKey(id))
+        defaults.set(Date(), forKey: "playbackPositionUpdatedAt.\(id.uuidString)")
     }
+
+    /// Below this, a reported position is indistinguishable from an unloaded player.
+    private static let minimumTrustedPosition: Double = 1
 
     func syncCurrentProgressToAccount() async {
         guard let record = currentRecord, let accountID = record.accountLibraryID else { return }

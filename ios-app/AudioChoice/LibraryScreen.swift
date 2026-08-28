@@ -236,7 +236,17 @@ struct LibraryScreen: View {
 
         for index in loaded.indices where loaded[index].accountLibraryID == nil {
             guard let fingerprint = loaded[index].fingerprint else { continue }
-            let request = LibraryBookUpsertRequest(fingerprint: fingerprint, title: loaded[index].book.title, author: loaded[index].book.author, narrator: nil, coverImageURL: nil)
+            // Narrator and signature come from the file's own tags. Sending them is
+            // what lets the server recognise a converted or re-tagged copy as the same
+            // edition and reuse its transcript and filter results.
+            let request = LibraryBookUpsertRequest(
+                fingerprint: fingerprint,
+                title: loaded[index].book.title,
+                author: loaded[index].book.author,
+                narrator: loaded[index].narrator,
+                coverImageURL: nil,
+                signature: loaded[index].editionSignature
+            )
             if let remote = try? await client.saveLibraryBook(request) {
                 loaded[index].accountLibraryID = remote.id
                 AudioPlaybackManager.applyRemotePosition(

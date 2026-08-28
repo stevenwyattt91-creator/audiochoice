@@ -14,6 +14,12 @@ struct MobileBook: Identifiable, Hashable, Codable {
 struct LibraryBookRecord: Identifiable, Codable {
     let id: UUID
     var book: MobileBook
+    /// Read from the file's own tags. Part of identifying an edition, since two
+    /// readings of the same book share a title, an author and often a runtime.
+    var narrator: String? = nil
+    /// Identity evidence the server cannot gather for itself, because it only ever
+    /// sees decoded audio and never the container tags.
+    var editionSignature: EditionSignature? = nil
     var localFileName: String?
     var artworkFileName: String?
     var fileSize: Int64

@@ -108,12 +108,34 @@ struct AccountLibraryBook: Codable, Identifiable {
     let updatedAt: Date
 }
 
+/// Identity evidence about a recording that a file's byte hash cannot express.
+///
+/// Only a client can read this, since the server never sees container tags. A matching
+/// retail product identifier is the one signal strong enough for the server to reuse
+/// another copy's filter results.
+struct EditionSignature: Codable, Equatable {
+    var productIdentifier: String?
+    var narrator: String?
+    /// Chapter start offsets in whole seconds; survives re-encoding, because rewrapping
+    /// a container does not move chapter marks.
+    var chapterOffsetSeconds: [Int]?
+
+    var isEmpty: Bool {
+        (productIdentifier ?? "").isEmpty && (narrator ?? "").isEmpty && (chapterOffsetSeconds ?? []).isEmpty
+    }
+}
+
 struct LibraryBookUpsertRequest: Codable {
     let fingerprint: BookFingerprint
     let title: String
     let author: String?
     let narrator: String?
     let coverImageURL: String?
+    /// The fingerprint of the file actually on this device, when the row above adopts
+    /// a different one. Lets the server link the two rather than losing track of
+    /// artifacts stored under the local file's hash.
+    var sourceFingerprint: BookFingerprint? = nil
+    var signature: EditionSignature? = nil
 }
 
 struct PlaybackProgressRequest: Codable {
