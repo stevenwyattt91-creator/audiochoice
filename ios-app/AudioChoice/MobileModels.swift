@@ -14,6 +14,23 @@ struct MobileBook: Identifiable, Hashable, Codable {
 struct LibraryBookRecord: Identifiable, Codable {
     let id: UUID
     var book: MobileBook
+    /// The title as the file described itself, kept even after the listener renames the
+    /// book.
+    ///
+    /// `book.title` is what the app displays and is editable. Identification has to keep
+    /// working from what the file actually said, because a typed-in title would otherwise
+    /// start steering which recording this is taken to be. Nil on books imported before
+    /// renaming existed, where the displayed title is still the file's own.
+    var identityTitle: String? = nil
+    /// Whether this book has been finished, either by playing to the end or by the
+    /// listener saying so.
+    var isFinished: Bool = false
+    /// Read from the file's own tags. Part of identifying an edition, since two
+    /// readings of the same book share a title, an author and often a runtime.
+    var narrator: String? = nil
+    /// Identity evidence the server cannot gather for itself, because it only ever
+    /// sees decoded audio and never the container tags.
+    var editionSignature: EditionSignature? = nil
     var localFileName: String?
     var artworkFileName: String?
     var fileSize: Int64
@@ -25,6 +42,73 @@ struct LibraryBookRecord: Identifiable, Codable {
     var scanState: String?
     /// Server-side library record. The audio itself stays private to this device.
     var accountLibraryID: UUID? = nil
+
+    /// The title to send as identity evidence: the file's own, never a correction.
+    var evidenceTitle: String { identityTitle ?? book.title }
+
+    init(
+        id: UUID,
+        book: MobileBook,
+        identityTitle: String? = nil,
+        isFinished: Bool = false,
+        narrator: String? = nil,
+        editionSignature: EditionSignature? = nil,
+        localFileName: String?,
+        artworkFileName: String?,
+        fileSize: Int64,
+        importedAt: Date,
+        fingerprint: BookFingerprint? = nil,
+        scanResult: ScanResult? = nil,
+        chapterMarkers: [AudiobookChapter]? = nil,
+        pendingScanID: UUID? = nil,
+        scanState: String? = nil,
+        accountLibraryID: UUID? = nil
+    ) {
+        self.id = id
+        self.book = book
+        self.identityTitle = identityTitle
+        self.isFinished = isFinished
+        self.narrator = narrator
+        self.editionSignature = editionSignature
+        self.localFileName = localFileName
+        self.artworkFileName = artworkFileName
+        self.fileSize = fileSize
+        self.importedAt = importedAt
+        self.fingerprint = fingerprint
+        self.scanResult = scanResult
+        self.chapterMarkers = chapterMarkers
+        self.pendingScanID = pendingScanID
+        self.scanState = scanState
+        self.accountLibraryID = accountLibraryID
+    }
+
+    /// Decodes leniently, because the stored library outlives any one version of this type.
+    ///
+    /// Swift's synthesised Decodable ignores default values and demands the key, so simply
+    /// adding a non-optional property with a default makes every previously saved record
+    /// fail to decode. `AudiobookLibraryStore.load` falls back to an empty array on error,
+    /// which would have presented an existing listener with an empty library after
+    /// updating. Only the identifier and the book itself are genuinely required; anything
+    /// else absent falls back.
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        id = try values.decode(UUID.self, forKey: .id)
+        book = try values.decode(MobileBook.self, forKey: .book)
+        identityTitle = try values.decodeIfPresent(String.self, forKey: .identityTitle)
+        isFinished = try values.decodeIfPresent(Bool.self, forKey: .isFinished) ?? false
+        narrator = try values.decodeIfPresent(String.self, forKey: .narrator)
+        editionSignature = try values.decodeIfPresent(EditionSignature.self, forKey: .editionSignature)
+        localFileName = try values.decodeIfPresent(String.self, forKey: .localFileName)
+        artworkFileName = try values.decodeIfPresent(String.self, forKey: .artworkFileName)
+        fileSize = try values.decodeIfPresent(Int64.self, forKey: .fileSize) ?? 0
+        importedAt = try values.decodeIfPresent(Date.self, forKey: .importedAt) ?? Date()
+        fingerprint = try values.decodeIfPresent(BookFingerprint.self, forKey: .fingerprint)
+        scanResult = try values.decodeIfPresent(ScanResult.self, forKey: .scanResult)
+        chapterMarkers = try values.decodeIfPresent([AudiobookChapter].self, forKey: .chapterMarkers)
+        pendingScanID = try values.decodeIfPresent(UUID.self, forKey: .pendingScanID)
+        scanState = try values.decodeIfPresent(String.self, forKey: .scanState)
+        accountLibraryID = try values.decodeIfPresent(UUID.self, forKey: .accountLibraryID)
+    }
 }
 
 struct AudiobookChapter: Identifiable, Codable, Hashable {
@@ -34,12 +118,90 @@ struct AudiobookChapter: Identifiable, Codable, Hashable {
     let duration: Double
 }
 
+/// Where a book's scan events live.
+///
+/// Kept out of the library blob deliberately. A scan is by far the largest thing the app
+/// stores -- a heavily flagged book runs to thousands of events -- and everything in
+/// UserDefaults is held in memory and rewritten as one plist. Parking them there meant every
+/// read of the library paid to decode every event of every book, and views read the library
+/// far more often than anyone would guess.
+///
+/// One file per book, so a scan is decoded only when that book is actually opened.
+enum ScanResultFileStore {
+    private static var directory: URL {
+        let root = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("ScanResults", isDirectory: true)
+        try? FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        return root
+    }
+
+    private static func url(_ bookID: UUID) -> URL {
+        directory.appendingPathComponent("\(bookID.uuidString).json")
+    }
+
+    static func load(_ bookID: UUID) -> ScanResult? {
+        guard let data = try? Data(contentsOf: url(bookID)) else { return nil }
+        return try? JSONDecoder().decode(ScanResult.self, from: data)
+    }
+
+    static func save(_ result: ScanResult, for bookID: UUID) {
+        guard let data = try? JSONEncoder().encode(result) else { return }
+        try? data.write(to: url(bookID), options: .atomic)
+    }
+
+    static func remove(_ bookID: UUID) {
+        try? FileManager.default.removeItem(at: url(bookID))
+    }
+}
+
 enum AudiobookLibraryStore {
     private static let key = "audiobookLibrary.v1"
 
+    /// Decoded records, held so repeated reads cost a lookup rather than a parse.
+    ///
+    /// Views read the library constantly: some do it from a computed property, which SwiftUI
+    /// re-evaluates on every render, and the player re-renders twice a second as the position
+    /// moves. Without this, that meant parsing the whole library twice a second during
+    /// playback. Every mutation here goes through `persist`, which refreshes the cache, so
+    /// there is no path that leaves it stale.
+    private static var cache: [LibraryBookRecord]?
+
+    /// Forces the next read to go back to disk.
+    ///
+    /// Needed by anything that changes the stored defaults without going through this type,
+    /// which in practice means the verification checks. Left available rather than hidden
+    /// because a stale cache is invisible, and a way to clear it is better than a comment
+    /// asking people not to create one.
+    static func invalidateCache() {
+        cache = nil
+    }
+
     static func load() -> [LibraryBookRecord] {
-        guard let data = UserDefaults.standard.data(forKey: key) else { return [] }
-        return (try? JSONDecoder().decode([LibraryBookRecord].self, from: data)) ?? []
+        if let cache { return cache }
+
+        guard let data = UserDefaults.standard.data(forKey: key),
+              var records = try? JSONDecoder().decode([LibraryBookRecord].self, from: data)
+        else {
+            cache = []
+            return []
+        }
+
+        // Records written by an earlier build still carry their scan inline. Those are left
+        // alone and only replaced from file when absent, because overwriting a present scan
+        // with a missing file would throw away the filter data for that book.
+        var carriedInlineScans = false
+        for index in records.indices {
+            if records[index].scanResult == nil {
+                records[index].scanResult = ScanResultFileStore.load(records[index].id)
+            } else {
+                carriedInlineScans = true
+            }
+        }
+
+        cache = records
+        // Moves them out once, rather than waiting for some unrelated edit to do it.
+        if carriedInlineScans { persist(records) }
+        return records
     }
 
     static func record(matching fingerprint: BookFingerprint) -> LibraryBookRecord? {
@@ -58,6 +220,35 @@ enum AudiobookLibraryStore {
         guard let index = records.firstIndex(where: { $0.id == record.id }) else { return }
         records[index] = record
         persist(records)
+    }
+
+    @discardableResult
+    static func setFinished(_ isFinished: Bool, for bookID: UUID) -> LibraryBookRecord? {
+        var records = load()
+        guard let index = records.firstIndex(where: { $0.id == bookID }) else { return nil }
+        guard records[index].isFinished != isFinished else { return records[index] }
+        records[index].isFinished = isFinished
+        persist(records)
+        return records[index]
+    }
+
+    /// Renames a book for display without disturbing what identifies it.
+    ///
+    /// The file's own title is captured on the first rename, so identification keeps
+    /// using it afterwards. Doing it here rather than at import means books added before
+    /// renaming existed are covered too.
+    @discardableResult
+    static func rename(_ title: String, for bookID: UUID) -> LibraryBookRecord? {
+        let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        var records = load()
+        guard let index = records.firstIndex(where: { $0.id == bookID }) else { return nil }
+        if records[index].identityTitle == nil {
+            records[index].identityTitle = records[index].book.title
+        }
+        records[index].book.title = trimmed
+        persist(records)
+        return records[index]
     }
 
     static func attach(result: ScanResult, to id: UUID) {
@@ -92,6 +283,7 @@ enum AudiobookLibraryStore {
         if let name = record.artworkFileName {
             try? FileManager.default.removeItem(at: AudiobookImportService.artworkURL(fileName: name))
         }
+        ScanResultFileStore.remove(record.id)
         persist(load().filter { $0.id != record.id })
     }
 
@@ -99,9 +291,23 @@ enum AudiobookLibraryStore {
         load().reduce(0) { $0 + $1.fileSize }
     }
 
+    /// Writes the index, with each book's scan stored beside it rather than inside it.
+    ///
+    /// The cache is refreshed from the same records that were just written, so a reader
+    /// immediately afterwards sees the change without going back to disk.
     private static func persist(_ records: [LibraryBookRecord]) {
-        guard let data = try? JSONEncoder().encode(records) else { return }
+        var index = records
+        for position in index.indices {
+            if let result = index[position].scanResult {
+                ScanResultFileStore.save(result, for: index[position].id)
+            }
+            // Cleared for encoding only. The cache below keeps the full records, so callers
+            // still see the scan they just saved.
+            index[position].scanResult = nil
+        }
+        guard let data = try? JSONEncoder().encode(index) else { return }
         UserDefaults.standard.set(data, forKey: key)
+        cache = records
     }
 }
 

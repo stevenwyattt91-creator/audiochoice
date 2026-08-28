@@ -469,10 +469,7 @@ public sealed class PostgresScanCatalog(NpgsqlDataSource dataSource) : IScanCata
             var item = ExploreCatalog.Create(fingerprint, result, reader.GetBoolean(17));
             values.Add(item with { EventCount = reader.GetInt32(15) });
         }
-        return values
-            .GroupBy(ExploreCatalog.CanonicalKey, StringComparer.Ordinal)
-            .Select(group => group.OrderByDescending(value => value.EventCount).ThenByDescending(value => value.ScanDate).First())
-            .ToArray();
+        return ExploreCatalog.Deduplicate(values);
     }
 
     public bool SaveEditionCover(BookFingerprint fingerprint, byte[] imageBytes, string contentType, bool replaceExisting = false)

@@ -29,6 +29,7 @@ struct BookCover: View {
     var title: String
     var compact = false
     var artworkFileName: String? = nil
+    var isFinished = false
 
     var body: some View {
         ZStack {
@@ -66,6 +67,27 @@ struct BookCover: View {
             RoundedRectangle(cornerRadius: compact ? 10 : 16)
                 .stroke(Color.white.opacity(0.14))
         }
+        .overlay(alignment: .topTrailing) {
+            if isFinished { FinishedBadge(compact: compact) }
+        }
+    }
+}
+
+/// Marks a finished book on its cover.
+///
+/// Sits on artwork of any colour, so the tick gets a dark disc behind it rather than
+/// relying on contrast with the image. Carries the accessibility label because the cover
+/// itself only announces the title, and a colour alone would say nothing to VoiceOver.
+struct FinishedBadge: View {
+    var compact = false
+
+    var body: some View {
+        Image(systemName: "checkmark.circle.fill")
+            .font(.system(size: compact ? 17 : 24, weight: .bold))
+            .symbolRenderingMode(.palette)
+            .foregroundStyle(ACTheme.accent, Color.black.opacity(0.75))
+            .padding(compact ? 5 : 8)
+            .accessibilityLabel("Finished")
     }
 }
 

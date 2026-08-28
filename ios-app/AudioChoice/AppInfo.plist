@@ -37,6 +37,13 @@
 			<array><string>audiochoice</string><string>audiochoice-beta</string></array>
 		</dict>
 	</array>
+	<!-- Bundled reading typeface. iOS will not load an app font unless it is declared
+	     here, so omitting this makes the reader silently fall back to the system face. -->
+	<key>UIAppFonts</key>
+	<array>
+		<string>OpenDyslexic-Regular.otf</string>
+		<string>OpenDyslexic-Bold.otf</string>
+	</array>
 	<key>LSApplicationCategoryType</key>
 	<string>public.app-category.books</string>
 	<key>LSRequiresIPhoneOS</key>

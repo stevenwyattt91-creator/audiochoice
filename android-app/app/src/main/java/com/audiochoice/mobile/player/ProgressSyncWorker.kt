@@ -54,8 +54,14 @@ class ProgressSyncWorker(
         for (bookID in dirtyBookIDs) {
             val positionMs = preferences.getLong(PlaybackProgressKeys.positionKey(bookID), -1L)
             if (positionMs < 0L) continue
+            // Completion travels with the position because the server assigns both in one
+            // write. Without it this worker would silently un-finish every book it synced.
+            val isFinished = preferences.getBoolean(
+                PlaybackProgressKeys.finishedKey(bookID),
+                false,
+            )
             val outcome = runCatching {
-                api.saveProgress(session.accessToken, bookID, positionMs / 1000.0, false)
+                api.saveProgress(session.accessToken, bookID, positionMs / 1000.0, isFinished)
             }
             outcome.onSuccess {
                 // Only clear the flag if the stored position is still the one we

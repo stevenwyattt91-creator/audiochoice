@@ -21,6 +21,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.draw.clip
 import androidx.compose.material.icons.Icons
@@ -71,6 +72,7 @@ import com.audiochoice.mobile.player.FilterAvailability
 import com.audiochoice.mobile.player.PlayerUiState
 import com.audiochoice.mobile.player.enabledScanEvents
 import com.audiochoice.mobile.reader.ReaderMask
+import com.audiochoice.mobile.reader.ReaderFont
 import com.audiochoice.mobile.reader.ReaderSettings
 import com.audiochoice.mobile.reader.ReaderTheme
 import com.audiochoice.mobile.reader.indexOfCharacter
@@ -81,6 +83,7 @@ import com.audiochoice.mobile.reader.readerTimeForCharacter
 import com.audiochoice.mobile.player.PlaybackFilterTaxonomy
 import com.audiochoice.mobile.security.ParentalControlsStore
 import com.audiochoice.mobile.support.SupportViewModel
+import com.audiochoice.mobile.ui.theme.readerFontFamily
 import com.audiochoice.mobile.ui.theme.ChoiceGreen
 import com.audiochoice.mobile.ui.theme.ChoiceMuted
 import com.audiochoice.mobile.ui.theme.ChoiceOutline
@@ -644,6 +647,7 @@ private fun LibraryHome(
                     BookArtwork(
                         coverPaths[featured.fingerprint.sha256.lowercase()],
                         Modifier.fillMaxWidth().height(120.dp),
+                        isFinished = featured.isFinished,
                     )
                     Column(Modifier.align(Alignment.BottomStart).fillMaxWidth().background(Color(0xE6101514)).padding(14.dp)) {
                         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
@@ -708,7 +712,11 @@ private fun LibraryBookRow(
         shape = RoundedCornerShape(13.dp),
     ) {
         Row(Modifier.fillMaxWidth().padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
-            BookArtwork(coverPath, Modifier.size(width = 62.dp, height = 80.dp))
+            BookArtwork(
+                coverPath,
+                Modifier.size(width = 62.dp, height = 80.dp),
+                isFinished = book.isFinished,
+            )
             Spacer(Modifier.width(13.dp))
             Column(Modifier.weight(1f)) {
                 Text(book.title, fontWeight = FontWeight.SemiBold, maxLines = 2)
@@ -766,6 +774,7 @@ private fun ExploreScannedBooks(
                             owned?.let { coverPaths[it.fingerprint.sha256.lowercase()] }
                                 ?: coverPaths[item.catalogID.lowercase()],
                             Modifier.size(width = 70.dp, height = 92.dp).clip(RoundedCornerShape(8.dp)),
+                            isFinished = owned?.isFinished == true,
                         )
                         Spacer(Modifier.width(13.dp))
                         Column(Modifier.weight(1f)) {
@@ -1462,7 +1471,11 @@ private fun BookDetailsScreen(
                 }
             }
         }
-        BookArtwork(state.coverPath ?: coverPath, Modifier.size(220.dp))
+        BookArtwork(
+            state.coverPath ?: coverPath,
+            Modifier.size(220.dp),
+            isFinished = state.book?.takeIf { it.id == book.id }?.isFinished ?: book.isFinished,
+        )
         Spacer(Modifier.height(14.dp))
         Text(book.title, fontSize = 24.sp, fontWeight = FontWeight.SemiBold, textAlign = TextAlign.Center)
         Text(book.author ?: "Imported audiobook", color = ChoiceMuted)
@@ -1522,6 +1535,15 @@ private fun BookDetailsScreen(
             HorizontalDivider(color = ChoiceOutline)
             val detectedCategoryCount = PlaybackFilterTaxonomy.available(state.scanEvents).size
             DetailRow(Icons.Outlined.Tune, "Filters", "$detectedCategoryCount detected", onFilters)
+            HorizontalDivider(color = ChoiceOutline)
+            // Books finish on reaching the end, but someone who stopped before the credits
+            // has no other way to say they are done with it.
+            val finished = state.book?.takeIf { it.id == book.id }?.isFinished ?: book.isFinished
+            DetailRow(
+                if (finished) Icons.Outlined.CheckCircle else Icons.Outlined.RadioButtonUnchecked,
+                "Finished",
+                if (finished) "Yes" else "No",
+            ) { player.setFinished(!finished) }
             if (BuildConfig.BETA_BUILD) {
                 HorizontalDivider(color = ChoiceOutline)
                 DetailRow(
@@ -1672,7 +1694,11 @@ private fun decodeDownsampledCover(path: String, targetPixels: Int = 512): Image
 }.getOrNull()
 
 @Composable
-private fun BookArtwork(coverPath: String?, modifier: Modifier = Modifier) {
+private fun BookArtwork(
+    coverPath: String?,
+    modifier: Modifier = Modifier,
+    isFinished: Boolean = false,
+) {
     // produceState keeps the disk read and decode off the composition thread.
     val cover by produceState<ImageBitmap?>(initialValue = null, coverPath) {
         value = coverPath?.let { path ->
@@ -1683,6 +1709,21 @@ private fun BookArtwork(coverPath: String?, modifier: Modifier = Modifier) {
     Box(modifier.background(ChoiceSurface, RoundedCornerShape(16.dp)).clip(RoundedCornerShape(16.dp)), contentAlignment = Alignment.Center) {
         if (artwork != null) Image(artwork, "Book artwork", Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
         else Image(painterResource(R.drawable.audiochoice_logo), "AudioChoice artwork", Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+        if (isFinished) {
+            // On a dark disc rather than relying on contrast with whatever artwork is
+            // underneath, and labelled because a colour alone says nothing to TalkBack.
+            Icon(
+                Icons.Outlined.CheckCircle,
+                "Finished",
+                tint = ChoiceGreen,
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(4.dp)
+                    .background(Color.Black.copy(alpha = 0.75f), CircleShape)
+                    .padding(1.dp)
+                    .size(18.dp),
+            )
+        }
     }
 }
 
@@ -1826,6 +1867,21 @@ private fun FilterHierarchyContent(
                             event.startTime?.let {
                                 Text(formatTime((it * 1000).toLong()), color = ChoiceMuted, fontSize = 10.sp)
                             }
+                        }
+                        // Reporting a control is what makes over-filtering fixable: it names
+                        // the thing that fired, rather than leaving a timestamp to be matched
+                        // back to one. Switching it off only helps this listener; reporting it
+                        // helps everyone with the same recording.
+                        IconButton(
+                            onClick = { player.reportWronglyFiltered(event.key, event.aggregate) },
+                            modifier = Modifier.size(34.dp),
+                        ) {
+                            Icon(
+                                Icons.Outlined.OutlinedFlag,
+                                "Report ${event.label} as wrongly filtered",
+                                tint = ChoiceMuted,
+                                modifier = Modifier.size(17.dp),
+                            )
                         }
                         Switch(
                             checked = player.isFilterEventEnabled(event),
@@ -2068,6 +2124,27 @@ private fun PlayerScreen(player: PlayerViewModel, filtersLocked: Boolean, onBack
                 IconPlayerToolButton(Icons.Outlined.Security, "Filters") { filterDialog = true }
                 IconPlayerToolButton(if (state.bookmarkSaved) Icons.Outlined.BookmarkAdded else Icons.Outlined.BookmarkBorder, "Bookmarks") {
                     bookmarkDialog = true
+                }
+                // One tap, no dialog. Someone hearing something they asked never to hear is
+                // usually driving or walking, and anything that needs reading first means the
+                // report never happens.
+                IconPlayerToolButton(
+                    if (state.filterReportSent) Icons.Outlined.Flag else Icons.Outlined.OutlinedFlag,
+                    "Report missed content",
+                ) {
+                    player.reportMissedContent()
+                }
+            }
+            if (state.filterReportSent) {
+                Text(
+                    "Reported at ${formatTime(state.positionMs)}. Thank you.",
+                    color = ChoiceGreen,
+                    fontSize = 11.sp,
+                    modifier = Modifier.padding(top = 22.dp),
+                )
+                LaunchedEffect(state.filterReportSent) {
+                    delay(2_500)
+                    player.acknowledgeFilterReport()
                 }
             }
         }
@@ -2335,8 +2412,12 @@ private fun ReaderScreen(
                     Text(
                         display.displayText,
                         color = palette.ink,
+                        fontFamily = readerFontFamily(settings.font),
                         fontSize = (READER_BASE_FONT_SP * settings.fontScale).sp,
-                        lineHeight = (READER_BASE_LINE_SP * settings.fontScale).sp,
+                        lineHeight = (
+                            READER_BASE_LINE_SP * settings.fontScale *
+                                ReaderSettings.lineHeightFactor(settings.font)
+                            ).sp,
                         modifier = Modifier
                             .fillMaxWidth()
                             .then(
@@ -2512,6 +2593,32 @@ private fun ReaderSettingsDialog(
                     selected = settings.fontScale,
                     label = ReaderSettings::fontScaleLabel,
                     onSelect = { onSettingsChanged(settings.copy(fontScale = it)) },
+                )
+                Spacer(Modifier.height(16.dp))
+                Text("Typeface", fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+                Spacer(Modifier.height(6.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    ReaderFont.entries.forEach { font ->
+                        FilterChip(
+                            selected = settings.font == font,
+                            onClick = { onSettingsChanged(settings.copy(font = font)) },
+                            // Each chip renders in the face it selects, so the choice
+                            // can be judged by eye rather than by name.
+                            label = {
+                                Text(
+                                    ReaderSettings.fontLabel(font),
+                                    fontFamily = readerFontFamily(font),
+                                )
+                            },
+                        )
+                    }
+                }
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    "OpenDyslexic weights the bottom of each letter and varies similar " +
+                        "shapes, which can make characters harder to transpose or flip.",
+                    color = ChoiceMuted,
+                    fontSize = 11.sp,
                 )
                 Spacer(Modifier.height(16.dp))
                 Text("Margins", fontWeight = FontWeight.SemiBold, fontSize = 13.sp)

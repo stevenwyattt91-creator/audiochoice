@@ -13,6 +13,7 @@ internal object PlaybackProgressKeys {
 
     private const val POSITION_PREFIX = "position_ms_"
     private const val DIRTY_PREFIX = "position_dirty_"
+    private const val FINISHED_PREFIX = "position_finished_"
 
     /**
      * A human-readable trace of the last save and the last resume decision.
@@ -28,6 +29,15 @@ internal object PlaybackProgressKeys {
     fun positionKey(bookID: String): String = "$POSITION_PREFIX$bookID"
 
     fun dirtyKey(bookID: String): String = "$DIRTY_PREFIX$bookID"
+
+    /**
+     * Whether this book is finished, stored beside its position.
+     *
+     * The server assigns position and completion in the same write, so every save has to
+     * carry the current value or it would clear it. Keeping it here means the background
+     * sync worker, which has no view model to ask, still sends the right answer.
+     */
+    fun finishedKey(bookID: String): String = "$FINISHED_PREFIX$bookID"
 
     fun isDirtyKey(key: String): Boolean = key.startsWith(DIRTY_PREFIX)
 

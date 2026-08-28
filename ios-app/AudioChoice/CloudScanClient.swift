@@ -150,10 +150,95 @@ struct CloudScanClient {
         try await put(value, path: "v1/library")
     }
 
-    func saveProgress(bookID: UUID, position: Double, isFinished: Bool = false) async throws -> AccountLibraryBook {
+    /// Saves position and completion together.
+    ///
+    /// `isFinished` has no default on purpose. The server assigns whatever is sent, so a
+    /// default of false would let any ordinary position save quietly un-finish a book the
+    /// listener had already completed.
+    func saveProgress(bookID: UUID, position: Double, isFinished: Bool) async throws -> AccountLibraryBook {
         try await put(
             PlaybackProgressRequest(positionSeconds: position, isFinished: isFinished),
             path: "v1/library/\(bookID.uuidString)/progress")
+    }
+
+    func filterProfiles() async throws -> [FilterProfile] {
+        try await get(path: "v1/filter-profiles")
+    }
+
+    func createFilterProfile(_ value: FilterProfileUpsertRequest) async throws -> FilterProfile {
+        try await post(value, path: "v1/filter-profiles")
+    }
+
+    func updateFilterProfile(
+        id: UUID,
+        _ value: FilterProfileUpsertRequest
+    ) async throws -> FilterProfile {
+        try await put(value, path: "v1/filter-profiles/\(id.uuidString)")
+    }
+
+    func deleteFilterProfile(id: UUID) async throws {
+        var request = URLRequest(url: endpoint("v1/filter-profiles/\(id.uuidString)"))
+        request.httpMethod = "DELETE"
+        addAPIHeaders(to: &request)
+        let (data, response) = try await session.data(for: request)
+        try validate(response: response, data: data)
+    }
+
+    /// Tells the server that filtering was wrong at a particular moment.
+    ///
+    /// The response is discarded: nothing in the app depends on the stored report, and the
+    /// queue only needs to know the upload was accepted.
+    func reportFilter(_ value: FilterReportRequest) async throws {
+        _ = try await post(value, path: "v1/filter-reports") as FilterReportAcknowledgement
+    }
+
+    /// Only the identifier is read back. Decoding the whole stored report would tie the
+    /// client to fields it has no use for.
+    private struct FilterReportAcknowledgement: Decodable { let id: UUID }
+
+    /// Corrects how a book is labelled for this account.
+    ///
+    /// Title only from here. Author and narrator are read from the file's tags and are
+    /// used as identity evidence, so letting them be typed over would start steering which
+    /// recording the book is taken to be.
+    func updateBookDetails(bookID: UUID, title: String) async throws -> AccountLibraryBook {
+        try await put(
+            LibraryBookDetailsRequest(title: title),
+            path: "v1/library/\(bookID.uuidString)/details"
+        )
+    }
+
+    /// This book's filter choices as stored for the account, or nil if none are stored.
+    ///
+    /// A book nobody has adjusted has no server record, and the endpoint answers 404 for
+    /// it. That is an ordinary outcome rather than a failure, so it comes back as nil
+    /// and the caller keeps whatever this device already had.
+    func bookFilterSettings(bookID: UUID) async throws -> RemoteBookFilterSettings? {
+        do {
+            return try await get(path: "v1/library/\(bookID.uuidString)/filter-settings")
+        } catch CloudClientError.server(404, _) {
+            return nil
+        }
+    }
+
+    func saveBookFilterSettings(
+        bookID: UUID,
+        _ value: BookFilterSettingsUpsertRequest
+    ) async throws -> RemoteBookFilterSettings {
+        try await put(value, path: "v1/library/\(bookID.uuidString)/filter-settings")
+    }
+
+    /// Sends the reading edition's text up and gets timing ranges back.
+    ///
+    /// The EPUB text is used in memory to build the map and is never persisted server
+    /// side, and the response carries only offsets and times -- never transcript text.
+    /// That is what lets read-along work without the private transcript ever reaching a
+    /// device.
+    func createReaderAlignment(bookID: UUID, epubText: String) async throws -> ReaderAlignmentResponse {
+        try await post(
+            ReaderAlignmentRequest(libraryBookID: bookID, epubText: epubText),
+            path: "v1/reader/alignments"
+        )
     }
 
     func exploreBooks() async throws -> [ExploreCatalogBook] {

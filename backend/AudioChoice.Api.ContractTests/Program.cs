@@ -1,3 +1,4 @@
+using System.Text;
 using AudioChoice.Api.Contracts;
 using AudioChoice.Api.Processing;
 using AudioChoice.Api.Services;
@@ -351,8 +352,19 @@ var scheduled = await scheduler.Transcribe(
     CancellationToken.None);
 Assert(scheduled.Select(item => item.Index).SequenceEqual([0, 1, 2, 3]),
     "Concurrent scheduler did not merge chunks by index.");
-Assert(schedulerProgress.Last() == (4, 4),
-    "Concurrent scheduler did not report completed/total progress.");
+// Order-independent on purpose. The scheduler reports progress as
+// progress(Interlocked.Increment(ref completed), total): the counter is atomic, but the
+// callback that follows it is not, so two workers can increment to 3 and 4 and then enqueue
+// in the opposite order. Asserting on the last item queued failed roughly one run in eight,
+// which is worse than no assertion because it teaches everyone to rerun and move on.
+//
+// What the scheduler does guarantee is that each count appears exactly once and the total
+// never changes, which is also a stronger statement than the last value being (4, 4).
+Assert(
+    schedulerProgress.Select(step => step.Done).OrderBy(done => done).SequenceEqual([1, 2, 3, 4]),
+    "Concurrent scheduler did not report each completed chunk exactly once.");
+Assert(schedulerProgress.All(step => step.Total == 4),
+    "Concurrent scheduler reported an inconsistent chunk total.");
 var retryProvider = new SchedulerFakeProvider(failFirst: true);
 var retryScheduler = new ConcurrentChunkTranscriber(
     retryProvider,
@@ -609,7 +621,152 @@ finally
     if (Directory.Exists(aliasFolder)) Directory.Delete(aliasFolder, true);
 }
 
+// Apple identity tokens. Every claim in one is attacker-supplied text until the
+// signature is verified, so a hand-assembled token must never be accepted.
+using var appleKey = System.Security.Cryptography.RSA.Create(2048);
+var appleParameters = appleKey.ExportParameters(false);
+var appleKeySet = $$"""
+{"keys":[{"kty":"RSA","kid":"test-key","use":"sig","alg":"RS256",
+"n":"{{Base64Url(appleParameters.Modulus!)}}","e":"{{Base64Url(appleParameters.Exponent!)}}"}]}
+""";
+var appleKeys = AppleIdentityToken.ParseJsonWebKeySet(appleKeySet);
+Assert(appleKeys.ContainsKey("test-key"), "Apple JWKS parsing did not yield the signing key.");
+
+var appleHeader = Base64Url(Encoding.UTF8.GetBytes("""{"alg":"RS256","kid":"test-key"}"""));
+var applePayload = Base64Url(Encoding.UTF8.GetBytes(
+    $$"""{"iss":"https://appleid.apple.com","aud":"com.audiochoice.mobile","sub":"001","exp":{{DateTimeOffset.UtcNow.AddHours(1).ToUnixTimeSeconds()}}}"""));
+var appleSignature = Base64Url(appleKey.SignData(
+    Encoding.ASCII.GetBytes($"{appleHeader}.{applePayload}"),
+    System.Security.Cryptography.HashAlgorithmName.SHA256,
+    System.Security.Cryptography.RSASignaturePadding.Pkcs1));
+
+Assert(AppleIdentityToken.SignatureIsValid($"{appleHeader}.{applePayload}.{appleSignature}", appleKeys),
+    "A correctly signed Apple token was rejected.");
+
+// The forgery this guards against: valid-looking claims, no real signature.
+Assert(!AppleIdentityToken.SignatureIsValid($"{appleHeader}.{applePayload}.", appleKeys),
+    "An Apple token with an empty signature was accepted.");
+Assert(!AppleIdentityToken.SignatureIsValid($"{appleHeader}.{applePayload}.{Base64Url(Encoding.UTF8.GetBytes("not-a-signature"))}", appleKeys),
+    "An Apple token with a junk signature was accepted.");
+
+// Claims cannot be edited after signing.
+var tamperedPayload = Base64Url(Encoding.UTF8.GetBytes(
+    $$"""{"iss":"https://appleid.apple.com","aud":"com.audiochoice.mobile","sub":"victim","exp":{{DateTimeOffset.UtcNow.AddHours(1).ToUnixTimeSeconds()}}}"""));
+Assert(!AppleIdentityToken.SignatureIsValid($"{appleHeader}.{tamperedPayload}.{appleSignature}", appleKeys),
+    "An Apple token whose subject was swapped after signing was accepted.");
+
+// "alg": "none" must not bypass verification.
+var unsignedHeader = Base64Url(Encoding.UTF8.GetBytes("""{"alg":"none","kid":"test-key"}"""));
+Assert(!AppleIdentityToken.SignatureIsValid($"{unsignedHeader}.{applePayload}.", appleKeys),
+    "An unsigned Apple token was accepted.");
+
+// An unknown key id fails closed rather than skipping the check.
+var foreignHeader = Base64Url(Encoding.UTF8.GetBytes("""{"alg":"RS256","kid":"some-other-key"}"""));
+Assert(!AppleIdentityToken.SignatureIsValid($"{foreignHeader}.{applePayload}.{appleSignature}", appleKeys),
+    "An Apple token naming an unknown key was accepted.");
+
+Assert(!AppleIdentityToken.SignatureIsValid("not.a.jwt", appleKeys), "Malformed input was accepted.");
+Assert(!AppleIdentityToken.SignatureIsValid(null, appleKeys), "A null token was accepted.");
+Assert(!AppleIdentityToken.SignatureIsValid($"{appleHeader}.{applePayload}.{appleSignature}", new Dictionary<string, System.Security.Cryptography.RSA>()),
+    "A token was accepted when no signing keys were available.");
+
+Assert(AppleIdentityToken.ParseJsonWebKeySet("}{not json").Count == 0,
+    "Malformed JWKS did not degrade to an empty key set.");
+
+// Listener reports that filtering was wrong. The only route by which a missed passage
+// becomes something anyone can act on, so what it accepts and refuses matters.
+var reportFolder = Path.Combine(Path.GetTempPath(), $"audiochoice-reports-{Guid.NewGuid()}");
+Directory.CreateDirectory(reportFolder);
+var reportPath = Path.Combine(reportFolder, "filter-reports.json");
+var reportStore = new FileFilterReportStore(reportPath);
+var reporter = Guid.NewGuid();
+var reported = reportStore.Record(reporter, new FilterReportRequest(
+    editionBase, FilterReportKind.MissedContent, 1234.5));
+Assert(reported is not null, "A well-formed missed-content report was refused.");
+Assert(reported!.WindowSeconds == FilterReports.DefaultWindowSeconds,
+    "A report without a window did not fall back to the default look-back.");
+Assert(reported.Kind == FilterReportKind.MissedContent, "A report changed kind on the way in.");
+
+// A report carries a timestamp and nothing about what was heard, which is what lets
+// filtering be corrected without a listener's audio ever leaving their device.
+Assert(reported.GetType().GetProperties().All(property =>
+        property.Name is not ("Transcript" or "Text" or "Audio" or "Words" or "Note")),
+    "A filter report gained a field that could carry the content it reports.");
+
+Assert(reportStore.Record(reporter, new FilterReportRequest(
+        editionBase, FilterReportKind.MissedContent, -5)) is null,
+    "A report at a negative position was accepted.");
+Assert(reportStore.Record(reporter, new FilterReportRequest(
+        editionBase, FilterReportKind.MissedContent, double.NaN)) is null,
+    "A report at a non-finite position was accepted.");
+Assert(reportStore.Record(Guid.Empty, new FilterReportRequest(
+        editionBase, FilterReportKind.MissedContent, 10)) is null,
+    "A report with no account was accepted.");
+Assert(reportStore.Record(reporter, new FilterReportRequest(
+        editionBase, FilterReportKind.MissedContent, 10, WindowSeconds: 10_000))!
+        .WindowSeconds == FilterReports.MaximumWindowSeconds,
+    "An unbounded look-back window was not clamped.");
+
+// Over-filtering is the complaint that needs an event to be actionable: without one there
+// is no way to tell which control was wrong.
+var overFiltered = reportStore.Record(reporter, new FilterReportRequest(
+    editionBase, FilterReportKind.WronglyFiltered, 99, ScanEventID: Guid.NewGuid(),
+    ScannerVersion: "test-1"));
+Assert(overFiltered?.ScanEventID is not null, "A wrongly-filtered report lost its event.");
+Assert(overFiltered?.ScannerVersion == "test-1",
+    "A report lost the scanner version that produced the result.");
+Assert(reportStore.List().Count >= 3, "Reports were not listed back.");
+Assert(reportStore.List(limit: 1).Count == 1, "A report listing ignored its limit.");
+Assert(reportStore.List(fingerprint: editionBase).Count >= 3,
+    "Filtering reports by edition returned nothing.");
+Assert(new FileFilterReportStore(reportPath).List().Count >= 3,
+    "Reports did not survive being read back from disk.");
+
+// Explore de-duplication. Merging too little leaves the duplicate rows; merging too much
+// hides a different recording behind another's entry, applying a scan that does not
+// describe it.
+Assert(ExploreCatalog.Deduplicate([
+        Catalogued("a", "Fourth Wing", "Rebecca Yarros", cover: "/cover"),
+        Catalogued("b", "Fourth Wing (Unabridged)", "Rebecca Yarros"),
+        Catalogued("c", "Fourth Wing")
+    ]).Count == 1,
+    "Three spellings of one recording were not merged.");
+Assert(ExploreCatalog.Deduplicate([
+        Catalogued("a", "Fourth Wing", "Rebecca Yarros", eventCount: 900),
+        Catalogued("b", "Fourth Wing", "Rebecca Yarros", eventCount: 2, cover: "/cover")
+    ]).Single().CatalogID == "b",
+    "A cover did not outrank a richer scan when choosing which entry survives.");
+Assert(ExploreCatalog.Deduplicate([
+        Catalogued("a", "Fourth Wing", "Rebecca Yarros", editionType: "GraphicAudio"),
+        Catalogued("b", "Fourth Wing", "Rebecca Yarros")
+    ]).Count == 2,
+    "Two different editions were collapsed into one.");
+Assert(ExploreCatalog.Deduplicate([
+        Catalogued("a", "Fourth Wing 1 of 2", "Rebecca Yarros"),
+        Catalogued("b", "Fourth Wing 2 of 2", "Rebecca Yarros")
+    ]).Count == 2,
+    "Two parts of one release were collapsed into one.");
+Assert(ExploreCatalog.Deduplicate([
+        Catalogued("a", "Fourth Wing", "Rebecca Yarros"),
+        Catalogued("b", "Fourth Wing", "Someone Else")
+    ]).Count == 2,
+    "Two different authors sharing a title were merged.");
+Assert(ExploreCatalog.Deduplicate([
+        Catalogued("1", "Alpha", "A"), Catalogued("2", "Beta", "B")
+    ]).Select(value => value.CatalogID).SequenceEqual(["1", "2"]),
+    "De-duplication reordered a catalogue that had no duplicates.");
+
 Console.WriteLine("AudioChoice backend contract tests passed.");
+
+static ExploreCatalogBook Catalogued(
+    string id, string title, string? author = null, string? editionType = null,
+    int eventCount = 10, string? cover = null) =>
+    new(id, title, author, null, null, editionType, 3600, "m4b",
+        DateTimeOffset.UnixEpoch, "v1", eventCount, [], cover, null,
+        new Uri("https://example.com"), "example", false);
+
+static string Base64Url(byte[] value) =>
+    Convert.ToBase64String(value).TrimEnd('=').Replace('+', '-').Replace('/', '_');
 
 static void Assert(bool condition, string message)
 {

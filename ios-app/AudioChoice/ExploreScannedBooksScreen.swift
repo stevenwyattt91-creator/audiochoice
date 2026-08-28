@@ -74,8 +74,16 @@ struct ExploreScannedBooksScreen: View {
     private func catalogCover(_ book: ExploreCatalogBook) -> some View {
         if let artwork = localRecord(for: book)?.artworkFileName {
             BookCover(title: book.title, compact: true, artworkFileName: artwork)
+        } else if let url = client?.coverURL(for: book) {
+            RemoteBookCover(url: url, title: book.title)
         } else {
-            RemoteBookCover(url: client?.coverURL(for: book), title: book.title)
+            // No cover exists to fetch. RemoteBookCover would show the same anonymous
+            // headphones glyph for every one of these, which is what made the catalogue
+            // look unfinished; BookCover at least names the book.
+            BookCover(
+                title: AudiobookTitleFormatter.format(book.title, editionType: book.editionType),
+                compact: true
+            )
         }
     }
 
@@ -94,7 +102,10 @@ struct ExploreScannedBooksScreen: View {
                 }
             }
             if uploadedCover { loadedBooks = (try? await client.exploreBooks()) ?? loadedBooks }
-            books = loadedBooks
+            // The server groups on normalised title plus author, so the same recording
+            // still arrives more than once whenever listeners' tags disagree about the
+            // author or carry a different edition note.
+            books = ExploreCatalogCleanup.deduplicated(loadedBooks)
         }
         catch { errorMessage = error.localizedDescription }
     }

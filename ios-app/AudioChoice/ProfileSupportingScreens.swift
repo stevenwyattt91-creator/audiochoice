@@ -1,35 +1,66 @@
 import SwiftUI
 
 struct ParentalControlsScreen: View {
-    @AppStorage("parentalPin") private var savedPin = ""
+    /// Mirrors the Keychain so the form can react. The PIN itself is never held here,
+    /// only whether one exists.
+    @State private var pinIsSet = ParentalPinStore.isSet
     @State private var pin = ""
     @State private var confirmation = ""
     @State private var currentPin = ""
-    @State private var mode: Mode = .setup
     @State private var message: String?
 
-    private enum Mode: String, CaseIterable, Identifiable { case setup = "Set PIN", change = "Change PIN"; var id: String { rawValue } }
     var body: some View {
         Form {
             Section("Filter lock") {
                 Text("A 4–6 digit PIN prevents others from changing audiobook filters on this device.")
                     .foregroundStyle(ACTheme.secondaryText)
-                if !savedPin.isEmpty { Picker("", selection: $mode) { ForEach(Mode.allCases) { Text($0.rawValue).tag($0) } }.pickerStyle(.segmented) }
-                if mode == .change && !savedPin.isEmpty { SecureField("Current PIN", text: $currentPin).keyboardType(.numberPad) }
-                SecureField(mode == .change ? "New PIN" : "PIN", text: $pin).keyboardType(.numberPad)
+                // An existing PIN always has to be entered to replace or remove it. The
+                // previous version offered a "Set PIN" mode that skipped this check, so
+                // anyone reaching this screen could overwrite the lock instead of opening
+                // it, and then unlock the filters with a PIN of their own.
+                if pinIsSet {
+                    SecureField("Current PIN", text: $currentPin).keyboardType(.numberPad)
+                }
+                SecureField(pinIsSet ? "New PIN" : "PIN", text: $pin).keyboardType(.numberPad)
                 SecureField("Confirm PIN", text: $confirmation).keyboardType(.numberPad)
-                Button(mode == .change ? "Change PIN" : (savedPin.isEmpty ? "Set PIN" : "Replace PIN")) { save() }
-                    .disabled(!validPin(pin) || pin != confirmation)
-                if !savedPin.isEmpty { Button("Remove PIN", role: .destructive) { if currentPin == savedPin { savedPin = ""; currentPin = ""; message = "PIN removed." } else { message = "Enter your current PIN before removing it." } } }
+                Button(pinIsSet ? "Change PIN" : "Set PIN") { save() }
+                    .disabled(!ParentalPinStore.isValidPin(pin) || pin != confirmation)
+                if pinIsSet {
+                    Button("Remove PIN", role: .destructive) {
+                        guard ParentalPinStore.verify(currentPin) else {
+                            message = "Enter your current PIN before removing it."
+                            return
+                        }
+                        ParentalPinStore.clear()
+                        pinIsSet = false
+                        currentPin = ""
+                        message = "PIN removed."
+                    }
+                }
             }
-            Section("What this does") { Text(savedPin.isEmpty ? "Filters are currently unlocked." : "Filters are protected on this device. You will be asked for this PIN before changes are made.") }
+            Section("What this does") {
+                Text(pinIsSet
+                     ? "Filters are protected on this device. You will be asked for this PIN before changes are made."
+                     : "Filters are currently unlocked.")
+            }
             if let message { Section { Text(message).foregroundStyle(ACTheme.accent) } }
-        }.navigationTitle("Parental Controls").acScreen()
+        }
+        .navigationTitle("Parental Controls")
+        .acScreen()
+        .onAppear { pinIsSet = ParentalPinStore.isSet }
     }
-    private func validPin(_ value: String) -> Bool { value.count >= 4 && value.count <= 6 && value.allSatisfy(\.isNumber) }
+
     private func save() {
-        guard mode != .change || currentPin == savedPin else { message = "Your current PIN did not match."; return }
-        savedPin = pin; pin = ""; confirmation = ""; currentPin = ""; message = "PIN saved."
+        guard !pinIsSet || ParentalPinStore.verify(currentPin) else {
+            message = "Your current PIN did not match."
+            return
+        }
+        ParentalPinStore.set(pin)
+        pinIsSet = ParentalPinStore.isSet
+        pin = ""
+        confirmation = ""
+        currentPin = ""
+        message = "PIN saved."
     }
 }
 

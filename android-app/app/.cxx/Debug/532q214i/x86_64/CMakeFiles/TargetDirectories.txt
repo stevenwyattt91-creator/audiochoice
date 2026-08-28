@@ -1,3 +1,0 @@
-C:/Users/cheye_aj94fwz/Documents/GitHub/audiochoice/android-app/app/.cxx/Debug/532q214i/x86_64/CMakeFiles/audiochoice_aax.dir
-C:/Users/cheye_aj94fwz/Documents/GitHub/audiochoice/android-app/app/.cxx/Debug/532q214i/x86_64/CMakeFiles/edit_cache.dir
-C:/Users/cheye_aj94fwz/Documents/GitHub/audiochoice/android-app/app/.cxx/Debug/532q214i/x86_64/CMakeFiles/rebuild_cache.dir

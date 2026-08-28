@@ -346,7 +346,10 @@ public sealed class InMemoryScanCatalog : IScanCatalog
         return updated;
     }
 
-    public IReadOnlyList<ExploreCatalogBook> ListExploreBooks() => _jobs.Values
+    public IReadOnlyList<ExploreCatalogBook> ListExploreBooks() =>
+        ExploreCatalog.Deduplicate(CompletedExploreBooks());
+
+    private IEnumerable<ExploreCatalogBook> CompletedExploreBooks() => _jobs.Values
         .Where(value => value.Status == CloudScanStatus.Completed && value.Result is not null)
         .GroupBy(value => FingerprintKey(value.Fingerprint))
         .Select(group => group.OrderByDescending(value => value.Result!.ScanDate).First())
@@ -357,8 +360,7 @@ public sealed class InMemoryScanCatalog : IScanCatalog
             value.Result!,
             _exploreCovers.ContainsKey(value.Fingerprint.Sha256[..Math.Min(24, value.Fingerprint.Sha256.Length)].ToLowerInvariant())))
         .Where(value => !_hiddenExploreBooks.ContainsKey(value.CatalogID))
-        .OrderBy(value => value.Title)
-        .ToArray();
+        .OrderBy(value => value.Title);
 
     public bool SaveExploreCover(string catalogID, byte[] imageBytes, string contentType, bool replaceExisting = false)
     {
@@ -448,14 +450,164 @@ public sealed class InMemoryScanCatalog : IScanCatalog
 
 public static class ExploreCatalog
 {
-    public static string CanonicalKey(ExploreCatalogBook book)
+    /// <summary>
+    /// Collapses entries that describe the same recording.
+    /// </summary>
+    /// <remarks>
+    /// The same audiobook arrives from different listeners' files and their tags disagree:
+    /// one carries an author and another does not, one title picks up "(Unabridged)", a
+    /// bracketed edition note or a series prefix. Grouping on title-plus-author alone left
+    /// a second row for a book already listed.
+    ///
+    /// Three things are deliberately kept apart. Parts of a split release are different
+    /// audio. So are different edition types, where a dramatised recording and a straight
+    /// reading have their own runtimes and their own scans. And two different authors
+    /// sharing a title are two different books. Merging any of those would show one
+    /// recording's filter data against another's audio.
+    ///
+    /// Mirrors ExploreCatalogCleanup on the clients. They keep their own pass so an older
+    /// app still tidies a catalogue from a server that has not deployed this yet, and the
+    /// rules match so the two cannot pick different survivors.
+    /// </remarks>
+    public static IReadOnlyList<ExploreCatalogBook> Deduplicate(
+        IEnumerable<ExploreCatalogBook> books)
     {
-        var title = Normalize(book.Title);
-        var author = Normalize(book.Author);
-        var part = System.Text.RegularExpressions.Regex.Match(title, @"part\s*(\d+)\s*of\s*(\d+)", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
-        if (part.Success) title = title[..part.Index].Trim();
-        return $"{title}|{author}|{(part.Success ? part.Value : "")}";
+        var clusters = new List<List<ExploreCatalogBook>>();
+        var byKey = new Dictionary<string, List<int>>(StringComparer.Ordinal);
+
+        foreach (var book in books)
+        {
+            var key = GroupKey(book);
+            if (!byKey.TryGetValue(key, out var indexes))
+            {
+                indexes = [];
+                byKey[key] = indexes;
+            }
+
+            var placed = false;
+            foreach (var index in indexes)
+            {
+                if (!IsSameBook(clusters[index][0], book)) continue;
+                clusters[index].Add(book);
+                placed = true;
+                break;
+            }
+            if (placed) continue;
+
+            clusters.Add([book]);
+            indexes.Add(clusters.Count - 1);
+        }
+
+        // Incoming order is preserved, so the caller's sort still holds.
+        return clusters.Select(Best).ToArray();
     }
+
+    /// <summary>
+    /// Which entry survives: a cover first, since a missing one is the visible symptom,
+    /// then the richest scan, the most recent, and the fullest metadata.
+    /// </summary>
+    private static ExploreCatalogBook Best(List<ExploreCatalogBook> candidates) =>
+        candidates.Skip(1).Aggregate(candidates[0],
+            (current, candidate) => IsBetter(candidate, current) ? candidate : current);
+
+    private static bool IsBetter(ExploreCatalogBook candidate, ExploreCatalogBook current)
+    {
+        var candidateHasCover = !string.IsNullOrWhiteSpace(candidate.CoverImageURL);
+        if (candidateHasCover != !string.IsNullOrWhiteSpace(current.CoverImageURL))
+        {
+            return candidateHasCover;
+        }
+        if (candidate.EventCount != current.EventCount) return candidate.EventCount > current.EventCount;
+        if (candidate.ScanDate != current.ScanDate) return candidate.ScanDate > current.ScanDate;
+        var candidateScore = MetadataScore(candidate);
+        var currentScore = MetadataScore(current);
+        if (candidateScore != currentScore) return candidateScore > currentScore;
+        // Deterministic last resort, so repeated calls cannot swap which of two equals wins.
+        return string.CompareOrdinal(candidate.CatalogID, current.CatalogID) < 0;
+    }
+
+    private static int MetadataScore(ExploreCatalogBook book)
+    {
+        var score = 0;
+        if (!string.IsNullOrWhiteSpace(book.Author)) score++;
+        if (!string.IsNullOrWhiteSpace(book.Description)) score++;
+        if (book.Duration is > 0) score++;
+        if (!string.IsNullOrWhiteSpace(book.SeriesTitle)) score++;
+        return score;
+    }
+
+    /// <summary>
+    /// Cheap bucket key. Excludes the author on purpose, because a missing author is one of
+    /// the differences being reconciled; <see cref="IsSameBook"/> decides real matches.
+    /// </summary>
+    private static string GroupKey(ExploreCatalogBook book) =>
+        $"{NormalizedTitle(book.Title)}|{PartMarker(book.Title)}|{Normalize(book.EditionType)}";
+
+    private static bool IsSameBook(ExploreCatalogBook left, ExploreCatalogBook right)
+    {
+        if (NormalizedTitle(left.Title) != NormalizedTitle(right.Title)) return false;
+        if (PartMarker(left.Title) != PartMarker(right.Title)) return false;
+        if (Normalize(left.EditionType) != Normalize(right.EditionType)) return false;
+
+        var leftAuthor = Normalize(left.Author);
+        var rightAuthor = Normalize(right.Author);
+        // An absent author means an untagged file, not a different recording. Two authors
+        // that genuinely differ keep their own entries: a shared title is not evidence of
+        // a shared book.
+        return leftAuthor.Length == 0 || rightAuthor.Length == 0 || leftAuthor == rightAuthor;
+    }
+
+    /// <summary>"2 of 3", however it was written, or an empty string.</summary>
+    private static string PartMarker(string title)
+    {
+        var match = System.Text.RegularExpressions.Regex.Match(
+            title,
+            @"(?:part|disc|volume|vol|book)?\s*(\d+)\s*(?:of|/)\s*(\d+)",
+            System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+        return match.Success ? $"{match.Groups[1].Value} of {match.Groups[2].Value}" : "";
+    }
+
+    private static readonly string[] EditionSuffixes =
+    [
+        "unabridged", "abridged", "audiobook", "audio book", "audio edition",
+        "a full cast production", "full cast production", "dramatized adaptation",
+        "dramatised adaptation", "graphic audio", "graphicaudio"
+    ];
+
+    private static string NormalizedTitle(string title)
+    {
+        var value = title;
+        foreach (var pattern in new[] { @"\([^)]*\)", @"\[[^\]]*\]", @"\{[^}]*\}" })
+        {
+            value = System.Text.RegularExpressions.Regex.Replace(value, pattern, " ");
+        }
+        value = System.Text.RegularExpressions.Regex.Replace(
+            value,
+            @"(?:part|disc|volume|vol|book)?\s*\d+\s*(?:of|/)\s*\d+",
+            " ",
+            System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+
+        // Only trailing edition wording is removed, so a title that genuinely contains one
+        // of these words keeps it.
+        var trimmed = true;
+        while (trimmed)
+        {
+            trimmed = false;
+            var simplified = Normalize(value);
+            foreach (var suffix in EditionSuffixes)
+            {
+                if (!simplified.EndsWith(" " + suffix, StringComparison.Ordinal)) continue;
+                value = simplified[..^(suffix.Length + 1)];
+                trimmed = true;
+                break;
+            }
+        }
+        return Normalize(value);
+    }
+
+    /// <summary>Kept for callers that only need a bucket, not the full clustering.</summary>
+    public static string CanonicalKey(ExploreCatalogBook book) =>
+        $"{NormalizedTitle(book.Title)}|{Normalize(book.Author)}|{PartMarker(book.Title)}";
 
     private static string Normalize(string? value) =>
         System.Text.RegularExpressions.Regex.Replace(value ?? "", @"[^a-z0-9]+", " ", System.Text.RegularExpressions.RegexOptions.IgnoreCase).Trim().ToLowerInvariant();

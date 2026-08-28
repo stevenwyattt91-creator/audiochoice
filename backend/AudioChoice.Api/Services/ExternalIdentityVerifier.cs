@@ -33,6 +33,7 @@ public sealed record VerifiedIdentity(
 public sealed class ExternalIdentityVerifier(
     HttpClient client,
     ExternalAuthOptions options,
+    IAppleSigningKeyProvider appleKeys,
     ILogger<ExternalIdentityVerifier> logger)
 {
     public async Task<VerifiedIdentity?> Verify(
@@ -54,7 +55,7 @@ public sealed class ExternalIdentityVerifier(
         // Native iOS sign-in returns an identity token whose audience is the
         // primary App ID. Web Sign in with Apple uses the grouped Services ID.
         // Accept either audience so both paths resolve to the same Apple subject.
-        var direct = ParseAppleIdentity(identityToken);
+        var direct = await VerifiedAppleIdentity(identityToken, cancellationToken);
         if (direct is not null) return direct;
         if (options.AppleClientIDs.Count == 0 ||
             string.IsNullOrWhiteSpace(options.AppleClientSecret) ||
@@ -69,7 +70,33 @@ public sealed class ExternalIdentityVerifier(
         using var response = await client.PostAsync("https://appleid.apple.com/auth/token", content, cancellationToken);
         if (!response.IsSuccessStatusCode) return null;
         var token = await response.Content.ReadFromJsonAsync<AppleTokenResponse>(cancellationToken: cancellationToken);
-        return ParseAppleIdentity(token?.IdentityToken);
+        return await VerifiedAppleIdentity(token?.IdentityToken, cancellationToken);
+    }
+
+    /// <summary>
+    /// Checks the signature against Apple's published keys before reading a single
+    /// claim.
+    /// </summary>
+    /// <remarks>
+    /// The audience, issuer, subject and expiry are all attacker-controlled until the
+    /// signature is verified, so validating them on an unverified token proves
+    /// nothing: a hand-assembled JWT naming any Apple subject would have been
+    /// accepted. Keys are refetched once if the token names an unknown key id, since
+    /// Apple rotates them and a rotation must not lock users out.
+    /// </remarks>
+    private async Task<VerifiedIdentity?> VerifiedAppleIdentity(
+        string? token,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(token)) return null;
+
+        var keys = await appleKeys.Keys(cancellationToken);
+        if (!AppleIdentityToken.SignatureIsValid(token, keys))
+        {
+            logger.LogWarning("Rejected an Apple identity token whose signature did not verify.");
+            return null;
+        }
+        return ParseAppleIdentity(token);
     }
 
     private VerifiedIdentity? ParseAppleIdentity(string? token)

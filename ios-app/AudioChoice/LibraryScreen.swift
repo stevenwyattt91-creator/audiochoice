@@ -236,7 +236,20 @@ struct LibraryScreen: View {
 
         for index in loaded.indices where loaded[index].accountLibraryID == nil {
             guard let fingerprint = loaded[index].fingerprint else { continue }
-            let request = LibraryBookUpsertRequest(fingerprint: fingerprint, title: loaded[index].book.title, author: loaded[index].book.author, narrator: nil, coverImageURL: nil)
+            // Narrator and signature come from the file's own tags. Sending them is
+            // what lets the server recognise a converted or re-tagged copy as the same
+            // edition and reuse its transcript and filter results.
+            let request = LibraryBookUpsertRequest(
+                fingerprint: fingerprint,
+                // The file's own title, not the listener's correction. This request is
+                // identity evidence, and a renamed book must not start matching a
+                // different recording because of what someone typed.
+                title: loaded[index].evidenceTitle,
+                author: loaded[index].book.author,
+                narrator: loaded[index].narrator,
+                coverImageURL: nil,
+                signature: loaded[index].editionSignature
+            )
             if let remote = try? await client.saveLibraryBook(request) {
                 loaded[index].accountLibraryID = remote.id
                 AudioPlaybackManager.applyRemotePosition(
@@ -255,13 +268,23 @@ struct LibraryScreen: View {
     @ViewBuilder
     private func libraryCover(_ record: LibraryBookRecord, compact: Bool) -> some View {
         if record.artworkFileName != nil {
-            BookCover(title: record.book.title, compact: compact, artworkFileName: record.artworkFileName)
+            BookCover(
+                title: record.book.title,
+                compact: compact,
+                artworkFileName: record.artworkFileName,
+                isFinished: record.isFinished
+            )
         } else if let cloud = accountBook(for: record),
                   let client = try? CloudScanClient.configured(),
                   let url = client.coverURL(for: cloud.coverImageURL) {
+            // RemoteBookCover draws its own artwork, so the badge is layered on here
+            // rather than threading the flag through a second cover view.
             RemoteBookCover(url: url, title: record.book.title)
+                .overlay(alignment: .topTrailing) {
+                    if record.isFinished { FinishedBadge(compact: compact) }
+                }
         } else {
-            BookCover(title: record.book.title, compact: compact)
+            BookCover(title: record.book.title, compact: compact, isFinished: record.isFinished)
         }
     }
 
