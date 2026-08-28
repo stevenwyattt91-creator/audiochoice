@@ -188,9 +188,12 @@ private struct LegacyPlayerScreen: View {
     @State private var sleepTask: Task<Void, Never>?
     @State private var bookmarkSaved = false
 
-    private var record: LibraryBookRecord? {
-        AudiobookLibraryStore.load().first { $0.id == book.id }
-    }
+    /// Loaded once per appearance rather than computed.
+    ///
+    /// A computed property here was re-evaluated on every render, and these views re-render
+    /// twice a second as the playback position moves, so the whole library was being read
+    /// continuously during playback.
+    @State private var record: LibraryBookRecord?
 
     var body: some View {
         VStack(spacing: 26) {
@@ -313,6 +316,7 @@ private struct LegacyPlayerScreen: View {
         .background(ACTheme.background.ignoresSafeArea())
         .navigationBarTitleDisplayMode(.inline)
         .task {
+            record = AudiobookLibraryStore.load().first { $0.id == book.id }
             if let record {
                 playback.load(record)
                 if let initialPosition { playback.seek(to: initialPosition) }
@@ -361,9 +365,12 @@ struct PlayerScreen: View {
     @State private var showingReader = false
     @State private var importingEpub = false
 
-    private var record: LibraryBookRecord? {
-        AudiobookLibraryStore.load().first { $0.id == book.id }
-    }
+    /// Loaded once per appearance rather than computed.
+    ///
+    /// A computed property here was re-evaluated on every render, and these views re-render
+    /// twice a second as the playback position moves, so the whole library was being read
+    /// continuously during playback.
+    @State private var record: LibraryBookRecord?
 
     private var hasReadingEdition: Bool {
         record.map { ReaderStore.hasEpub(bookID: $0.id) } ?? false
@@ -528,6 +535,7 @@ struct PlayerScreen: View {
             }
         }
         .task {
+            record = AudiobookLibraryStore.load().first { $0.id == book.id }
             if let record {
                 playback.load(record)
                 if let initialPosition { playback.seek(to: initialPosition) }

@@ -116,6 +116,89 @@ check("unmarking is stored",
 check("an unknown book cannot be marked",
       AudiobookLibraryStore.setFinished(true, for: UUID()) == nil)
 
+print("Scan results stored beside the library")
+// Scans are the largest thing stored and used to sit inside the library blob, so every read
+// of the library decoded every event of every book. They now live in their own files; what
+// matters is that moving them cannot lose them.
+func scan(_ eventCount: Int) -> ScanResult {
+    ScanResult(
+        events: (0..<eventCount).map { index in
+            ScanEvent(
+                id: UUID(), startTime: Double(index) * 10, endTime: Double(index) * 10 + 2,
+                categoryID: UUID(uuidString: "20000000-0000-0000-0000-000000000001")!,
+                groupID: UUID(uuidString: "21000000-0000-0000-0000-000000000002")!,
+                eventID: UUID(), confidence: 0.9, stableKey: "key-\(index)",
+                safeDescription: "Strong language", aggregateKey: nil, aggregateDisplay: nil
+            )
+        },
+        scanDate: Date(),
+        scannerVersion: "checks-1"
+    )
+}
+
+var scanned = makeRecord(title: "Scanned Book")
+AudiobookLibraryStore.upsert(scanned)
+AudiobookLibraryStore.attach(result: scan(50), to: scanned.id)
+check("a scan is readable straight after being attached",
+      AudiobookLibraryStore.load().first { $0.id == scanned.id }?.scanResult?.events.count == 50)
+
+// Proves it really came from the file rather than from the in-memory copy.
+check("the scan is on disk by itself",
+      ScanResultFileStore.load(scanned.id)?.events.count == 50)
+
+// The point of the change: the blob must no longer carry the events.
+let blob = UserDefaults.standard.data(forKey: "audiobookLibrary.v1") ?? Data()
+let blobText = String(data: blob, encoding: .utf8) ?? ""
+check("the library index does not contain scan events", !blobText.contains("Strong language"))
+// Expressed against the scan's own size rather than a fixed number of bytes, so the check
+// says what it means regardless of how many books happen to be stored.
+let scanBytes = (try? Data(
+    contentsOf: FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+        .appendingPathComponent("ScanResults/\(scanned.id.uuidString).json")
+))?.count ?? 0
+check("the scan file holds the bulk of it", scanBytes > blob.count)
+
+check("a scan survives an unrelated edit",
+      AudiobookLibraryStore.rename("Renamed", for: scanned.id)?.scanResult?.events.count == 50)
+check("marking finished does not drop the scan",
+      AudiobookLibraryStore.setFinished(true, for: scanned.id)?.scanResult?.events.count == 50)
+
+print("Records written before scans moved out")
+// An older blob carries its scan inline. Replacing that with a file lookup that finds
+// nothing would throw away the book's filter data, which is the one thing that must not
+// happen here.
+let legacyID = UUID()
+let legacyBookID = UUID()
+let inlineScan = scan(3)
+let inlineEvents = try! JSONEncoder().encode(inlineScan)
+let inlineText = String(data: inlineEvents, encoding: .utf8)!
+let legacyBlob = """
+[{"id":"\(legacyID.uuidString)","book":{"id":"\(legacyBookID.uuidString)","title":"Inline",\
+"author":"A","progress":0,"timeRemaining":"","runtime":"1h","chapters":1,\
+"edition":"Standard"},"fileSize":10,"importedAt":0,"scanResult":\(inlineText)}]
+"""
+UserDefaults.standard.set(Data(legacyBlob.utf8), forKey: "audiobookLibrary.v1")
+AudiobookLibraryStore.invalidateCache()
+check("an inline scan is still found", 
+      AudiobookLibraryStore.load().first { $0.id == legacyID }?.scanResult?.events.count == 3)
+check("it is migrated out to its own file",
+      ScanResultFileStore.load(legacyID)?.events.count == 3)
+AudiobookLibraryStore.invalidateCache()
+check("and it survives the migration",
+      AudiobookLibraryStore.load().first { $0.id == legacyID }?.scanResult?.events.count == 3)
+
+print("Removing a book takes its scan with it")
+let doomed = makeRecord(title: "Doomed")
+AudiobookLibraryStore.upsert(doomed)
+AudiobookLibraryStore.attach(result: scan(4), to: doomed.id)
+check("its scan exists first", ScanResultFileStore.load(doomed.id) != nil)
+AudiobookLibraryStore.remove(doomed)
+check("the scan file is deleted too", ScanResultFileStore.load(doomed.id) == nil)
+check("the book is gone", !AudiobookLibraryStore.load().contains { $0.id == doomed.id })
+
+// Leaves nothing behind in Application Support.
+for id in [scanned.id, legacyID] { ScanResultFileStore.remove(id) }
+
 print("Older records still decode")
 // Records written before these fields existed must load rather than being dropped, which
 // would empty someone's library on update.

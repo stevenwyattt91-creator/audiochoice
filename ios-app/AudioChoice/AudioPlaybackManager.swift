@@ -30,7 +30,13 @@ final class AudioPlaybackManager: ObservableObject {
 
     private var player: AVPlayer?
     private var timeObserver: Any?
-    private var record: LibraryBookRecord?
+    /// Rebuilds the enforced ranges whenever the record changes, so a scan that arrives while
+    /// the book is open takes effect. Deciding what to skip was previously re-derived on every
+    /// tick, which made that happen for free; now that it is cached, every path that replaces
+    /// the record has to refresh it, and doing it here means none can be forgotten.
+    private var record: LibraryBookRecord? {
+        didSet { rebuildEnforcedRanges() }
+    }
     private var lastHandledEventID: UUID?
     private var itemStatusObservation: NSKeyValueObservation?
 
@@ -84,6 +90,7 @@ final class AudioPlaybackManager: ObservableObject {
                 guard let self, let bookID = self.currentBookID,
                       notification.userInfo?["bookID"] as? UUID == bookID else { return }
                 self.filterSettings = BookFilterSettingsStore.load(bookID)
+                self.rebuildEnforcedRanges()
                 // A range that is no longer filtered should stop being treated as
                 // handled, otherwise re-enabling it within the same session is ignored.
                 self.lastHandledEventID = nil
@@ -99,7 +106,7 @@ final class AudioPlaybackManager: ObservableObject {
         ) { [weak self] _ in
             Task { @MainActor in
                 guard let self else { return }
-                self.persistPosition()
+                self.persistPosition(force: true)
                 await self.syncCurrentProgressToAccount()
             }
         }
@@ -112,7 +119,7 @@ final class AudioPlaybackManager: ObservableObject {
         case .began:
             player?.pause()
             isPlaying = false
-            persistPosition()
+            persistPosition(force: true)
             updateNowPlaying()
             Task { await syncCurrentProgressToAccount() }
         case .ended:
@@ -138,7 +145,7 @@ final class AudioPlaybackManager: ObservableObject {
         // a listener using a filtering audiobook app does not want.
         player?.pause()
         isPlaying = false
-        persistPosition()
+        persistPosition(force: true)
         updateNowPlaying()
     }
 
@@ -165,7 +172,7 @@ final class AudioPlaybackManager: ObservableObject {
     func load(_ record: LibraryBookRecord) {
         guard currentBookID != record.id,
               let fileName = record.localFileName else { return }
-        persistPosition()
+        persistPosition(force: true)
         let previousRecord = currentRecord
         let previousPosition = position
         // Carries the outgoing book's own completion state, not the incoming one's, and
@@ -190,11 +197,15 @@ final class AudioPlaybackManager: ObservableObject {
         // Read synchronously from local storage so the first skip decision is already
         // correct. The account copy is adopted a moment later if it differs.
         self.filterSettings = BookFilterSettingsStore.load(record.id)
+        self.rebuildEnforcedRanges()
+        // The previous book's write time must not throttle this one's first save.
+        self.lastPositionWriteAt = nil
         Task { [id = record.id, accountID = record.accountLibraryID] in
             let settings = await BookFilterSettingsStore.refresh(bookID: id, accountLibraryID: accountID)
             await MainActor.run {
                 guard self.currentBookID == id else { return }
                 self.filterSettings = settings
+                self.rebuildEnforcedRanges()
             }
         }
         playbackError = nil
@@ -234,7 +245,7 @@ final class AudioPlaybackManager: ObservableObject {
         if isPlaying {
             player.pause()
             isPlaying = false
-            persistPosition()
+            persistPosition(force: true)
             Task { await syncCurrentProgressToAccount() }
         } else {
             do {
@@ -357,7 +368,7 @@ final class AudioPlaybackManager: ObservableObject {
     /// replace a real bookmark with the start of the book — the same failure that took
     /// four attempts to pin down on Android. A zero is only believed once the asset has
     /// loaded, or when the listener seeks there deliberately.
-    private func persistPosition(allowingRestart: Bool = false) {
+    private func persistPosition(allowingRestart: Bool = false, force: Bool = false) {
         guard let id = currentBookID else { return }
         let defaults = UserDefaults.standard
         if !allowingRestart, position < Self.minimumTrustedPosition, duration <= 0 {
@@ -367,12 +378,33 @@ final class AudioPlaybackManager: ObservableObject {
         if !allowingRestart, position < Self.minimumTrustedPosition, stored > Self.minimumTrustedPosition {
             return
         }
+        // Ordinary progress is written at a walking pace rather than on every tick. Four
+        // writes a second, for hours, costs battery and disk to record something that only
+        // has to be right when playback stops. Every deliberate save -- pausing, seeking, an
+        // interruption, backgrounding, switching books -- passes `force` and writes at once,
+        // which is what actually protects the listener's place. Only the periodic tick is
+        // throttled, and the position check still lets a large jump through.
+        if !force, !allowingRestart,
+           let last = lastPositionWriteAt,
+           Date().timeIntervalSince(last) < Self.positionWriteInterval,
+           abs(position - stored) < Self.positionWriteInterval * 4 {
+            return
+        }
+        lastPositionWriteAt = Date()
         defaults.set(max(position, 0), forKey: positionKey(id))
         defaults.set(Date(), forKey: "playbackPositionUpdatedAt.\(id.uuidString)")
     }
 
     /// Below this, a reported position is indistinguishable from an unloaded player.
     private static let minimumTrustedPosition: Double = 1
+
+    /// How often routine progress is committed while playing.
+    ///
+    /// Losing at most this much of someone's place after a crash is a fair trade for a
+    /// fraction of the writes. A clean pause, seek or backgrounding still writes at once.
+    private static let positionWriteInterval: Double = 5
+
+    private var lastPositionWriteAt: Date?
 
     func syncCurrentProgressToAccount() async {
         guard let record = currentRecord, let accountID = record.accountLibraryID else { return }
@@ -422,15 +454,21 @@ final class AudioPlaybackManager: ObservableObject {
         // No scan data means nothing can be filtered. That state is published as
         // filterAvailability and shown in the player rather than passing silently,
         // because the audio plays either way and the listener needs to know which.
-        guard let events = record?.scanResult?.events else {
+        guard record?.scanResult != nil else {
             player?.isMuted = false
             activeFilterEvent = nil
             return
         }
-        let matching = events.first { event in
-            guard event.startTime <= position, position < event.endTime,
-                  BookFilterPredicate.shouldSkip(event, settings: filterSettings) else { return false }
-            return true
+
+        // Sorted by start, so the first range starting after the listener rules out every
+        // range behind it.
+        var matching: ScanEvent?
+        for range in enforcedRanges {
+            if range.start > position { break }
+            if position < range.end {
+                matching = range.event
+                break
+            }
         }
         activeFilterEvent = matching
         guard let matching else {
@@ -450,6 +488,21 @@ final class AudioPlaybackManager: ObservableObject {
 
     /// Clears the flagged range before resuming, so its final moment is not replayed.
     private static let filterExitPadding: Double = 0.2
+
+    /// The ranges playback removes, in start order.
+    ///
+    /// Worked out once per book rather than on every tick. Deciding it inline meant running
+    /// the filter predicate over every event twice a second, and that predicate lowercases
+    /// two GUID strings per event -- thousands of string allocations a second on a heavily
+    /// flagged book, purely to answer a question whose answer had not changed.
+    private var enforcedRanges: [(start: Double, end: Double, event: ScanEvent)] = []
+
+    private func rebuildEnforcedRanges() {
+        enforcedRanges = (record?.scanResult?.events ?? [])
+            .filter { BookFilterPredicate.shouldSkip($0, settings: filterSettings) }
+            .sorted { $0.startTime < $1.startTime }
+            .map { (start: $0.startTime, end: $0.endTime, event: $0) }
+    }
 
     private func configureRemoteCommands() {
         let commands = MPRemoteCommandCenter.shared()
