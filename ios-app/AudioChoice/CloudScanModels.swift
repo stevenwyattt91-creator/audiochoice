@@ -175,3 +175,23 @@ struct ExploreCatalogBook: Codable, Identifiable {
     let purchaseURL: URL
     let purchaseProvider: String
 }
+
+/// A book's filter choices as the server stores them.
+///
+/// Categories and groups travel as GUIDs because the server's contract declares them
+/// that way; the individual event and aggregate keys are opaque scanner strings.
+struct BookFilterSettingsUpsertRequest: Codable {
+    let disabledCategoryIDs: [UUID]
+    let disabledGroupIDs: [UUID]
+    let disabledEventKeys: [String]
+    let disabledAggregateKeys: [String]
+}
+
+struct RemoteBookFilterSettings: Codable {
+    let libraryBookID: UUID
+    let disabledCategoryIDs: [UUID]
+    let disabledGroupIDs: [UUID]
+    let disabledEventKeys: [String]
+    let disabledAggregateKeys: [String]
+    let updatedAt: Date
+}

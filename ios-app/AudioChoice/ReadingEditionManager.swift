@@ -145,7 +145,12 @@ final class ReadingEditionManager: ObservableObject {
             removedPassageCount = 0
             return
         }
-        let enabled = (record?.scanResult?.events ?? []).filter(IOSContentTaxonomy.shouldSkip)
+        // The same per-book choices playback uses, so the text never shows a passage the
+        // audio removes, or hides one the listener chose to allow through.
+        let settings = record.map { BookFilterSettingsStore.load($0.id) } ?? .everythingFiltered
+        let enabled = (record?.scanResult?.events ?? []).filter {
+            BookFilterPredicate.shouldSkip($0, settings: settings)
+        }
         let masks = ReaderFilterMasks.build(events: enabled, timings: timings, text: text)
         displayParagraphs = readerDisplayParagraphs(paragraphs, masks: masks)
         removedPassageCount = displayParagraphs.reduce(0) { $0 + $1.removedPassages }

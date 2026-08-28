@@ -156,6 +156,26 @@ struct CloudScanClient {
             path: "v1/library/\(bookID.uuidString)/progress")
     }
 
+    /// This book's filter choices as stored for the account, or nil if none are stored.
+    ///
+    /// A book nobody has adjusted has no server record, and the endpoint answers 404 for
+    /// it. That is an ordinary outcome rather than a failure, so it comes back as nil
+    /// and the caller keeps whatever this device already had.
+    func bookFilterSettings(bookID: UUID) async throws -> RemoteBookFilterSettings? {
+        do {
+            return try await get(path: "v1/library/\(bookID.uuidString)/filter-settings")
+        } catch CloudClientError.server(404, _) {
+            return nil
+        }
+    }
+
+    func saveBookFilterSettings(
+        bookID: UUID,
+        _ value: BookFilterSettingsUpsertRequest
+    ) async throws -> RemoteBookFilterSettings {
+        try await put(value, path: "v1/library/\(bookID.uuidString)/filter-settings")
+    }
+
     /// Sends the reading edition's text up and gets timing ranges back.
     ///
     /// The EPUB text is used in memory to build the map and is never persisted server

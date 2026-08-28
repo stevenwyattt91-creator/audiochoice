@@ -21,6 +21,9 @@ final class AudioPlaybackManager: ObservableObject {
     /// because filtering silently doing nothing is worse than saying so: the listener
     /// would otherwise assume their filters were active.
     @Published private(set) var filterAvailability: FilterAvailability = .unavailable
+    /// The open book's filter choices, held here rather than read from storage on every
+    /// tick. Kept current by `load` and by the filter screen's change notification.
+    @Published private(set) var filterSettings: BookFilterSettings = .everythingFiltered
 
     private var player: AVPlayer?
     private var timeObserver: Any?
@@ -65,6 +68,23 @@ final class AudioPlaybackManager: ObservableObject {
             queue: .main
         ) { [weak self] notification in
             Task { @MainActor in self?.handleRouteChange(notification) }
+        }
+        // Switching a filter off has to affect the book that is already playing. Without
+        // this the change would sit in storage until the book was next opened, so a
+        // listener turning something off would hear it skipped anyway.
+        center.addObserver(
+            forName: .bookFilterSettingsDidChange,
+            object: nil,
+            queue: .main
+        ) { [weak self] notification in
+            Task { @MainActor in
+                guard let self, let bookID = self.currentBookID,
+                      notification.userInfo?["bookID"] as? UUID == bookID else { return }
+                self.filterSettings = BookFilterSettingsStore.load(bookID)
+                // A range that is no longer filtered should stop being treated as
+                // handled, otherwise re-enabling it within the same session is ignored.
+                self.lastHandledEventID = nil
+            }
         }
         // Progress was otherwise only pushed on pause or when switching books, so
         // leaving the app mid-chapter left the server behind and another device would
@@ -158,6 +178,16 @@ final class AudioPlaybackManager: ObservableObject {
         self.activeFilterEvent = nil
         self.skippedEventCount = 0
         self.filterAvailability = FilterAvailability.of(record)
+        // Read synchronously from local storage so the first skip decision is already
+        // correct. The account copy is adopted a moment later if it differs.
+        self.filterSettings = BookFilterSettingsStore.load(record.id)
+        Task { [id = record.id, accountID = record.accountLibraryID] in
+            let settings = await BookFilterSettingsStore.refresh(bookID: id, accountLibraryID: accountID)
+            await MainActor.run {
+                guard self.currentBookID == id else { return }
+                self.filterSettings = settings
+            }
+        }
         playbackError = nil
         currentBookID = record.id
         duration = 0
@@ -320,7 +350,7 @@ final class AudioPlaybackManager: ObservableObject {
         }
         let matching = events.first { event in
             guard event.startTime <= position, position < event.endTime,
-                  IOSContentTaxonomy.shouldSkip(event) else { return false }
+                  BookFilterPredicate.shouldSkip(event, settings: filterSettings) else { return false }
             return true
         }
         activeFilterEvent = matching

@@ -69,11 +69,13 @@ struct BookDetailScreen: View {
                         }
                         Divider()
                         if let record {
-                            NavigationLink { FilterEventListScreen(record: record) } label: {
+                            NavigationLink { BookFiltersScreen(record: record) } label: {
                                 detailRow(
                                     "Filters",
                                     icon: "ear.badge.checkmark",
-                                    value: record.scanResult.map { "\(IOSContentTaxonomy.controlCount($0.events)) Events" } ?? "Pending"
+                                    value: record.scanResult.map {
+                                        "\(PlaybackFilterTaxonomy.controlCount($0.events)) controls"
+                                    } ?? "Pending"
                                 )
                             }
                         } else {
@@ -406,7 +408,7 @@ struct PlayerScreen: View {
                     } else { tool("list.bullet", "Chapters") }
 
                     if let record {
-                        NavigationLink { FilterEventListScreen(record: record) } label: { tool("shield", "Filters") }
+                        NavigationLink { BookFiltersScreen(record: record) } label: { tool("shield", "Filters") }
                     } else { tool("shield", "Filters") }
 
                     Button { showingBookmarks = true } label: { tool("bookmark", "Bookmarks") }

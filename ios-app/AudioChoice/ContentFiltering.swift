@@ -33,19 +33,6 @@ enum FilterCategory: String, CaseIterable, Identifiable, Codable {
     }
 }
 
-struct FilterEventGroup: Identifiable {
-    let id: UUID
-    let title: String
-    let events: [ScanEvent]
-}
-
-struct FilterEventCategoryGroup: Identifiable {
-    let id: UUID
-    let title: String
-    let icon: String
-    let groups: [FilterEventGroup]
-}
-
 enum IOSContentTaxonomy {
     private static let sexual = UUID(uuidString: "10000000-0000-0000-0000-000000000001")!
     private static let profanity = UUID(uuidString: "20000000-0000-0000-0000-000000000001")!
@@ -53,8 +40,11 @@ enum IOSContentTaxonomy {
     private static let substances = UUID(uuidString: "40000000-0000-0000-0000-000000000001")!
     private static let blasphemy = UUID(uuidString: "50000000-0000-0000-0000-000000000001")!
     private static let selfHarm = UUID(uuidString: "60000000-0000-0000-0000-000000000001")!
-    private static let explicit = UUID(uuidString: "11100000-0000-0000-0000-000000000001")!
 
+    /// Which broad category an event belongs to, for labelling only.
+    ///
+    /// What actually gets filtered is decided by PlaybackFilterTaxonomy and the book's
+    /// own settings, not here.
     static func category(for event: ScanEvent) -> FilterCategory? {
         switch event.categoryID {
         case sexual: .sexualContent
@@ -65,137 +55,6 @@ enum IOSContentTaxonomy {
         case selfHarm: .selfHarm
         default: nil
         }
-    }
-
-    static func detail(for event: ScanEvent) -> String {
-        if let aggregateDisplay = event.aggregateDisplay, !aggregateDisplay.isEmpty {
-            return aggregateDisplay
-        }
-        if let safeDescription = event.safeDescription, !safeDescription.isEmpty {
-            return safeDescription
-        }
-        if event.eventID == explicit { return "Explicit sexual content" }
-        return category(for: event)?.title ?? "Unsupported event"
-    }
-
-    static func userFacingEvents(_ events: [ScanEvent]) -> [ScanEvent] {
-        var aggregateKeys = Set<String>()
-        return events.sorted { $0.startTime < $1.startTime }.filter { event in
-            guard shouldSkip(event) else { return false }
-            guard let key = event.aggregateKey, !key.isEmpty else { return true }
-            return aggregateKeys.insert(key).inserted
-        }
-    }
-
-    static func shouldSkip(_ event: ScanEvent) -> Bool {
-        guard let category = category(for: event) else { return false }
-        // A listener's choice has to actually reach playback. This previously called
-        // a stub that always returned true, so every toggle on the filter screen was
-        // decorative and the screen displayed states that did not match behaviour.
-        guard FilterPreferences.isEnabled(category) else { return false }
-        guard category == .graphicViolence else { return true }
-        // The scanner can retain lower-severity violence for internal review,
-        // but playback only skips the severe Android-visible groups.
-        let severeViolenceGroups: Set<String> = [
-            "31000000-0000-0000-0000-000000000003", // graphic violence / gore
-            "31000000-0000-0000-0000-000000000004"  // torture
-        ]
-        return severeViolenceGroups.contains(event.groupID.uuidString.uppercased())
-    }
-
-    static func controlCount(_ events: [ScanEvent]) -> Int {
-        userFacingEvents(events).count
-    }
-
-    static func hierarchy(for events: [ScanEvent]) -> [FilterEventCategoryGroup] {
-        let visible = userFacingEvents(events)
-        let byCategory = Dictionary(grouping: visible) { $0.categoryID }
-        return FilterCategory.allCases.compactMap { category in
-            guard let categoryID = categoryID(for: category), let categoryEvents = byCategory[categoryID] else { return nil }
-            let groups = Dictionary(grouping: categoryEvents) { $0.groupID }
-                .map { groupID, values in
-                    FilterEventGroup(
-                        id: groupID,
-                        title: groupTitle(for: groupID) ?? "Other detected events",
-                        events: values.sorted { $0.startTime < $1.startTime }
-                    )
-                }
-                .sorted { $0.events.first?.startTime ?? 0 < $1.events.first?.startTime ?? 0 }
-            return FilterEventCategoryGroup(
-                id: categoryID,
-                title: category == .graphicViolence ? "Violence" : category.title,
-                icon: category.icon,
-                groups: groups
-            )
-        }
-    }
-
-    private static func categoryID(for category: FilterCategory) -> UUID? {
-        switch category {
-        case .sexualContent: sexual
-        case .profanity: profanity
-        case .graphicViolence: violence
-        case .drugsAndAlcohol: substances
-        case .blasphemy: blasphemy
-        case .selfHarm: selfHarm
-        }
-    }
-
-    private static func groupTitle(for id: UUID) -> String? {
-        let groups: [String: String] = [
-            "11000000-0000-0000-0000-000000000001": "Suggestive dialogue",
-            "11000000-0000-0000-0000-000000000002": "Sexual references",
-            "11000000-0000-0000-0000-000000000003": "Nudity",
-            "11000000-0000-0000-0000-000000000004": "Implied sexual activity",
-            "11000000-0000-0000-0000-000000000005": "Explicit sexual activity",
-            "11000000-0000-0000-0000-000000000006": "Complete sex scenes",
-            "21000000-0000-0000-0000-000000000001": "Mild profanity",
-            "21000000-0000-0000-0000-000000000002": "Strong profanity",
-            "21000000-0000-0000-0000-000000000003": "Sexual profanity",
-            "21000000-0000-0000-0000-000000000004": "Slurs / derogatory language",
-            "31000000-0000-0000-0000-000000000003": "Graphic violence / gore",
-            "31000000-0000-0000-0000-000000000004": "Torture",
-            "31000000-0000-0000-0000-000000000006": "Violence involving children",
-            "31000000-0000-0000-0000-000000000007": "Violence involving animals",
-            "41000000-0000-0000-0000-000000000001": "Alcohol use",
-            "41000000-0000-0000-0000-000000000002": "Intoxication",
-            "41000000-0000-0000-0000-000000000003": "Drug references",
-            "41000000-0000-0000-0000-000000000004": "Drug use",
-            "41000000-0000-0000-0000-000000000005": "Drug abuse / overdose",
-            "51000000-0000-0000-0000-000000000001": "Religious profanity",
-            "51000000-0000-0000-0000-000000000002": "Blasphemous statements",
-            "61000000-0000-0000-0000-000000000001": "Self-harm references",
-            "61000000-0000-0000-0000-000000000002": "Suicidal thoughts",
-            "61000000-0000-0000-0000-000000000003": "Suicide attempt",
-            "61000000-0000-0000-0000-000000000004": "Depiction of self-harm / suicide"
-        ]
-        return groups[id.uuidString.uppercased()]
-    }
-}
-
-/// The listener's per-category filter choices, as playback sees them.
-///
-/// Backed by the same UserDefaults keys the filter screen writes through
-/// `@AppStorage`, because a preference that playback never consults is a lie told to
-/// someone who may be relying on it.
-enum FilterPreferences {
-    static func storageKey(_ category: FilterCategory) -> String {
-        "filterEnabled.\(category.rawValue)"
-    }
-
-    /// Filtered until the listener says otherwise.
-    ///
-    /// `UserDefaults.bool(forKey:)` reports false for a key that was never written,
-    /// which for a content filter means "expose everything". Anyone who had not opened
-    /// the filter screen would silently lose protection they never knew they had, so
-    /// an absent value resolves to on rather than to the type default.
-    static let defaultEnabled = true
-
-    static func isEnabled(_ category: FilterCategory) -> Bool {
-        let defaults = UserDefaults.standard
-        let key = storageKey(category)
-        guard defaults.object(forKey: key) != nil else { return defaultEnabled }
-        return defaults.bool(forKey: key)
     }
 }
 
@@ -216,32 +75,5 @@ enum FilterAvailability {
         guard let record else { return .unavailable }
         if record.scanResult != nil { return .available }
         return record.pendingScanID != nil ? .loading : .unavailable
-    }
-}
-
-struct FilterCorrection: Codable, Identifiable {
-    let id: UUID
-    let bookID: UUID
-    let scanEventID: UUID
-    let reportedAt: Date
-}
-
-enum FilterCorrectionStore {
-    private static let key = "filterCorrections.v1"
-
-    static func report(bookID: UUID, eventID: UUID) {
-        var values = load()
-        guard !values.contains(where: { $0.bookID == bookID && $0.scanEventID == eventID }) else { return }
-        values.append(FilterCorrection(id: UUID(), bookID: bookID, scanEventID: eventID, reportedAt: Date()))
-        if let data = try? JSONEncoder().encode(values) { UserDefaults.standard.set(data, forKey: key) }
-    }
-
-    static func contains(bookID: UUID, eventID: UUID) -> Bool {
-        load().contains { $0.bookID == bookID && $0.scanEventID == eventID }
-    }
-
-    private static func load() -> [FilterCorrection] {
-        guard let data = UserDefaults.standard.data(forKey: key) else { return [] }
-        return (try? JSONDecoder().decode([FilterCorrection].self, from: data)) ?? []
     }
 }
