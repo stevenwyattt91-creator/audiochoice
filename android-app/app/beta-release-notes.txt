@@ -14,6 +14,7 @@ Reading edition (attach an EPUB)
 - Filtered passages are removed from the text, not blacked out
 - Your reading place is remembered per book
 - If read-along timing is unavailable, the app now says why instead of giving one vague message
+- OpenDyslexic typeface option, the same one Kindle offers, under Reading settings
 Titles and details
 - Titles now come from the audiobook file's own details rather than its filename
 - Narrator is shown when the file provides it

@@ -71,6 +71,7 @@ import com.audiochoice.mobile.player.FilterAvailability
 import com.audiochoice.mobile.player.PlayerUiState
 import com.audiochoice.mobile.player.enabledScanEvents
 import com.audiochoice.mobile.reader.ReaderMask
+import com.audiochoice.mobile.reader.ReaderFont
 import com.audiochoice.mobile.reader.ReaderSettings
 import com.audiochoice.mobile.reader.ReaderTheme
 import com.audiochoice.mobile.reader.indexOfCharacter
@@ -81,6 +82,7 @@ import com.audiochoice.mobile.reader.readerTimeForCharacter
 import com.audiochoice.mobile.player.PlaybackFilterTaxonomy
 import com.audiochoice.mobile.security.ParentalControlsStore
 import com.audiochoice.mobile.support.SupportViewModel
+import com.audiochoice.mobile.ui.theme.readerFontFamily
 import com.audiochoice.mobile.ui.theme.ChoiceGreen
 import com.audiochoice.mobile.ui.theme.ChoiceMuted
 import com.audiochoice.mobile.ui.theme.ChoiceOutline
@@ -2335,8 +2337,12 @@ private fun ReaderScreen(
                     Text(
                         display.displayText,
                         color = palette.ink,
+                        fontFamily = readerFontFamily(settings.font),
                         fontSize = (READER_BASE_FONT_SP * settings.fontScale).sp,
-                        lineHeight = (READER_BASE_LINE_SP * settings.fontScale).sp,
+                        lineHeight = (
+                            READER_BASE_LINE_SP * settings.fontScale *
+                                ReaderSettings.lineHeightFactor(settings.font)
+                            ).sp,
                         modifier = Modifier
                             .fillMaxWidth()
                             .then(
@@ -2512,6 +2518,32 @@ private fun ReaderSettingsDialog(
                     selected = settings.fontScale,
                     label = ReaderSettings::fontScaleLabel,
                     onSelect = { onSettingsChanged(settings.copy(fontScale = it)) },
+                )
+                Spacer(Modifier.height(16.dp))
+                Text("Typeface", fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+                Spacer(Modifier.height(6.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    ReaderFont.entries.forEach { font ->
+                        FilterChip(
+                            selected = settings.font == font,
+                            onClick = { onSettingsChanged(settings.copy(font = font)) },
+                            // Each chip renders in the face it selects, so the choice
+                            // can be judged by eye rather than by name.
+                            label = {
+                                Text(
+                                    ReaderSettings.fontLabel(font),
+                                    fontFamily = readerFontFamily(font),
+                                )
+                            },
+                        )
+                    }
+                }
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    "OpenDyslexic weights the bottom of each letter and varies similar " +
+                        "shapes, which can make characters harder to transpose or flip.",
+                    color = ChoiceMuted,
+                    fontSize = 11.sp,
                 )
                 Spacer(Modifier.height(16.dp))
                 Text("Margins", fontWeight = FontWeight.SemiBold, fontSize = 13.sp)

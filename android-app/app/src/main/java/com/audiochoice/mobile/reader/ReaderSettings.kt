@@ -6,6 +6,17 @@ import kotlinx.serialization.Serializable
 enum class ReaderTheme { LIGHT, SEPIA, DARK }
 
 /**
+ * Typeface for the reading edition.
+ *
+ * [OPEN_DYSLEXIC] is the same typeface Kindle offers for the same reason: weighted
+ * letter bottoms and deliberately asymmetric shapes make it harder to rotate or
+ * transpose similar characters. Bundled rather than downloaded so it works offline
+ * and cannot disappear.
+ */
+@Serializable
+enum class ReaderFont { SYSTEM, OPEN_DYSLEXIC }
+
+/**
  * Reading preferences. These are device-wide rather than per-book: a listener's
  * preferred text size and theme should not reset every time they open a
  * different audiobook.
@@ -19,6 +30,7 @@ data class ReaderSettings(
     /** Sepia matches the paper palette the reader shipped with. */
     val theme: ReaderTheme = ReaderTheme.SEPIA,
     val marginScale: Float = 1f,
+    val font: ReaderFont = ReaderFont.SYSTEM,
     /**
      * Highlight and scroll the text to match audio position, and allow tapping a
      * paragraph to seek. On by default: following along is the reason to pair a
@@ -41,6 +53,21 @@ data class ReaderSettings(
             scale <= 0.6f -> "Narrow"
             scale <= 1f -> "Normal"
             else -> "Wide"
+        }
+
+        fun fontLabel(font: ReaderFont): String = when (font) {
+            ReaderFont.SYSTEM -> "Standard"
+            ReaderFont.OPEN_DYSLEXIC -> "OpenDyslexic"
+        }
+
+        /**
+         * OpenDyslexic sets a larger x-height with heavy letter bottoms, so lines sit
+         * visually closer than the same measurement in the default face. A little
+         * extra leading keeps the weighted baselines from crowding.
+         */
+        fun lineHeightFactor(font: ReaderFont): Float = when (font) {
+            ReaderFont.SYSTEM -> 1f
+            ReaderFont.OPEN_DYSLEXIC -> 1.12f
         }
     }
 }
