@@ -103,6 +103,20 @@ Assert(
     EditionTitleFormatter.Format(fourthWingPart1) == "Fourth Wing (Part 1 of 2) (Dramatized Adaptation)",
     "Fourth Wing Part 1 fallback title was not canonicalized.");
 
+// The other half of the release, repaired by migration 026. It arrived titled plainly, and
+// what has to hold is that the structured columns alone produce the full name.
+Assert(
+    EditionTitleFormatter.Format("Fourth Wing", "Dramatized Adaptation", 2, 2)
+        == "Fourth Wing (Part 2 of 2) (Dramatized Adaptation)",
+    "Fourth Wing Part 2 did not render from its part and edition columns.");
+// That migration also writes the finished title into the row. Formatting has to be idempotent
+// or the wording would be appended a second time every time the entry is displayed.
+Assert(
+    EditionTitleFormatter.Format(
+        "Fourth Wing (Part 2 of 2) (Dramatized Adaptation)", "Dramatized Adaptation", 2, 2)
+        == "Fourth Wing (Part 2 of 2) (Dramatized Adaptation)",
+    "Re-formatting a stored Part 2 title doubled its part or edition wording.");
+
 var persistenceFolder = Path.Combine(
     Path.GetTempPath(),
     $"audiochoice-catalog-{Guid.NewGuid()}");
