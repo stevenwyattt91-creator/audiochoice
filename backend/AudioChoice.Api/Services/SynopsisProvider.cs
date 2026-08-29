@@ -202,6 +202,12 @@ public sealed class OpenLibrarySynopsisProvider(
         var quoted = QuotedRun.Matches(trimmed).Sum(match => match.Length);
         if (quoted > trimmed.Length * 0.7) return null;
 
+        // Translated text that the record does not admit to. Editions frequently declare no
+        // language at all, so the declared field cannot be the only check: Dungeon Crawler
+        // Carl's French edition and Project Hail Mary's Spanish one both declare nothing and
+        // would otherwise have been stored against an English audiobook.
+        if (!LooksEnglish(trimmed)) return null;
+
         // Notes about the catalogue record rather than the book.
         var lowered = trimmed.ToLowerInvariant();
         string[] recordNotes =
@@ -217,6 +223,36 @@ public sealed class OpenLibrarySynopsisProvider(
 
         return trimmed.Length > MaximumLength ? trimmed[..MaximumLength] : trimmed;
     }
+
+    /// <summary>
+    /// Whether text reads as English, judged on how much of it is English function words.
+    /// </summary>
+    /// <remarks>
+    /// Deliberately crude, because it only has to separate English prose from another
+    /// language entirely. Measured against real records the margin is wide: English
+    /// descriptions run a fifth to a third function words, while French and Spanish ones
+    /// score nothing at all, so the threshold sits far below anything English.
+    /// </remarks>
+    public static bool LooksEnglish(string? value)
+    {
+        var words = WordPattern.Matches((value ?? "").ToLowerInvariant())
+            .Select(match => match.Value)
+            .ToArray();
+        if (words.Length == 0) return false;
+        var hits = words.Count(EnglishFunctionWords.Contains);
+        return hits >= 3 && hits >= words.Length * 0.05;
+    }
+
+    private static readonly System.Text.RegularExpressions.Regex WordPattern = new(
+        "[a-z']+", System.Text.RegularExpressions.RegexOptions.Compiled);
+
+    /// Words common in English prose and absent from the languages being screened out.
+    private static readonly HashSet<string> EnglishFunctionWords = new(StringComparer.Ordinal)
+    {
+        "the", "and", "of", "to", "with", "his", "her", "that", "from", "was", "who",
+        "which", "they", "she", "he", "is", "are", "has", "have", "been", "will", "not",
+        "but", "their", "when", "all"
+    };
 
     /// A closing quotation mark followed by an attribution: "...," she says.
     private static readonly System.Text.RegularExpressions.Regex SpeechTag = new(

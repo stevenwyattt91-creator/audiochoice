@@ -988,8 +988,12 @@ Assert(
     "A note about the edition was accepted as a description of the story.");
 Assert(OpenLibrarySynopsisProvider.ReadableSynopsis(null) is null, "Null text was accepted.");
 Assert(OpenLibrarySynopsisProvider.ReadableSynopsis("   ") is null, "Blank text was accepted.");
+// Real English prose rather than filler, because the gate now also judges whether text is
+// English and a run of one letter is not.
+var overlongSynopsis = string.Concat(Enumerable.Repeat(realSynopsis + " ", 20));
+Assert(overlongSynopsis.Length > 4000, "The oversized fixture was not actually oversized.");
 Assert(
-    OpenLibrarySynopsisProvider.ReadableSynopsis(new string('x', 5000))!.Length == 4000,
+    OpenLibrarySynopsisProvider.ReadableSynopsis(overlongSynopsis)!.Length == 4000,
     "An oversized looked-up synopsis was not clamped to the column width.");
 
 // A popular book's editions include translations, and each carries its description in its own
@@ -1013,6 +1017,25 @@ Assert(OpenLibrarySynopsisProvider.IsEnglish(Record("""{"title":"Red Rising"}"""
     "A record that declares no language was rejected.");
 Assert(OpenLibrarySynopsisProvider.IsEnglish(Record("""{"languages":[]}""")),
     "A record with an empty language list was rejected.");
+
+// The declared language cannot be the only check. Both of these are real edition records that
+// declare no language at all, so the field alone would have stored them against an English
+// audiobook.
+var frenchBlurb = "Bienvenue, chers crawlers. Bienvenue dans le donjon. Survivre est le seul "
+    + "objectif, et le monde entier regarde le spectacle se derouler sans aucune pitie.";
+var spanishBlurb = "La nueva novela del autor de El marciano, que se convertira en una "
+    + "pelicula, con un protagonista que despierta sin recordar nada de su mision.";
+Assert(!OpenLibrarySynopsisProvider.LooksEnglish(frenchBlurb),
+    "French text was accepted as an English synopsis.");
+Assert(!OpenLibrarySynopsisProvider.LooksEnglish(spanishBlurb),
+    "Spanish text was accepted as an English synopsis.");
+Assert(OpenLibrarySynopsisProvider.ReadableSynopsis(frenchBlurb) is null,
+    "French text passed the synopsis gate.");
+Assert(OpenLibrarySynopsisProvider.LooksEnglish(realSynopsis),
+    "An English synopsis was judged not to be English.");
+Assert(OpenLibrarySynopsisProvider.LooksEnglish(pullQuoteBlurb),
+    "An English blurb opening with a pull-quote was judged not to be English.");
+Assert(!OpenLibrarySynopsisProvider.LooksEnglish(""), "Empty text was judged English.");
 
 // Curating the catalogue. Hiding has to be reversible and has to leave the scan alone: the
 // entry comes off the store front, but a listener who owns that file keeps its filter
