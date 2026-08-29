@@ -950,6 +950,48 @@ Assert(ExploreCatalog.Deduplicate([
     ]).Count == 2,
     "Two different readings of one title were merged.");
 
+// Looked-up synopses. Open Library's description field is free text, and a good share of it
+// is not a synopsis, so what comes back has to be judged before it is shown under a heading
+// reading "About this audiobook".
+var realSynopsis = "Darrow is a Red, a member of the lowest caste in the color-coded society "
+    + "of the future. Like his fellow Reds, he works all day, believing that he and his people "
+    + "are making the surface of Mars livable for future generations.";
+Assert(OpenLibrarySynopsisProvider.ReadableSynopsis(realSynopsis) == realSynopsis,
+    "A genuine synopsis was rejected.");
+// This is verbatim what Open Library returns for Red Rising: dialogue from chapter one.
+var bookExcerpt = "\"I live for the dream that my children will be born free,\" she says. "
+    + "\"That they will be what they like. That they will own the land their father gave them.\" "
+    + "\"I live for you,\" I say sadly.";
+Assert(OpenLibrarySynopsisProvider.ReadableSynopsis(bookExcerpt) is null,
+    "A passage quoted from the book was accepted as a synopsis.");
+// Publishers' own copy often leads with a pull-quote. Rejecting anything that opens on a
+// quotation mark threw away the real synopsis for Iron Flame, so the test is a speech tag
+// rather than a leading quote.
+var pullQuoteBlurb = "\u201CThe first year is when some of us lose our lives. The second year "
+    + "is when the rest of us lose our humanity.\u201D Everyone expected Violet Sorrengail to "
+    + "die during her first year at Basgiath War College.";
+Assert(OpenLibrarySynopsisProvider.ReadableSynopsis(pullQuoteBlurb) == pullQuoteBlurb,
+    "A blurb opening with a pull-quote was rejected.");
+// Markdown emphasis and hard breaks are common in these records and are noise once rendered.
+Assert(
+    OpenLibrarySynopsisProvider.ReadableSynopsis(
+        "**The apocalypse will be televised!**\r\n\r\nA man, his ex-girlfriend's cat, and a "
+        + "sadistic game show unlike anything in the universe await the last of humanity.")
+        is { } cleaned && !cleaned.Contains('*') && !cleaned.Contains('\r'),
+    "Markdown emphasis or hard breaks survived into a stored synopsis.");
+Assert(OpenLibrarySynopsisProvider.ReadableSynopsis("Book 1 of the Red Rising series.") is null,
+    "A one-line note was accepted as a synopsis.");
+Assert(
+    OpenLibrarySynopsisProvider.ReadableSynopsis(
+        "This edition contains the complete text of the novel together with a new afterword "
+        + "by the author and a reading group guide for book clubs.") is null,
+    "A note about the edition was accepted as a description of the story.");
+Assert(OpenLibrarySynopsisProvider.ReadableSynopsis(null) is null, "Null text was accepted.");
+Assert(OpenLibrarySynopsisProvider.ReadableSynopsis("   ") is null, "Blank text was accepted.");
+Assert(
+    OpenLibrarySynopsisProvider.ReadableSynopsis(new string('x', 5000))!.Length == 4000,
+    "An oversized looked-up synopsis was not clamped to the column width.");
+
 // Curating the catalogue. Hiding has to be reversible and has to leave the scan alone: the
 // entry comes off the store front, but a listener who owns that file keeps its filter
 // results, and putting it back must not need a database edit.

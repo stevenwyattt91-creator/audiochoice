@@ -511,9 +511,13 @@ struct PlayerScreen: View {
                     Button { showingBookmarks = true } label: { tool("bookmark", "Bookmarks") }
                 }
                 .padding(.top, 18)
-                Spacer(minLength: 8)
+                Spacer(minLength: 12)
             }
             .padding(.horizontal, 20)
+            // Clearance for the tab bar. The player fills the tab and its background
+            // deliberately runs under the bar, which left the speed, chapter, filter and
+            // bookmark row sitting behind it and partly unreadable.
+            .padding(.bottom, 28)
         }
         .background(ACTheme.background.ignoresSafeArea())
         .navigationBarTitleDisplayMode(.inline)

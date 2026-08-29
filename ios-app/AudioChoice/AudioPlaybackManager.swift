@@ -227,6 +227,10 @@ final class AudioPlaybackManager: ObservableObject {
         }
         player = AVPlayer(playerItem: item)
         position = UserDefaults.standard.double(forKey: positionKey(record.id))
+        // Speed is a per-book choice, not a global setting. A listener who slows down one
+        // narrator does not want every other book slowed, and does not want to set it again
+        // each time they come back to this one.
+        playbackRate = storedRate(for: record.id)
         player?.seek(to: CMTime(seconds: position, preferredTimescale: 600))
         addTimeObserver()
         Task {
@@ -319,6 +323,9 @@ final class AudioPlaybackManager: ObservableObject {
     func setRate(_ rate: Float) {
         playbackRate = rate
         if isPlaying { player?.rate = rate }
+        if let id = currentBookID {
+            UserDefaults.standard.set(Double(rate), forKey: rateKey(id))
+        }
         updateNowPlaying()
     }
 
@@ -431,6 +438,9 @@ final class AudioPlaybackManager: ObservableObject {
     func setFinished(_ value: Bool) {
         guard let id = currentBookID else { return }
         isFinished = value
+        // A finished book starts over at normal speed. The chosen speed suited getting
+        // through this narrator once; it should not silently govern a re-listen.
+        if value { UserDefaults.standard.removeObject(forKey: rateKey(id)) }
         let updated = AudiobookLibraryStore.setFinished(value, for: id)
         if let updated { record = updated; currentRecord = updated }
         guard let accountID = updated?.accountLibraryID ?? currentRecord?.accountLibraryID else {
@@ -444,6 +454,24 @@ final class AudioPlaybackManager: ObservableObject {
     }
 
     private func positionKey(_ id: UUID) -> String { "playbackPosition.\(id.uuidString)" }
+
+    private func rateKey(_ id: UUID) -> String { "playbackRate.\(id.uuidString)" }
+
+    /// The speed last chosen for this book, or normal speed for one never adjusted.
+    ///
+    /// Clamped to the range the player offers, so a value left by an older build, or an
+    /// absent one reading as zero, cannot leave a book playing at a speed the controls
+    /// cannot express or silently not playing at all.
+    private func storedRate(for id: UUID) -> Float {
+        let stored = UserDefaults.standard.double(forKey: rateKey(id))
+        guard stored > 0 else { return 1 }
+        return min(max(Float(stored), Self.minimumRate), Self.maximumRate)
+    }
+
+    /// The bounds the speed menu offers. A stored value outside them could not be undone
+    /// from the controls.
+    private static let minimumRate: Float = 0.75
+    private static let maximumRate: Float = 2
 
     private func updateChapter() {
         currentChapterTitle = record?.chapterMarkers?
