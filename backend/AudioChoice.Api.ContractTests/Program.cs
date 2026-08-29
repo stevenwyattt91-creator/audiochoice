@@ -992,6 +992,28 @@ Assert(
     OpenLibrarySynopsisProvider.ReadableSynopsis(new string('x', 5000))!.Length == 4000,
     "An oversized looked-up synopsis was not clamped to the column width.");
 
+// A popular book's editions include translations, and each carries its description in its own
+// language. Red Rising's first listed edition is Brazilian, so without this the catalogue got
+// Portuguese prose for an English audiobook.
+static System.Text.Json.JsonElement Record(string json) =>
+    System.Text.Json.JsonDocument.Parse(json).RootElement;
+Assert(
+    OpenLibrarySynopsisProvider.IsEnglish(Record("""{"languages":[{"key":"/languages/eng"}]}""")),
+    "An English edition was rejected.");
+Assert(
+    !OpenLibrarySynopsisProvider.IsEnglish(Record("""{"languages":[{"key":"/languages/por"}]}""")),
+    "A Portuguese edition was accepted as a source of English prose.");
+Assert(
+    OpenLibrarySynopsisProvider.IsEnglish(
+        Record("""{"languages":[{"key":"/languages/por"},{"key":"/languages/eng"}]}""")),
+    "A bilingual edition including English was rejected.");
+// Work records generally omit the field, and most records that omit it are English. Rejecting
+// those would discard the majority of usable descriptions.
+Assert(OpenLibrarySynopsisProvider.IsEnglish(Record("""{"title":"Red Rising"}""")),
+    "A record that declares no language was rejected.");
+Assert(OpenLibrarySynopsisProvider.IsEnglish(Record("""{"languages":[]}""")),
+    "A record with an empty language list was rejected.");
+
 // Curating the catalogue. Hiding has to be reversible and has to leave the scan alone: the
 // entry comes off the store front, but a listener who owns that file keeps its filter
 // results, and putting it back must not need a database edit.

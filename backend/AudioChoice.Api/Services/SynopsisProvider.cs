@@ -41,11 +41,23 @@ public sealed class OpenLibrarySynopsisProvider(
         if (string.IsNullOrWhiteSpace(title)) return null;
         try
         {
-            var workKey = await FindWorkKey(title, fingerprint.Author, cancellationToken);
-            if (workKey is null) return null;
-            var description = await ReadDescription(workKey, cancellationToken);
-            var readable = ReadableSynopsis(description);
-            return readable is null ? null : $"{readable}\n\n{Attribution}";
+            var match = await FindWork(title, fingerprint.Author, cancellationToken);
+            if (match is null) return null;
+            // The work record first, then that work's editions. A work's description is
+            // community-written and is sometimes a passage from the book rather than a
+            // summary; an edition's is usually the publisher's own copy. Red Rising is the
+            // case in point: its work record holds dialogue from chapter one while its
+            // editions carry the real synopsis, so stopping at the work found nothing usable.
+            var candidates = new List<string> { match.Value.WorkKey };
+            candidates.AddRange(match.Value.EditionKeys.Take(MaximumEditionLookups)
+                .Select(key => $"/books/{key}"));
+            foreach (var key in candidates)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                var readable = ReadableSynopsis(await ReadDescription(key, cancellationToken));
+                if (readable is not null) return $"{readable}\n\n{Attribution}";
+            }
+            return null;
         }
         catch (Exception error) when (error is HttpRequestException or TaskCanceledException or JsonException)
         {
@@ -57,14 +69,25 @@ public sealed class OpenLibrarySynopsisProvider(
         }
     }
 
+    /// <summary>
+    /// How many of a work's editions to consult before giving up.
+    /// </summary>
+    /// <remarks>
+    /// A popular book has dozens. Bounded so filling one book's synopsis cannot turn into
+    /// thirty requests to someone else's service.
+    /// </remarks>
+    /// Eight because translations are interleaved with English printings and are skipped on
+    /// sight: Red Rising's first English edition is the sixth listed.
+    private const int MaximumEditionLookups = 8;
+
     /// <summary>Finds the work whose title and author best match this edition.</summary>
-    private async Task<string?> FindWorkKey(
+    private async Task<(string WorkKey, string[] EditionKeys)?> FindWork(
         string title, string? author, CancellationToken cancellationToken)
     {
         var query = Uri.EscapeDataString(
             string.Join(' ', new[] { title, author }.Where(value => !string.IsNullOrWhiteSpace(value))));
         var response = await client.GetFromJsonAsync<JsonElement>(
-            $"search.json?q={query}&fields=key,title,author_name&limit=5", cancellationToken);
+            $"search.json?q={query}&fields=key,title,author_name,edition_key&limit=5", cancellationToken);
         if (!response.TryGetProperty("docs", out var docs) || docs.ValueKind != JsonValueKind.Array)
         {
             return null;
@@ -85,15 +108,28 @@ public sealed class OpenLibrarySynopsisProvider(
             {
                 continue;
             }
-            return workKey;
+            var editionKeys = doc.TryGetProperty("edition_key", out var editions) &&
+                editions.ValueKind == JsonValueKind.Array
+                ? editions.EnumerateArray()
+                    .Select(value => value.GetString())
+                    .Where(value => !string.IsNullOrWhiteSpace(value))
+                    .Select(value => value!)
+                    .ToArray()
+                : [];
+            return (workKey, editionKeys);
         }
         return null;
     }
 
-    private async Task<string?> ReadDescription(string workKey, CancellationToken cancellationToken)
+    /// <param name="recordKey">A work or edition key, with or without a leading slash.</param>
+    private async Task<string?> ReadDescription(string recordKey, CancellationToken cancellationToken)
     {
         var work = await client.GetFromJsonAsync<JsonElement>(
-            $"{workKey.TrimStart('/')}.json", cancellationToken);
+            $"{recordKey.TrimStart('/')}.json", cancellationToken);
+        // A popular book's editions include translations, and those carry their description
+        // in the translated language. Red Rising's first listed edition is Brazilian, so
+        // taking the first edition with any description at all produced Portuguese prose.
+        if (!IsEnglish(work)) return null;
         if (!work.TryGetProperty("description", out var description)) return null;
         // Older records store a bare string; newer ones a typed object.
         return description.ValueKind switch
@@ -104,6 +140,28 @@ public sealed class OpenLibrarySynopsisProvider(
                 : null,
             _ => null
         };
+    }
+
+    /// <summary>
+    /// Whether a record is in English, so far as it says.
+    /// </summary>
+    /// <remarks>
+    /// Records that declare no language are accepted: most are English, and work records
+    /// generally omit the field entirely. Only an explicit other language is rejected.
+    /// </remarks>
+    public static bool IsEnglish(JsonElement record)
+    {
+        if (!record.TryGetProperty("languages", out var languages) ||
+            languages.ValueKind != JsonValueKind.Array)
+        {
+            return true;
+        }
+        var declared = languages.EnumerateArray()
+            .Select(value => value.TryGetProperty("key", out var key) ? key.GetString() : null)
+            .Where(value => value is not null)
+            .ToArray();
+        return declared.Length == 0 ||
+            declared.Any(value => value!.EndsWith("/eng", StringComparison.OrdinalIgnoreCase));
     }
 
     /// <summary>The shortest text worth showing as a synopsis from a lookup.</summary>
