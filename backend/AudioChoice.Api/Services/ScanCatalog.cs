@@ -468,8 +468,18 @@ public sealed class InMemoryScanCatalog : IScanCatalog
             .Select(group => group.First())
             .ToArray();
 
-    public bool UpdateEditionMetadata(AdminEditionMetadataRequest request) =>
-        _results.ContainsKey(FingerprintKey(request.Fingerprint));
+    public bool UpdateEditionMetadata(AdminEditionMetadataRequest request)
+    {
+        if (!_results.ContainsKey(FingerprintKey(request.Fingerprint))) return false;
+        var description = ExploreCatalog.NormalizeDescription(request.Description);
+        // Overwrites, unlike a client report: an administrator correcting an entry is a
+        // deliberate act, where a client is one of many owners reporting the same file.
+        if (description is not null)
+        {
+            _editionDescriptions[CatalogIDOf(request.Fingerprint)] = description;
+        }
+        return true;
+    }
 
     public static string FingerprintKey(BookFingerprint fingerprint) =>
         $"{fingerprint.Version}:{fingerprint.Sha256.ToLowerInvariant()}:{fingerprint.FileSize}";

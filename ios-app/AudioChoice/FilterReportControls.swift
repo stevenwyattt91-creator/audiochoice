@@ -9,6 +9,9 @@ import SwiftUI
 struct FilterReportControl: View {
     let record: LibraryBookRecord?
     @ObservedObject var playback: AudioPlaybackManager
+    /// Renders as one of the player's tool buttons rather than a standalone control, so it
+    /// sits in the row beside Bookmarks as it does on Android.
+    var asPlayerTool = false
     @StateObject private var queue = FilterReportQueue.shared
     @State private var showingRefinement = false
     @State private var reportedPosition: Double = 0
@@ -28,13 +31,27 @@ struct FilterReportControl: View {
                     )
                     showingRefinement = true
                 } label: {
-                    Label("Report missed content", systemImage: "flag")
-                        .font(.caption.bold())
-                        .foregroundStyle(ACTheme.secondaryText)
+                    if asPlayerTool {
+                        VStack(spacing: 6) {
+                            // The icon fills once a report is saved, which is the whole
+                            // acknowledgement in this form. A caption appearing under one
+                            // item would resize its column and shift the whole row.
+                            Image(systemName: queue.lastConfirmation == nil ? "flag" : "flag.fill")
+                                .font(.title3)
+                            Text("Report").font(.caption2).foregroundStyle(ACTheme.secondaryText)
+                        }
+                        .foregroundStyle(ACTheme.accent)
+                        .frame(maxWidth: .infinity)
+                    } else {
+                        Label("Report missed content", systemImage: "flag")
+                            .font(.caption.bold())
+                            .foregroundStyle(ACTheme.secondaryText)
+                    }
                 }
+                .accessibilityLabel("Report missed content")
                 .accessibilityHint("Reports that something played which should have been filtered")
 
-                if let confirmation = queue.lastConfirmation {
+                if !asPlayerTool, let confirmation = queue.lastConfirmation {
                     Text(confirmation)
                         .font(.caption2)
                         .foregroundStyle(ACTheme.accent)

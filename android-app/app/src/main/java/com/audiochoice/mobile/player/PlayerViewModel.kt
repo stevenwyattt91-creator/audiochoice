@@ -400,6 +400,7 @@ class PlayerViewModel(
                 readerTimingRanges = readerTimingRanges,
                 readerSettings = localAudio.readerSettings(),
                 readerPosition = localAudio.readerPosition(book.fingerprint.sha256),
+                speed = localAudio.playbackSpeed(book.fingerprint.sha256),
             )
             // Earlier Experimental builds could attach an EPUB before the
             // reader-sync endpoint existed. Retry automatically on opening the
@@ -529,6 +530,9 @@ class PlayerViewModel(
             // as the value a checkpoint must not overwrite until it has been reached.
             pendingResumeMs = resumeMs.takeIf { it > RESUME_TOLERANCE_MS }
             active.setMediaItem(mediaItemFor(book, uri, coverPath), resumeMs)
+            // Applied before prepare so the book starts at the speed it was left at, rather
+            // than a moment of normal speed followed by a jump once the UI catches up.
+            active.setPlaybackSpeed(localAudio.playbackSpeed(book.fingerprint.sha256))
             active.prepare()
             trace(book.id, "open loaded startAt=$resumeMs after=${active.currentPosition}")
             // Filter state is loaded before the player becomes ready. Resuming,
@@ -786,7 +790,13 @@ class PlayerViewModel(
         val target = mutableState.value.chapters.firstOrNull { it.startSeconds > position + 1.0 }
         if (target != null) seekToChapter(target) else skip(30)
     }
-    fun setSpeed(speed: Float) { controller?.setPlaybackSpeed(speed); mutableState.value = mutableState.value.copy(speed = speed) }
+    fun setSpeed(speed: Float) {
+        controller?.setPlaybackSpeed(speed)
+        mutableState.value = mutableState.value.copy(speed = speed)
+        // Remembered against this book, so returning to it keeps the chosen speed.
+        val sha256 = mutableState.value.book?.fingerprint?.sha256 ?: return
+        viewModelScope.launch { localAudio.savePlaybackSpeed(sha256, speed) }
+    }
 
     fun setSleepTimer(minutes: Int?) {
         sleepJob?.cancel()
@@ -1293,6 +1303,11 @@ class PlayerViewModel(
         val accessToken = token ?: return
         localProgress.edit().putBoolean(progressFinishedKey(book.id), finished).apply()
         mutableState.value = mutableState.value.copy(book = book.copy(isFinished = finished))
+        // A finished book starts over at normal speed. The chosen speed suited getting
+        // through this narrator once; it should not silently govern a re-listen.
+        if (finished) {
+            viewModelScope.launch { localAudio.clearPlaybackSpeed(book.fingerprint.sha256) }
+        }
         val seconds = (trustedPositionMs ?: lastKnownPositionMs) / 1000.0
         viewModelScope.launch {
             runCatching { api.saveProgress(accessToken, book.id, seconds, finished) }

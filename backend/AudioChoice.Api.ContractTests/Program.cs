@@ -950,6 +950,111 @@ Assert(ExploreCatalog.Deduplicate([
     ]).Count == 2,
     "Two different readings of one title were merged.");
 
+// Looked-up synopses. Open Library's description field is free text, and a good share of it
+// is not a synopsis, so what comes back has to be judged before it is shown under a heading
+// reading "About this audiobook".
+var realSynopsis = "Darrow is a Red, a member of the lowest caste in the color-coded society "
+    + "of the future. Like his fellow Reds, he works all day, believing that he and his people "
+    + "are making the surface of Mars livable for future generations.";
+Assert(OpenLibrarySynopsisProvider.ReadableSynopsis(realSynopsis) == realSynopsis,
+    "A genuine synopsis was rejected.");
+// This is verbatim what Open Library returns for Red Rising: dialogue from chapter one.
+var bookExcerpt = "\"I live for the dream that my children will be born free,\" she says. "
+    + "\"That they will be what they like. That they will own the land their father gave them.\" "
+    + "\"I live for you,\" I say sadly.";
+Assert(OpenLibrarySynopsisProvider.ReadableSynopsis(bookExcerpt) is null,
+    "A passage quoted from the book was accepted as a synopsis.");
+// Publishers' own copy often leads with a pull-quote. Rejecting anything that opens on a
+// quotation mark threw away the real synopsis for Iron Flame, so the test is a speech tag
+// rather than a leading quote.
+var pullQuoteBlurb = "\u201CThe first year is when some of us lose our lives. The second year "
+    + "is when the rest of us lose our humanity.\u201D Everyone expected Violet Sorrengail to "
+    + "die during her first year at Basgiath War College.";
+Assert(OpenLibrarySynopsisProvider.ReadableSynopsis(pullQuoteBlurb) == pullQuoteBlurb,
+    "A blurb opening with a pull-quote was rejected.");
+// Markdown emphasis and hard breaks are common in these records and are noise once rendered.
+Assert(
+    OpenLibrarySynopsisProvider.ReadableSynopsis(
+        "**The apocalypse will be televised!**\r\n\r\nA man, his ex-girlfriend's cat, and a "
+        + "sadistic game show unlike anything in the universe await the last of humanity.")
+        is { } cleaned && !cleaned.Contains('*') && !cleaned.Contains('\r'),
+    "Markdown emphasis or hard breaks survived into a stored synopsis.");
+Assert(OpenLibrarySynopsisProvider.ReadableSynopsis("Book 1 of the Red Rising series.") is null,
+    "A one-line note was accepted as a synopsis.");
+Assert(
+    OpenLibrarySynopsisProvider.ReadableSynopsis(
+        "This edition contains the complete text of the novel together with a new afterword "
+        + "by the author and a reading group guide for book clubs.") is null,
+    "A note about the edition was accepted as a description of the story.");
+Assert(OpenLibrarySynopsisProvider.ReadableSynopsis(null) is null, "Null text was accepted.");
+Assert(OpenLibrarySynopsisProvider.ReadableSynopsis("   ") is null, "Blank text was accepted.");
+// Real English prose rather than filler, because the gate now also judges whether text is
+// English and a run of one letter is not.
+var overlongSynopsis = string.Concat(Enumerable.Repeat(realSynopsis + " ", 20));
+Assert(overlongSynopsis.Length > 4000, "The oversized fixture was not actually oversized.");
+Assert(
+    OpenLibrarySynopsisProvider.ReadableSynopsis(overlongSynopsis)!.Length == 4000,
+    "An oversized looked-up synopsis was not clamped to the column width.");
+
+// A popular book's editions include translations, and each carries its description in its own
+// language. Red Rising's first listed edition is Brazilian, so without this the catalogue got
+// Portuguese prose for an English audiobook.
+static System.Text.Json.JsonElement Record(string json) =>
+    System.Text.Json.JsonDocument.Parse(json).RootElement;
+Assert(
+    OpenLibrarySynopsisProvider.IsEnglish(Record("""{"languages":[{"key":"/languages/eng"}]}""")),
+    "An English edition was rejected.");
+Assert(
+    !OpenLibrarySynopsisProvider.IsEnglish(Record("""{"languages":[{"key":"/languages/por"}]}""")),
+    "A Portuguese edition was accepted as a source of English prose.");
+Assert(
+    OpenLibrarySynopsisProvider.IsEnglish(
+        Record("""{"languages":[{"key":"/languages/por"},{"key":"/languages/eng"}]}""")),
+    "A bilingual edition including English was rejected.");
+// Work records generally omit the field, and most records that omit it are English. Rejecting
+// those would discard the majority of usable descriptions.
+Assert(OpenLibrarySynopsisProvider.IsEnglish(Record("""{"title":"Red Rising"}""")),
+    "A record that declares no language was rejected.");
+Assert(OpenLibrarySynopsisProvider.IsEnglish(Record("""{"languages":[]}""")),
+    "A record with an empty language list was rejected.");
+
+// The declared language cannot be the only check. Both of these are real edition records that
+// declare no language at all, so the field alone would have stored them against an English
+// audiobook.
+var frenchBlurb = "Bienvenue, chers crawlers. Bienvenue dans le donjon. Survivre est le seul "
+    + "objectif, et le monde entier regarde le spectacle se derouler sans aucune pitie.";
+var spanishBlurb = "La nueva novela del autor de El marciano, que se convertira en una "
+    + "pelicula, con un protagonista que despierta sin recordar nada de su mision.";
+Assert(!OpenLibrarySynopsisProvider.LooksEnglish(frenchBlurb),
+    "French text was accepted as an English synopsis.");
+Assert(!OpenLibrarySynopsisProvider.LooksEnglish(spanishBlurb),
+    "Spanish text was accepted as an English synopsis.");
+Assert(OpenLibrarySynopsisProvider.ReadableSynopsis(frenchBlurb) is null,
+    "French text passed the synopsis gate.");
+Assert(OpenLibrarySynopsisProvider.LooksEnglish(realSynopsis),
+    "An English synopsis was judged not to be English.");
+Assert(OpenLibrarySynopsisProvider.LooksEnglish(pullQuoteBlurb),
+    "An English blurb opening with a pull-quote was judged not to be English.");
+Assert(!OpenLibrarySynopsisProvider.LooksEnglish(""), "Empty text was judged English.");
+
+// An ISBN names one edition outright, so it settles which book a file is without matching
+// titles. Files report either an ISBN or an Audible ASIN in the same field, and only the ISBN
+// is usable: checked against real records, Open Library indexes Amazon print identifiers and
+// holds no Audible ASINs at all, so treating one as an ISBN would be a guaranteed miss.
+Assert(OpenLibrarySynopsisProvider.AsISBN("9781408857885") == "9781408857885",
+    "An ISBN-13 was not recognised.");
+Assert(OpenLibrarySynopsisProvider.AsISBN("978-1-4088-5788-5") == "9781408857885",
+    "A punctuated ISBN-13 was not recognised.");
+Assert(OpenLibrarySynopsisProvider.AsISBN("140885788X") == "140885788X",
+    "An ISBN-10 ending in a check character was not recognised.");
+Assert(OpenLibrarySynopsisProvider.AsISBN("B0BW2CCVQ2") is null,
+    "An Audible ASIN was treated as an ISBN.");
+Assert(OpenLibrarySynopsisProvider.AsISBN("B01A8ZNWXS") is null,
+    "An Amazon ASIN was treated as an ISBN.");
+Assert(OpenLibrarySynopsisProvider.AsISBN(null) is null, "A missing identifier became an ISBN.");
+Assert(OpenLibrarySynopsisProvider.AsISBN("12345") is null,
+    "A short number was treated as an ISBN.");
+
 // Curating the catalogue. Hiding has to be reversible and has to leave the scan alone: the
 // entry comes off the store front, but a listener who owns that file keeps its filter
 // results, and putting it back must not need a database edit.
@@ -973,6 +1078,29 @@ Assert(curated.CompleteJob(curatedJob!.ID, new ScanResult([], DateTimeOffset.Uni
     "The curation fixture's scan did not complete.");
 Assert(curated.ListExploreBooks().Any(book => book.CatalogID == curatedCatalogID),
     "A completed, identified scan did not reach the catalogue.");
+
+// Setting a synopsis by hand. Files often carry no description tag, and without this such a
+// book could never get one: the only other source is a client reporting the file's own tag.
+var curatedSynopsis = "Hannah needs a tutor. Garrett needs to pass. Neither expects the deal "
+    + "they strike to turn into something else entirely.";
+Assert(
+    curated.UpdateEditionMetadata(new AdminEditionMetadataRequest(
+        curatedFingerprint, "The Deal", "Elle Kennedy", null, null, null, null, null, null,
+        curatedSynopsis)),
+    "An administrator could not set a synopsis.");
+Assert(
+    curated.ListExploreBooks()
+        .Single(book => book.CatalogID == curatedCatalogID).Description == curatedSynopsis,
+    "A synopsis set by an administrator was not served.");
+// Correcting a title must not discard the synopsis, which is why the column is coalesced.
+Assert(
+    curated.UpdateEditionMetadata(new AdminEditionMetadataRequest(
+        curatedFingerprint, "The Deal", "Elle Kennedy", "Off-Campus", 1, null, null, null, null)),
+    "A metadata correction with no synopsis failed.");
+Assert(
+    curated.ListExploreBooks()
+        .Single(book => book.CatalogID == curatedCatalogID).Description == curatedSynopsis,
+    "Correcting an entry's metadata discarded its synopsis.");
 
 Assert(curated.HideExploreBook(curatedCatalogID), "Hiding a catalogue entry failed.");
 Assert(!curated.ListExploreBooks().Any(book => book.CatalogID == curatedCatalogID),

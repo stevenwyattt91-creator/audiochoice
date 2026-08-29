@@ -273,6 +273,18 @@ else
 }
 builder.Services.AddSingleton<IEditionAliasStore>(services =>
     new FileEditionAliasStore(services.GetRequiredService<AudioChoiceDataPaths>()));
+// Looked up only for books whose own file carries no description. A short timeout because a
+// missing synopsis must never hold up a request; the backfill simply tries again later.
+builder.Services.AddHttpClient<ISynopsisProvider, OpenLibrarySynopsisProvider>(client =>
+{
+    client.BaseAddress = new Uri("https://openlibrary.org/");
+    client.Timeout = TimeSpan.FromSeconds(10);
+    // Open Library asks that callers identify themselves so they can contact whoever is
+    // responsible for unusual traffic.
+    client.DefaultRequestHeaders.UserAgent.ParseAdd(
+        "AudioChoice/1.0 (+https://audiochoice.app)");
+});
+
 builder.Services.AddSingleton<IEditionSignatureStore>(services =>
     new FileEditionSignatureStore(services.GetRequiredService<AudioChoiceDataPaths>()));
 builder.Services.AddSingleton<IEditionResolver, EditionResolver>();
@@ -915,6 +927,11 @@ app.MapPut("/v1/admin/editions/metadata", (
     {
         return Results.BadRequest(new { error = "A valid audiobook title is required." });
     }
+    // Refused here rather than becoming a database error, since the column is bounded.
+    if (request.Description?.Trim().Length > 4000)
+    {
+        return Results.BadRequest(new { error = "A synopsis is limited to 4000 characters." });
+    }
 
     return catalog.UpdateEditionMetadata(request)
         ? Results.NoContent()
@@ -940,6 +957,52 @@ app.MapGet("/v1/admin/explore/all", (
     return IsConfiguredApiToken(context, app.Configuration)
         ? Results.Ok(catalog.ListExploreCatalog())
         : Results.Unauthorized();
+});
+
+// Fills in synopses for catalogue entries that have none.
+//
+// A book's own description tags are the first source and cost nothing, but plenty of files
+// carry none. This looks those up so the catalogue reads like a store front rather than a
+// list of titles. Deliberately a request an administrator makes rather than something that
+// runs during a scan: it calls an outside service, and a scan must not depend on one.
+app.MapPost("/v1/admin/explore/descriptions/backfill", async (
+    HttpContext context,
+    IScanCatalog catalog,
+    ISynopsisProvider synopses,
+    CancellationToken cancellationToken) =>
+{
+    if (!IsConfiguredApiToken(context, app.Configuration)) return Results.Unauthorized();
+    var missing = catalog.ListExploreCatalog()
+        .Where(entry => entry.IsPublishable && string.IsNullOrWhiteSpace(entry.Book.Description))
+        .ToArray();
+    var filled = new List<string>();
+    var unresolved = new List<string>();
+    foreach (var entry in missing)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        var fingerprint = catalog.ListFingerprints().FirstOrDefault(value =>
+            value.Sha256.StartsWith(entry.Book.CatalogID, StringComparison.OrdinalIgnoreCase));
+        if (fingerprint is null) continue;
+        var synopsis = await synopses.Find(
+            fingerprint, entry.Book.ProductIdentifier, cancellationToken);
+        if (synopsis is not null && catalog.SaveEditionDescription(fingerprint, synopsis))
+        {
+            filled.Add(entry.Book.Title);
+        }
+        else
+        {
+            // Reported rather than silently skipped, because the remedy is to write one by
+            // hand and that needs knowing which books are still waiting.
+            unresolved.Add(entry.Book.Title);
+        }
+    }
+    return Results.Ok(new
+    {
+        considered = missing.Length,
+        filled = filled.Count,
+        filledTitles = filled,
+        stillMissing = unresolved
+    });
 });
 
 // Undoes a hide. Without this, hiding the wrong edition could only be corrected by editing

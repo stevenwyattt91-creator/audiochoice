@@ -15,6 +15,11 @@ struct ImportScreen: View {
     @State private var isImporting = false
     @State private var importError: String?
     @State private var showingTransferScanner = false
+    /// The book whose scan should open without another tap, once a single import finishes.
+    ///
+    /// Held as an identifier rather than the record itself, because navigation needs a
+    /// hashable value and the record is a stored model that has no reason to become one.
+    @State private var scanTargetID: UUID?
     @State private var isReceivingTransfer = false
     @ObservedObject private var transferCoordinator = CompanionTransferCoordinator.shared
 
@@ -143,6 +148,23 @@ struct ImportScreen: View {
                     importError = error.localizedDescription
                 }
                 isImporting = false
+                // Choosing a file is the listener saying what they want scanned, so the scan
+                // starts on its own. Only for a single book: several at once would mean
+                // picking one to open and leaving the rest looking ignored, so those keep
+                // their buttons.
+                if importedRecords.count == 1, importError == nil,
+                   importedRecords[0].localFileName != nil {
+                    scanTargetID = importedRecords[0].id
+                }
+            }
+        }
+        .navigationDestination(item: $scanTargetID) { id in
+            if let record = importedRecords.first(where: { $0.id == id }),
+               let localFileName = record.localFileName {
+                ScanProgressScreen(
+                    record: record,
+                    fileURL: AudiobookImportService.audioURL(fileName: localFileName)
+                )
             }
         }
         .sheet(isPresented: $showingTransferScanner) {

@@ -63,7 +63,7 @@ if not entries:
 show_status = isinstance(entries[0], dict) and "book" in entries[0]
 print(f"{'"'"'catalog id'"'"':<26} {'"'"'runtime'"'"':>8}  {'"'"'ctl'"'"':>4}  title")
 print("-" * 96)
-shown = withheld = 0
+shown = withheld = missing_synopsis = 0
 for entry in entries:
     book = entry["book"] if show_status else entry
     reason = entry.get("withheldReason") if show_status else None
@@ -74,6 +74,9 @@ for entry in entries:
           f"{book['"'"'title'"'"']}{marker}")
     byline = book.get("author") or "no author"
     identifier = book.get("productIdentifier")
+    if not (book.get("description") or "").strip():
+        missing_synopsis += 1
+        byline += "  -- no synopsis"
     print(f"{'"'"''"'"':<26} {'"'"''"'"':>8}  {'"'"''"'"':>4}  {byline}"
           + (f"  ({identifier})" if identifier else ""))
     if reason:
@@ -82,6 +85,9 @@ for entry in entries:
     else:
         shown += 1
 print("-" * 96)
+if missing_synopsis:
+    print(f"{missing_synopsis} of {len(entries)} have no synopsis. Set one with:")
+    print("  scripts/correct-explore-entry.sh <catalog-id> --synopsis \"...\"")
 if show_status:
     print(f"{shown} listed, {withheld} withheld, {len(entries)} scanned in total.")
 else:

@@ -3,6 +3,7 @@ package com.audiochoice.mobile.data
 import android.content.Context
 import android.net.Uri
 import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.floatPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import kotlinx.coroutines.flow.first
@@ -42,6 +43,9 @@ data class PendingBookmark(
 
 class LocalAudioStore(private val context: Context) {
     private companion object {
+        /** The bounds the speed menu offers; outside them a stored value is unreachable. */
+        const val MINIMUM_SPEED = 0.25f
+        const val MAXIMUM_SPEED = 2f
         // Increment whenever the server-side EPUB/audio matching behavior changes.
         // This replaces old locally cached maps without requiring the listener to
         // detach and reattach their EPUB.
@@ -75,6 +79,7 @@ class LocalAudioStore(private val context: Context) {
     private fun pendingBookmarksKey(sha256: String) = stringPreferencesKey("pending_bookmarks_${sha256.lowercase()}")
     private fun filterSettingsDirtyKey(sha256: String) = stringPreferencesKey("filter_settings_dirty_${sha256.lowercase()}")
     private fun readerPositionKey(sha256: String) = stringPreferencesKey("reader_position_${sha256.lowercase()}")
+    private fun playbackSpeedKey(sha256: String) = floatPreferencesKey("playback_speed_${sha256.lowercase()}")
 
     /** Device-wide rather than per-book, so text size and theme carry across books. */
     private val readerSettingsKey = stringPreferencesKey("reader_settings")
@@ -87,6 +92,32 @@ class LocalAudioStore(private val context: Context) {
         context.localAudioDataStore.data.first()[readerSettingsKey]
             ?.let { runCatching { json.decodeFromString<ReaderSettings>(it) }.getOrNull() }
             ?: ReaderSettings()
+
+    /**
+     * Remembers the speed chosen for one book.
+     *
+     * Speed is a per-book choice rather than a device setting: a listener who slows one
+     * narrator down does not want every other book slowed, and does not want to set it
+     * again each time they come back to this one.
+     */
+    suspend fun savePlaybackSpeed(sha256: String, speed: Float) {
+        context.localAudioDataStore.edit { it[playbackSpeedKey(sha256)] = speed }
+    }
+
+    suspend fun clearPlaybackSpeed(sha256: String) {
+        context.localAudioDataStore.edit { it.remove(playbackSpeedKey(sha256)) }
+    }
+
+    /**
+     * The speed last chosen for this book, or normal speed for one never adjusted.
+     *
+     * Clamped to the range the menu offers, so a value stored by an older build cannot
+     * leave a book at a speed the controls are unable to undo.
+     */
+    suspend fun playbackSpeed(sha256: String): Float {
+        val stored = context.localAudioDataStore.data.first()[playbackSpeedKey(sha256)] ?: return 1f
+        return if (stored <= 0f) 1f else stored.coerceIn(MINIMUM_SPEED, MAXIMUM_SPEED)
+    }
 
     suspend fun saveReaderPosition(sha256: String, position: ReaderPosition) {
         context.localAudioDataStore.edit { it[readerPositionKey(sha256)] = json.encodeToString(position) }
