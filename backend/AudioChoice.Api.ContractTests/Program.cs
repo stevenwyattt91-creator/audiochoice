@@ -974,6 +974,29 @@ Assert(curated.CompleteJob(curatedJob!.ID, new ScanResult([], DateTimeOffset.Uni
 Assert(curated.ListExploreBooks().Any(book => book.CatalogID == curatedCatalogID),
     "A completed, identified scan did not reach the catalogue.");
 
+// Setting a synopsis by hand. Files often carry no description tag, and without this such a
+// book could never get one: the only other source is a client reporting the file's own tag.
+var curatedSynopsis = "Hannah needs a tutor. Garrett needs to pass. Neither expects the deal "
+    + "they strike to turn into something else entirely.";
+Assert(
+    curated.UpdateEditionMetadata(new AdminEditionMetadataRequest(
+        curatedFingerprint, "The Deal", "Elle Kennedy", null, null, null, null, null, null,
+        curatedSynopsis)),
+    "An administrator could not set a synopsis.");
+Assert(
+    curated.ListExploreBooks()
+        .Single(book => book.CatalogID == curatedCatalogID).Description == curatedSynopsis,
+    "A synopsis set by an administrator was not served.");
+// Correcting a title must not discard the synopsis, which is why the column is coalesced.
+Assert(
+    curated.UpdateEditionMetadata(new AdminEditionMetadataRequest(
+        curatedFingerprint, "The Deal", "Elle Kennedy", "Off-Campus", 1, null, null, null, null)),
+    "A metadata correction with no synopsis failed.");
+Assert(
+    curated.ListExploreBooks()
+        .Single(book => book.CatalogID == curatedCatalogID).Description == curatedSynopsis,
+    "Correcting an entry's metadata discarded its synopsis.");
+
 Assert(curated.HideExploreBook(curatedCatalogID), "Hiding a catalogue entry failed.");
 Assert(!curated.ListExploreBooks().Any(book => book.CatalogID == curatedCatalogID),
     "A hidden entry was still shown to listeners.");

@@ -125,7 +125,17 @@ public sealed record AdminEditionMetadataRequest(
     string? EditionType,
     int? PartNumber,
     int? TotalParts,
-    double? Duration);
+    double? Duration,
+    /// <summary>
+    /// The synopsis shown under "About this audiobook", replacing whatever is stored.
+    /// </summary>
+    /// <remarks>
+    /// Descriptions normally come from the file's own description tags, reported by whichever
+    /// client imported it. Plenty of files carry none, and for those this was unreachable:
+    /// there was no way to give a catalogue entry a synopsis at all. Null leaves the stored
+    /// one alone, so a metadata correction does not wipe a good description.
+    /// </remarks>
+    string? Description = null);
 
 public sealed record ExploreCatalogBook(
     string CatalogID,

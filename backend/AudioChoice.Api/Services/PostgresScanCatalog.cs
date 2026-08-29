@@ -635,7 +635,10 @@ public sealed class PostgresScanCatalog(
                 edition_type = $5,
                 part_number = $6,
                 total_parts = $7,
-                duration_seconds = coalesce($8, duration_seconds)
+                duration_seconds = coalesce($8, duration_seconds),
+                -- Coalesced so correcting a title cannot silently discard a synopsis that
+                -- was already reported from the file's tags.
+                description = coalesce($12, description)
             where fingerprint_version = $9 and sha256 = $10 and file_size = $11
               and exists(select 1 from scan_results where edition_id = audiobook_editions.id);
             """, connection);
@@ -650,6 +653,7 @@ public sealed class PostgresScanCatalog(
         command.Parameters.AddWithValue(request.Fingerprint.Version);
         command.Parameters.AddWithValue(request.Fingerprint.Sha256.ToLowerInvariant());
         command.Parameters.AddWithValue(request.Fingerprint.FileSize);
+        AddNullable(command, ExploreCatalog.NormalizeDescription(request.Description));
         return command.ExecuteNonQuery() == 1;
     }
 

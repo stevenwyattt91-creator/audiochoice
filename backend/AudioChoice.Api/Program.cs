@@ -915,6 +915,11 @@ app.MapPut("/v1/admin/editions/metadata", (
     {
         return Results.BadRequest(new { error = "A valid audiobook title is required." });
     }
+    // Refused here rather than becoming a database error, since the column is bounded.
+    if (request.Description?.Trim().Length > 4000)
+    {
+        return Results.BadRequest(new { error = "A synopsis is limited to 4000 characters." });
+    }
 
     return catalog.UpdateEditionMetadata(request)
         ? Results.NoContent()
