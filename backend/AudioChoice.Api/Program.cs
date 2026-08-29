@@ -983,7 +983,8 @@ app.MapPost("/v1/admin/explore/descriptions/backfill", async (
         var fingerprint = catalog.ListFingerprints().FirstOrDefault(value =>
             value.Sha256.StartsWith(entry.Book.CatalogID, StringComparison.OrdinalIgnoreCase));
         if (fingerprint is null) continue;
-        var synopsis = await synopses.Find(fingerprint, cancellationToken);
+        var synopsis = await synopses.Find(
+            fingerprint, entry.Book.ProductIdentifier, cancellationToken);
         if (synopsis is not null && catalog.SaveEditionDescription(fingerprint, synopsis))
         {
             filled.Add(entry.Book.Title);

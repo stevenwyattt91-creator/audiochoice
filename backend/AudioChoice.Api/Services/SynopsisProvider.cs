@@ -12,7 +12,14 @@ public interface ISynopsisProvider
     /// <summary>
     /// Returns a usable synopsis for this edition, or null when none can be found.
     /// </summary>
-    Task<string?> Find(BookFingerprint fingerprint, CancellationToken cancellationToken);
+    /// <param name="productIdentifier">
+    /// The retail identifier the file reported, when it had one. An ISBN pins the edition
+    /// exactly; an Audible ASIN does not help, because those are not indexed.
+    /// </param>
+    Task<string?> Find(
+        BookFingerprint fingerprint,
+        string? productIdentifier,
+        CancellationToken cancellationToken);
 }
 
 /// <summary>
@@ -35,27 +42,45 @@ public sealed class OpenLibrarySynopsisProvider(
     /// Credits the source, as reusing this text requires.
     public const string Attribution = "Description from Open Library.";
 
-    public async Task<string?> Find(BookFingerprint fingerprint, CancellationToken cancellationToken)
+    public async Task<string?> Find(
+        BookFingerprint fingerprint,
+        string? productIdentifier,
+        CancellationToken cancellationToken)
     {
         var title = fingerprint.WorkTitle?.Trim();
-        if (string.IsNullOrWhiteSpace(title)) return null;
+        var isbn = AsISBN(productIdentifier);
+        if (string.IsNullOrWhiteSpace(title) && isbn is null) return null;
         try
         {
-            var match = await FindWork(title, fingerprint.Author, cancellationToken);
-            if (match is null) return null;
-            // The work record first, then that work's editions. A work's description is
-            // community-written and is sometimes a passage from the book rather than a
-            // summary; an edition's is usually the publisher's own copy. Red Rising is the
-            // case in point: its work record holds dialogue from chapter one while its
-            // editions carry the real synopsis, so stopping at the work found nothing usable.
-            var candidates = new List<string> { match.Value.WorkKey };
-            candidates.AddRange(match.Value.EditionKeys.Take(MaximumEditionLookups)
-                .Select(key => $"/books/{key}"));
-            foreach (var key in candidates)
+            // An ISBN names one edition outright, so it settles which book this is without
+            // matching titles. Only some files carry one, and Audible's own identifiers are
+            // not indexed here, so a title search remains the general case.
+            var candidates = new List<string>();
+            var byISBN = await FindWorkByISBN(isbn, cancellationToken);
+            if (byISBN is not null) candidates.Add(byISBN);
+            if (!string.IsNullOrWhiteSpace(title))
+            {
+                candidates.AddRange(await FindWorks(title, fingerprint.Author, cancellationToken));
+            }
+
+            // Several works can describe one book. Open Library holds sparse duplicates
+            // alongside the canonical record, and its search names a work by whichever title
+            // ranks first, which for A Court of Mist and Fury is the Spanish one. Settling for
+            // the first candidate whose title matched therefore chose a duplicate holding no
+            // description at all, so each is tried in turn instead.
+            foreach (var workKey in candidates.Distinct(StringComparer.Ordinal).Take(MaximumWorksTried))
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                var readable = ReadableSynopsis(await ReadDescription(key, cancellationToken));
-                if (readable is not null) return $"{readable}\n\n{Attribution}";
+                // The work record first, then that work's editions. A work's description is
+                // community-written and is sometimes a passage from the book rather than a
+                // summary; an edition's is usually the publisher's own copy. Red Rising is the
+                // case in point: its work record holds dialogue from chapter one while its
+                // editions carry the real synopsis.
+                var fromWork = ReadableSynopsis(await ReadDescription(workKey, cancellationToken));
+                if (fromWork is not null) return $"{fromWork}\n\n{Attribution}";
+
+                var fromEdition = await FindEditionDescription(workKey, cancellationToken);
+                if (fromEdition is not null) return $"{fromEdition}\n\n{Attribution}";
             }
             return null;
         }
@@ -70,67 +95,174 @@ public sealed class OpenLibrarySynopsisProvider(
     }
 
     /// <summary>
-    /// How many of a work's editions to consult before giving up.
+    /// How many of a work's editions to read.
     /// </summary>
     /// <remarks>
-    /// A popular book has dozens. Bounded so filling one book's synopsis cannot turn into
-    /// thirty requests to someone else's service.
+    /// They arrive in one response, so this bounds how much is parsed rather than how many
+    /// requests are made. Generous because the English printing can sit a long way down a
+    /// popular book's list: A Court of Mist and Fury has twenty-nine editions, most of them
+    /// translations, and the usable English description is well past the first handful.
     /// </remarks>
-    /// Eight because translations are interleaved with English printings and are skipped on
-    /// sight: Red Rising's first English edition is the sixth listed.
-    private const int MaximumEditionLookups = 8;
+    private const int EditionPageSize = 50;
 
-    /// <summary>Finds the work whose title and author best match this edition.</summary>
-    private async Task<(string WorkKey, string[] EditionKeys)?> FindWork(
+    /// <summary>
+    /// The first usable English description among a work's editions.
+    /// </summary>
+    /// <remarks>
+    /// One request for the whole list rather than one per edition. Fetching them individually
+    /// meant choosing a cut-off, and any cut-off small enough to be polite was too small:
+    /// Red Rising's English edition is sixth and A Court of Mist and Fury's is further still.
+    /// </remarks>
+    private async Task<string?> FindEditionDescription(
+        string workKey, CancellationToken cancellationToken)
+    {
+        var response = await client.GetFromJsonAsync<JsonElement>(
+            $"{workKey.TrimStart('/')}/editions.json?limit={EditionPageSize}", cancellationToken);
+        if (!response.TryGetProperty("entries", out var entries) ||
+            entries.ValueKind != JsonValueKind.Array)
+        {
+            return null;
+        }
+        foreach (var edition in entries.EnumerateArray())
+        {
+            if (!IsEnglish(edition)) continue;
+            var readable = ReadableSynopsis(DescriptionOf(edition));
+            if (readable is not null) return readable;
+        }
+        return null;
+    }
+
+    /// <summary>
+    /// The identifier as an ISBN, or null when it is not one.
+    /// </summary>
+    /// <remarks>
+    /// Files report either an ISBN or an Audible ASIN in the same field. Only the ISBN is
+    /// usable here: Open Library indexes Amazon print identifiers, and a check against real
+    /// records found Audible's own ASINs are absent from it entirely.
+    /// </remarks>
+    public static string? AsISBN(string? value)
+    {
+        var digits = new string((value ?? "").Where(char.IsLetterOrDigit).ToArray());
+        if (ExploreCatalog.IsAudibleProductIdentifier(digits)) return null;
+        // ISBN-13 is all digits; ISBN-10 may end in X as its check character.
+        if (digits.Length == 13 && digits.All(char.IsDigit)) return digits;
+        if (digits.Length == 10 &&
+            digits[..9].All(char.IsDigit) &&
+            (char.IsDigit(digits[9]) || digits[9] is 'X' or 'x'))
+        {
+            return digits.ToUpperInvariant();
+        }
+        return null;
+    }
+
+    /// <summary>
+    /// The work an ISBN belongs to, taken straight from the edition record.
+    /// </summary>
+    /// <remarks>
+    /// Exact where a title search is a guess, which matters because a wrong match means a
+    /// synopsis for a different book. The edition itself often carries no description, so its
+    /// value is in naming the work rather than in what it holds.
+    /// </remarks>
+    private async Task<string?> FindWorkByISBN(string? isbn, CancellationToken cancellationToken)
+    {
+        if (isbn is null) return null;
+        try
+        {
+            var edition = await client.GetFromJsonAsync<JsonElement>(
+                $"isbn/{isbn}.json", cancellationToken);
+            if (!edition.TryGetProperty("works", out var works) ||
+                works.ValueKind != JsonValueKind.Array)
+            {
+                return null;
+            }
+            foreach (var work in works.EnumerateArray())
+            {
+                if (work.TryGetProperty("key", out var key) && key.GetString() is { } workKey)
+                {
+                    return workKey;
+                }
+            }
+            return null;
+        }
+        catch (HttpRequestException)
+        {
+            // An ISBN Open Library does not hold is an ordinary miss, not a failure.
+            return null;
+        }
+    }
+
+    /// How many works to consult before giving up, bounding requests per book.
+    private const int MaximumWorksTried = 3;
+
+    /// <summary>
+    /// Works that could be this edition, best first.
+    /// </summary>
+    /// <remarks>
+    /// Ordered rather than reduced to one. A title match is the strongest signal, so those
+    /// come first; after them come works whose author agrees but whose listed title does not,
+    /// because that title may simply be a translation. Within each group the work with more
+    /// editions wins, which is a good proxy for the canonical record over a stub.
+    /// </remarks>
+    private async Task<List<string>> FindWorks(
         string title, string? author, CancellationToken cancellationToken)
     {
         var query = Uri.EscapeDataString(
             string.Join(' ', new[] { title, author }.Where(value => !string.IsNullOrWhiteSpace(value))));
         var response = await client.GetFromJsonAsync<JsonElement>(
-            $"search.json?q={query}&fields=key,title,author_name,edition_key&limit=5", cancellationToken);
+            $"search.json?q={query}&fields=key,title,author_name,edition_count&limit=5",
+            cancellationToken);
         if (!response.TryGetProperty("docs", out var docs) || docs.ValueKind != JsonValueKind.Array)
         {
-            return null;
+            return [];
         }
+
+        var titleMatches = new List<(string Key, int Editions)>();
+        var authorMatches = new List<(string Key, int Editions)>();
         foreach (var doc in docs.EnumerateArray())
         {
             if (!doc.TryGetProperty("key", out var key) || key.GetString() is not { } workKey) continue;
-            // The title has to agree. Search is forgiving enough to return a different book by
-            // the same author, and a wrong synopsis is worse than none.
-            var candidateTitle = doc.TryGetProperty("title", out var found) ? found.GetString() : null;
-            if (!TitlesAgree(title, candidateTitle)) continue;
-            // Only check the author when both sides have one, since many files carry none.
-            if (!string.IsNullOrWhiteSpace(author) &&
+            // The author has to agree whenever both sides name one, since search is forgiving
+            // enough to return an unrelated book and a wrong synopsis is worse than none.
+            var authorKnown = !string.IsNullOrWhiteSpace(author) &&
                 doc.TryGetProperty("author_name", out var authors) &&
                 authors.ValueKind == JsonValueKind.Array &&
-                authors.EnumerateArray().Any() &&
-                !authors.EnumerateArray().Any(value => AuthorsAgree(author, value.GetString())))
+                authors.EnumerateArray().Any();
+            if (authorKnown &&
+                !doc.GetProperty("author_name").EnumerateArray()
+                    .Any(value => AuthorsAgree(author!, value.GetString())))
             {
                 continue;
             }
-            var editionKeys = doc.TryGetProperty("edition_key", out var editions) &&
-                editions.ValueKind == JsonValueKind.Array
-                ? editions.EnumerateArray()
-                    .Select(value => value.GetString())
-                    .Where(value => !string.IsNullOrWhiteSpace(value))
-                    .Select(value => value!)
-                    .ToArray()
-                : [];
-            return (workKey, editionKeys);
+            var editions = doc.TryGetProperty("edition_count", out var count) &&
+                count.ValueKind == JsonValueKind.Number
+                ? count.GetInt32()
+                : 0;
+            var candidateTitle = doc.TryGetProperty("title", out var found) ? found.GetString() : null;
+            if (TitlesAgree(title, candidateTitle)) titleMatches.Add((workKey, editions));
+            else if (authorKnown) authorMatches.Add((workKey, editions));
         }
-        return null;
+
+        return titleMatches.OrderByDescending(value => value.Editions)
+            .Concat(authorMatches.OrderByDescending(value => value.Editions))
+            .Select(value => value.Key)
+            .ToList();
     }
 
     /// <param name="recordKey">A work or edition key, with or without a leading slash.</param>
     private async Task<string?> ReadDescription(string recordKey, CancellationToken cancellationToken)
     {
-        var work = await client.GetFromJsonAsync<JsonElement>(
+        var record = await client.GetFromJsonAsync<JsonElement>(
             $"{recordKey.TrimStart('/')}.json", cancellationToken);
         // A popular book's editions include translations, and those carry their description
         // in the translated language. Red Rising's first listed edition is Brazilian, so
         // taking the first edition with any description at all produced Portuguese prose.
-        if (!IsEnglish(work)) return null;
-        if (!work.TryGetProperty("description", out var description)) return null;
+        return IsEnglish(record) ? DescriptionOf(record) : null;
+    }
+
+    /// <summary>Reads a record's description, in either of the shapes Open Library uses.</summary>
+    private static string? DescriptionOf(JsonElement record)
+    {
+        if (!record.TryGetProperty("description", out var description)) return null;
         // Older records store a bare string; newer ones a typed object.
         return description.ValueKind switch
         {

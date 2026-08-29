@@ -1037,6 +1037,24 @@ Assert(OpenLibrarySynopsisProvider.LooksEnglish(pullQuoteBlurb),
     "An English blurb opening with a pull-quote was judged not to be English.");
 Assert(!OpenLibrarySynopsisProvider.LooksEnglish(""), "Empty text was judged English.");
 
+// An ISBN names one edition outright, so it settles which book a file is without matching
+// titles. Files report either an ISBN or an Audible ASIN in the same field, and only the ISBN
+// is usable: checked against real records, Open Library indexes Amazon print identifiers and
+// holds no Audible ASINs at all, so treating one as an ISBN would be a guaranteed miss.
+Assert(OpenLibrarySynopsisProvider.AsISBN("9781408857885") == "9781408857885",
+    "An ISBN-13 was not recognised.");
+Assert(OpenLibrarySynopsisProvider.AsISBN("978-1-4088-5788-5") == "9781408857885",
+    "A punctuated ISBN-13 was not recognised.");
+Assert(OpenLibrarySynopsisProvider.AsISBN("140885788X") == "140885788X",
+    "An ISBN-10 ending in a check character was not recognised.");
+Assert(OpenLibrarySynopsisProvider.AsISBN("B0BW2CCVQ2") is null,
+    "An Audible ASIN was treated as an ISBN.");
+Assert(OpenLibrarySynopsisProvider.AsISBN("B01A8ZNWXS") is null,
+    "An Amazon ASIN was treated as an ISBN.");
+Assert(OpenLibrarySynopsisProvider.AsISBN(null) is null, "A missing identifier became an ISBN.");
+Assert(OpenLibrarySynopsisProvider.AsISBN("12345") is null,
+    "A short number was treated as an ISBN.");
+
 // Curating the catalogue. Hiding has to be reversible and has to leave the scan alone: the
 // entry comes off the store front, but a listener who owns that file keeps its filter
 // results, and putting it back must not need a database edit.
