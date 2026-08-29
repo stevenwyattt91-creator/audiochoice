@@ -450,8 +450,6 @@ struct PlayerScreen: View {
                     .clipShape(Capsule())
                 }
 
-                FilterReportControl(record: record, playback: playback)
-
                 VStack(spacing: 4) {
                     Slider(
                         value: Binding(
@@ -509,6 +507,10 @@ struct PlayerScreen: View {
                     } else { tool("shield", "Filters") }
 
                     Button { showingBookmarks = true } label: { tool("bookmark", "Bookmarks") }
+                    // One tap, no dialog. Someone hearing something they asked never to hear
+                    // is usually driving or walking, and anything needing to be read first
+                    // means the report never happens.
+                    FilterReportControl(record: record, playback: playback, asPlayerTool: true)
                 }
                 .padding(.top, 18)
                 Spacer(minLength: 12)
