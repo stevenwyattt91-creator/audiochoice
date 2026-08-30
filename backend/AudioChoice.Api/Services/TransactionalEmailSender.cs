@@ -13,6 +13,19 @@ public sealed class TransactionalEmailOptions
     public string FromAddress { get; init; } = "AudioChoice <no-reply@audiochoiceapp.com>";
     public string ReplyToAddress { get; init; } = "support@audiochoiceapp.com";
     public string ActionBaseURL { get; init; } = "https://app.audiochoiceapp.com";
+
+    /// <summary>
+    /// Whether a verification email is sent when an account is created.
+    /// </summary>
+    /// <remarks>
+    /// Off. Nothing requires a verified address -- sign-in does not check it -- so the email asked
+    /// something of every new listener that changed nothing for them, and its only visible effect was
+    /// an extra message during sign-up. Password reset is unaffected and still sends.
+    ///
+    /// Separate from <see cref="Enabled"/> so verification can come back without touching the
+    /// sending configuration, which is the part that is awkward to get right.
+    /// </remarks>
+    public bool VerificationEnabled { get; init; }
 }
 
 public interface ITransactionalEmailSender
@@ -101,9 +114,9 @@ public sealed class ResendTransactionalEmailSender(
 
             {resetCode}
 
-            Open AudioChoice, choose "Forgot password", and paste this code with your new password.
+            Open AudioChoice, choose "Forgot password", and enter this code with your new password.
 
-            The code lasts one hour and can be used once.
+            The code lasts 15 minutes and can be used once.
 
             You can also reset in a browser: {resetURL}
 
