@@ -299,12 +299,14 @@ resource api 'Microsoft.App/containerApps@2024-03-01' = {
               value: narrationAwsRegion
             }
           ], resendApiKeyPresent ? [
-        {
-          name: 'resend-api-key'
-          keyVaultUrl: '${vault.properties.vaultUri}secrets/resend-api-key'
-          identity: pullIdentity.id
-        }
-      ] : [], narrationAwsCredentialsPresent ? [
+            {
+              // secretRef, not keyVaultUrl. Only the secrets array resolves a vault URL; an
+              // environment variable must carry a literal value or name a secret already declared
+              // there, and getting that wrong fails the whole revision rather than one variable.
+              name: 'AudioChoice__TransactionalEmail__ApiKey'
+              secretRef: 'resend-api-key'
+            }
+          ] : [], narrationAwsCredentialsPresent ? [
             {
               name: 'AWS_ACCESS_KEY_ID'
               secretRef: 'aws-access-key-id'
