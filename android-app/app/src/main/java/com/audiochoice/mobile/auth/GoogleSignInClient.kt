@@ -64,9 +64,26 @@ class GoogleSignInClient(private val context: Context) {
             is GetCredentialCancellationException ->
                 // Genuine user cancellation and an unauthorised app both land here.
                 if (failure.message?.contains("reauth", ignoreCase = true) == true) {
-                    "Google could not verify this account. Re-add your Google account in the " +
-                        "device settings, then try again. If it keeps failing, sign in with an " +
-                        "email address and password instead."
+                    // Previously this blamed the listener's Google account and told them to
+                    // re-add it, which is the wrong advice most of the time and unfixable
+                    // advice on a build whose package is simply not registered. The
+                    // experimental build has its own applicationId suffix, so it is a
+                    // different app to Google than the beta build is, and Play Services
+                    // refuses to vouch for it -- reporting the same opaque "reauth failed"
+                    // it uses for a genuinely stale account.
+                    //
+                    // Naming the likelier cause first, and naming the way out, matters more
+                    // than being exhaustive: nobody can act on "could not verify".
+                    if (BuildConfig.EXPERIMENTAL_BUILD) {
+                        "Google sign-in is not set up for the Experimental build yet. Use an " +
+                            "email address and password instead — tap Create account below. " +
+                            "(This build has its own app identifier, which has to be " +
+                            "registered with Google separately from the beta build.)"
+                    } else {
+                        "Google could not verify this account. Re-add your Google account in " +
+                            "the device settings, then try again. If it keeps failing, sign in " +
+                            "with an email address and password instead."
+                    }
                 } else {
                     "Google sign-in was cancelled."
                 }

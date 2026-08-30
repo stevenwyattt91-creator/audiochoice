@@ -1,6 +1,8 @@
 package com.audiochoice.mobile.data
 
 import com.audiochoice.contracts.BookFingerprint
+import com.audiochoice.contracts.ScanEvent
+import kotlinx.serialization.EncodeDefault
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
@@ -41,7 +43,38 @@ data class FilterReportRequest(
     val scanEventID: String? = null,
     @SerialName("categoryID")
     val categoryID: String? = null,
+    /**
+     * What [positionSeconds] measures: seconds of audio, or a character offset into a narrated
+     * book's text.
+     *
+     * Additive, optional, and defaulted to null so an imported audiobook's request body is
+     * byte-identical to what every shipped client already sends. Renaming `positionSeconds`
+     * would have been cleaner and would have broken the iOS client, the Android release build
+     * and the admin triage views at once.
+     *
+     * Null means seconds. Triage reading a character offset as a timestamp is the failure this
+     * field exists to prevent, which is why the server constrains it to two values rather than
+     * accepting free text.
+     *
+     * [EncodeDefault] with mode NEVER is load-bearing, not tidiness. The app configures its
+     * `Json` with `encodeDefaults = true`, so without this a null would still be written as
+     * `"positionUnit":null` -- and "optional field with a default" would silently stop being
+     * wire-compatible. An audiobook's request body has to stay byte-identical to what shipped
+     * clients send, and this is what keeps it that way.
+     */
+    @EncodeDefault(EncodeDefault.Mode.NEVER)
+    @SerialName("positionUnit")
+    val positionUnit: String? = null,
 )
+
+/** The two things [FilterReportRequest.positionSeconds] can mean. */
+object FilterReportPositionUnit {
+    /** The default, and what every existing client means. Sent as null, never as this string. */
+    const val SECONDS = "seconds"
+
+    /** A character offset into a narrated book's Book_Text. */
+    const val CHARACTER_OFFSET = "characterOffset"
+}
 
 /** Only the identifier is read back; nothing in the app depends on the stored report. */
 @Serializable
@@ -105,4 +138,142 @@ object FilterReportComposer {
             categoryID = categoryID,
         )
     }
+
+    /**
+     * How many characters before the reported offset a narration report covers.
+     *
+     * The audio equivalent is twenty seconds. At an unhurried narration rate that is roughly
+     * 290 characters, rounded to 300. Expressed in characters rather than seconds because the
+     * whole point of a narration report is that its coordinate space is text: converting to
+     * seconds and back would reintroduce the ambiguity the position unit exists to remove.
+     */
+    const val LOOK_BACK_CHARACTERS: Int = 300
+
+    /** Longer than this describes the book rather than a passage in it. */
+    const val MAXIMUM_WINDOW_CHARACTERS: Int = 2_000
+
+    /**
+     * A narrated book's report that something was missed.
+     *
+     * `positionSeconds` carries a character offset, which is why `positionUnit` is set. The
+     * field name is the compromise that lets a narrated book reuse the entire report pipeline;
+     * the unit is what stops triage reading the number as a timestamp.
+     */
+    fun narrationMissedContent(
+        fingerprint: BookFingerprint,
+        characterOffset: Int,
+        scannerVersion: String?,
+        categoryID: String? = null,
+    ): FilterReportRequest = FilterReportRequest(
+        fingerprint = fingerprint,
+        kind = FilterReportKind.MISSED_CONTENT,
+        positionSeconds = characterOffset.coerceAtLeast(0).toDouble(),
+        windowSeconds = LOOK_BACK_CHARACTERS.toDouble(),
+        scannerVersion = scannerVersion,
+        categoryID = categoryID,
+        positionUnit = FilterReportPositionUnit.CHARACTER_OFFSET,
+    )
+
+    /**
+     * A narrated book's report that a passage was removed when it should not have been.
+     *
+     * The event identifiers come from the enabled scan event containing the offset, which is
+     * what makes the report actionable: it names the control that removed the passage rather
+     * than leaving an offset to be matched back to one.
+     */
+    fun narrationWronglyFiltered(
+        fingerprint: BookFingerprint,
+        eventID: String?,
+        categoryID: String?,
+        startCharacter: Int,
+        endCharacter: Int,
+        scannerVersion: String?,
+    ): FilterReportRequest {
+        val span = (endCharacter - startCharacter).coerceAtLeast(1)
+        return FilterReportRequest(
+            fingerprint = fingerprint,
+            kind = FilterReportKind.WRONGLY_FILTERED,
+            positionSeconds = startCharacter.coerceAtLeast(0).toDouble(),
+            windowSeconds = minOf(span, MAXIMUM_WINDOW_CHARACTERS).toDouble(),
+            scannerVersion = scannerVersion,
+            scanEventID = eventID,
+            categoryID = categoryID,
+            positionUnit = FilterReportPositionUnit.CHARACTER_OFFSET,
+        )
+    }
+
+    /**
+     * The enabled event covering [characterOffset], preferring the lowest start offset.
+     *
+     * Several events legitimately contain one offset: a profanity inside a scene inside a
+     * chapter-scale flag. The lowest start is the widest containing passage, which is the one a
+     * listener most likely means when they say "this should not have been removed" -- and it is
+     * a deterministic tie-break, so two reports of the same moment name the same event.
+     */
+    fun containingEvent(
+        events: List<ScanEvent>,
+        characterOffset: Int,
+    ): ScanEvent? = events
+        .filter { characterOffset >= it.startTime && characterOffset < it.endTime }
+        .minWithOrNull(compareBy({ it.startTime }, { it.endTime }, { it.id }))
+
+    /**
+     * Turns a reported moment in a narrated book into a report, or explains why it cannot.
+     *
+     * Both refusals send nothing at all. A report whose position maps nowhere is not a weaker
+     * report, it is a report about a passage nobody can find: triage would receive an offset with no
+     * text behind it, and the listener would believe they had helped.
+     *
+     * [characterForTime] is the reader's own time-to-character mapping, passed in so this stays
+     * testable and so there is exactly one implementation of that conversion in the app.
+     */
+    fun narrationReport(
+        fingerprint: BookFingerprint,
+        bookTimeSeconds: Double,
+        enabledEvents: List<ScanEvent>,
+        scannerVersion: String?,
+        characterForTime: (Double) -> Int?,
+    ): NarrationReportOutcome {
+        val offset = characterForTime(bookTimeSeconds)
+            ?: return NarrationReportOutcome.NoTextAtThisMoment
+
+        val event = containingEvent(enabledEvents, offset)
+            ?: return NarrationReportOutcome.NothingFilteredHere
+
+        return NarrationReportOutcome.Ready(
+            narrationWronglyFiltered(
+                fingerprint = fingerprint,
+                eventID = event.id,
+                categoryID = event.categoryID,
+                startCharacter = event.startTime.toInt(),
+                endCharacter = event.endTime.toInt(),
+                scannerVersion = scannerVersion,
+            ),
+            event = event,
+        )
+    }
+}
+
+/** What composing a narrated book's report produced. */
+sealed interface NarrationReportOutcome {
+
+    data class Ready(val request: FilterReportRequest, val event: ScanEvent) : NarrationReportOutcome
+
+    /**
+     * No timing covers the reported moment, so it maps to no position in the book's text.
+     *
+     * Happens across a gap between rendered chapters, or before anything has been rendered. Nothing
+     * is sent: an offset guessed from a nearby chapter would point triage at the wrong passage,
+     * which is worse than no report because it looks like evidence.
+     */
+    data object NoTextAtThisMoment : NarrationReportOutcome
+
+    /**
+     * The offset maps fine, but no enabled filter covers it.
+     *
+     * The listener has reported a passage that was not removed by anything, so there is no control
+     * to name and nothing for triage to act on. Their filter choices are deliberately left
+     * untouched: they asked a question, not for a change.
+     */
+    data object NothingFilteredHere : NarrationReportOutcome
 }

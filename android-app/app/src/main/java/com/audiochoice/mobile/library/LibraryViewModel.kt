@@ -19,6 +19,15 @@ data class LibraryUiState(
     val books: List<LibraryBook> = emptyList(),
     val exploreBooks: List<ExploreCatalogBook> = emptyList(),
     val coverPaths: Map<String, String> = emptyMap(),
+    /**
+     * Ebooks with no filter results, by lowercase sha256.
+     *
+     * Surfaced in the list because a book that cannot be filtered is a book the listener has a
+     * decision to make about, and finding that out only after opening it and pressing Read aloud
+     * wastes the trip. Excludes books whose owner already chose to continue without results: they
+     * have made the decision, and repeating it reads as nagging.
+     */
+    val ebooksWithoutFilterResults: Set<String> = emptySet(),
     val error: String? = null,
 )
 
@@ -199,6 +208,10 @@ class LibraryViewModel(
                     exploreBooks = it.second,
                     coverPaths = it.third,
                 )
+                // After the list, not as part of it. A book's filter state is worth showing but not
+                // worth delaying the whole library for, and a failure to read it must leave the
+                // library intact rather than empty.
+                refreshEbookFilterState(it.first)
             }
                 .onFailure {
                     if (cachedBooks.isEmpty()) {
@@ -207,6 +220,33 @@ class LibraryViewModel(
                         mutableState.value = mutableState.value.copy(loading = false, loaded = true, error = null)
                     }
                 }
+        }
+    }
+
+    /**
+     * Reads which ebooks have no filter results yet.
+     *
+     * Only ebooks are examined. An audiobook's filter state already has its own presentation, and
+     * scanning every audiobook's directory for a file that is never there would be work for nothing.
+     */
+    private fun refreshEbookFilterState(books: List<LibraryBook>) {
+        viewModelScope.launch {
+            val store = com.audiochoice.mobile.narration.NarrationStore(context.filesDir)
+            val missing = books
+                .filter {
+                    com.audiochoice.mobile.library.LibraryShelves.shelfFor(it) ==
+                        com.audiochoice.mobile.library.LibraryShelf.EBOOKS
+                }
+                .filter { book ->
+                    val sha = book.fingerprint.sha256
+                    // A stored scan means results exist. Continuing without them is a decision
+                    // already taken, so it is not reported as something outstanding.
+                    store.textScan(sha) == null &&
+                        !localAudio.narrationFlags(sha).continuedWithoutFilterResults
+                }
+                .map { it.fingerprint.sha256.lowercase() }
+                .toSet()
+            mutableState.value = mutableState.value.copy(ebooksWithoutFilterResults = missing)
         }
     }
 

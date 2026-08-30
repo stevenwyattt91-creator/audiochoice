@@ -18,6 +18,11 @@ media3 = "1.10.1"
 work = "2.11.2"
 documentfile = "1.1.0"
 appdistribution = "5.3.0"
+# Property-based assertions only. Deliberately kotest-property rather than jqwik:
+# jqwik requires the JUnit 5 platform, and switching platforms would touch every
+# existing JUnit 4 test. kotest-property is a plain library that runs inside an
+# ordinary @Test, so it is additive and test-only.
+kotestProperty = "5.9.1"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
@@ -49,6 +54,7 @@ androidx-media3-session = { group = "androidx.media3", name = "media3-session", 
 androidx-media3-ui = { group = "androidx.media3", name = "media3-ui", version.ref = "media3" }
 androidx-work-runtime-ktx = { group = "androidx.work", name = "work-runtime-ktx", version.ref = "work" }
 androidx-documentfile = { group = "androidx.documentfile", name = "documentfile", version.ref = "documentfile" }
+kotest-property = { group = "io.kotest", name = "kotest-property", version.ref = "kotestProperty" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }

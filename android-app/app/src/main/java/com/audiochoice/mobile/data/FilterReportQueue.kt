@@ -22,6 +22,23 @@ class FilterReportQueue(
     private val preferences =
         context.getSharedPreferences(PREFERENCES_NAME, Context.MODE_PRIVATE)
 
+    /** Drops the oldest entries matching [selector] until at most [limit] remain. */
+    private fun trimTo(
+        pending: MutableList<FilterReportRequest>,
+        limit: Int,
+        selector: (FilterReportRequest) -> Boolean,
+    ) {
+        var excess = pending.count(selector) - limit
+        if (excess <= 0) return
+        val iterator = pending.iterator()
+        while (iterator.hasNext() && excess > 0) {
+            if (selector(iterator.next())) {
+                iterator.remove()
+                excess -= 1
+            }
+        }
+    }
+
     /** Records a report. Never throws: the listener has already moved on. */
     fun enqueue(report: FilterReportRequest) {
         val pending = load().toMutableList()
@@ -30,6 +47,12 @@ class FilterReportQueue(
         // likelier to still be worth acting on, and by this point the same problem has almost
         // certainly been reported already.
         while (pending.size > MAXIMUM_PENDING) pending.removeAt(0)
+        // Narration reports are capped more tightly, and separately, so a narrated book cannot
+        // crowd out an audiobook's reports. A narrated book is one listener's private copy, so
+        // its reports are worth less to triage than a report about a published edition several
+        // listeners share -- and text scanning is far newer, so a systematic fault there could
+        // otherwise fill the whole queue in one session.
+        trimTo(pending, MAXIMUM_PENDING_NARRATION) { it.positionUnit == FilterReportPositionUnit.CHARACTER_OFFSET }
         save(pending)
     }
 
@@ -86,5 +109,8 @@ class FilterReportQueue(
         const val PREFERENCES_NAME = "audiochoice_filter_reports"
         const val PENDING_KEY = "pending_v1"
         const val MAXIMUM_PENDING = 200
+
+        /** Narration reports, capped separately so they cannot crowd out audiobook reports. */
+        const val MAXIMUM_PENDING_NARRATION = 100
     }
 }

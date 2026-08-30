@@ -55,6 +55,11 @@ class MainActivity : ComponentActivity() {
     private val libraryViewModel by viewModels<LibraryViewModel> { LibraryViewModel.Factory(this, api, localAudio) }
     private val playerViewModel by viewModels<PlayerViewModel> { PlayerViewModel.Factory(this, api, localAudio) }
     private val supportViewModel by viewModels<SupportViewModel> { SupportViewModel.Factory(api) }
+    // Constructed on every build; only reached where NarrationConfig.enabled gates the UI that
+    // uses it, so a beta build creates it and never opens it.
+    private val narrationViewModel by viewModels<com.audiochoice.mobile.narration.NarrationViewModel> {
+        com.audiochoice.mobile.narration.NarrationViewModel.Factory(this, api, localAudio, filesDir)
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -68,6 +73,7 @@ class MainActivity : ComponentActivity() {
                     libraryViewModel,
                     playerViewModel,
                     supportViewModel,
+                    narrationViewModel,
                     pendingExternalAudioUri.asStateFlow(),
                     pendingCompanionTransferUri.asStateFlow(),
                     onExternalAudioHandled = { pendingExternalAudioUri.value = null },

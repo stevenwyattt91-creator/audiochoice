@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Experimental-only manifest additions for EPUB narration.
+
+  This file is merged into the experimental build type alone, which is what keeps the
+  requirement that beta and release request the same Android permissions they always
+  have. Adding these to the main manifest would change the permission list of every
+  shipping build for a feature those builds do not contain.
+
+  Narration produces audio for later rather than playing it now, so it must not claim
+  the media playback service type. Two types are declared because the right one depends
+  on the platform: Android 15 introduced a media-processing type that describes exactly
+  this work, and older versions have only the general data-sync type. The code picks
+  whichever is available at runtime.
+-->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROCESSING" />
+
+    <application>
+        <!--
+          WorkManager runs foreground workers through its own service, and that service
+          only carries the types its manifest entry declares. Without this merge the
+          typed ForegroundInfo the render worker supplies is rejected at runtime.
+        -->
+        <service
+            android:name="androidx.work.impl.foreground.SystemForegroundService"
+            android:foregroundServiceType="dataSync|mediaProcessing"
+            tools:node="merge" />
+    </application>
+</manifest>

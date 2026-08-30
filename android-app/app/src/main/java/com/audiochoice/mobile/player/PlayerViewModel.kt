@@ -101,6 +101,13 @@ data class PlayerUiState(
     val bookmarkSaved: Boolean = false,
     /** Set after a filter report is queued, so the player can confirm it. */
     val filterReportSent: Boolean = false,
+    /**
+     * Present only for a narrated book, and the marker the two playback guards test on.
+     *
+     * Null for every imported audiobook, which is what keeps both guards inert on the
+     * path that ships today.
+     */
+    val narration: NarrationPlaybackState? = null,
     val error: String? = null,
     val epubText: String? = null,
     /** Parsed once per book rather than on every recomposition. */
@@ -192,16 +199,33 @@ class PlayerViewModel(
     private val liveTransport: MediaController?
         get() = controller?.takeIf { it.isConnected && it.playbackState != Player.STATE_IDLE }
 
+    /**
+     * Converts the controller's numbers into book position and duration.
+     *
+     * [DirectPlaybackTimeline] reports the controller's own values unchanged, so an
+     * imported audiobook behaves exactly as it did before this indirection existed. A
+     * narrated book swaps in a timeline that accumulates across rendered chapters,
+     * because its playlist holds one item per chapter rather than one item per book.
+     *
+     * Routed through one property rather than converted at each of the fourteen reads
+     * below, since missing one of those -- most easily the progress checkpoint -- writes a
+     * wrong resume position to the account with nothing to show that it happened.
+     */
+    private var playbackTimeline: PlaybackTimeline = DirectPlaybackTimeline
+
     /** Null when nothing trustworthy can report a position right now. */
     private val trustedPositionMs: Long?
-        get() = liveTransport?.currentPosition?.coerceAtLeast(0L)
+        get() = liveTransport
+            ?.let { playbackTimeline.bookPositionMs(it.currentMediaItemIndex, it.currentPosition) }
+            ?.coerceAtLeast(0L)
 
     private val currentPositionMs: Long
         get() = trustedPositionMs ?: lastKnownPositionMs
 
     /** Raw duration, which is [androidx.media3.common.C.TIME_UNSET] until known. */
     private val rawDurationMs: Long
-        get() = liveTransport?.duration ?: lastKnownDurationMs
+        get() = liveTransport?.let { playbackTimeline.bookDurationMs(it.duration) }
+            ?: lastKnownDurationMs
 
     private val isPlayingNow: Boolean
         get() = controller?.isPlaying == true
@@ -772,7 +796,13 @@ class PlayerViewModel(
             if (duration == null) requested else requested.coerceAtMost(duration)
         }
         pendingFilterSeekTargetMs = null
-        controller?.seekTo(target)
+        // For a single-file book this resolves to the same seekTo(target) call as before.
+        // For a narrated book the position has to be split into which chapter's file and
+        // how far into it, which only the timeline knows.
+        val seek = playbackTimeline.seekTarget(target)
+        val itemIndex = seek.itemIndex
+        if (itemIndex == null) controller?.seekTo(seek.positionMs)
+        else controller?.seekTo(itemIndex, seek.positionMs)
         // The listener normally runs immediately, but this direct check also
         // protects same-position seeks that some devices may coalesce.
         enforceEnabledFilters(target, allowLookAhead = isPlayingNow)
@@ -1286,6 +1316,12 @@ class PlayerViewModel(
     /** Marks the open book finished once playback reaches the end. */
     private fun markFinishedIfAtEnd(positionMs: Long, durationMs: Long) {
         val book = mutableState.value.book ?: return
+        // A narrated book's duration is only the chapters produced so far, so reaching
+        // "the end" means the end of what exists, not the end of the book. Without this
+        // a forty-chapter book would be marked finished on its third rendered chapter,
+        // synced as finished, and -- because finishing clears the stored speed -- would
+        // silently reset the listener's chosen playback speed too.
+        mutableState.value.narration?.let { if (!it.fullyRendered) return }
         if (!BookCompletion.isComplete(positionMs, durationMs)) return
         // Guarded, or this would issue a save every hundred milliseconds through the outro.
         if (isFinished(book.id)) return
@@ -1369,6 +1405,21 @@ class PlayerViewModel(
 
     private fun enforceEnabledFilters(positionMs: Long, allowLookAhead: Boolean) {
         val current = mutableState.value
+        // A narrated book has nothing to skip: filtered passages were removed before the
+        // text ever reached a voice, so they are absent from the audio rather than
+        // present and skipped over.
+        //
+        // This guard is not an optimisation. A narrated book's ScanEvent startTime and
+        // endTime carry character offsets into Book_Text, not seconds, which is what
+        // lets the whole existing filter stack be reused unchanged. Handed to
+        // FilterSkipPlanner they are read as seconds, and because a novel's filtered
+        // passages tile its text, adjacent windows chain through the connected-block
+        // expansion and the chain runs the length of the book: a seek of tens of hours
+        // from the first minute of playback. NarrationPlaybackGuardTest demonstrates it.
+        //
+        // The test is on narration state rather than on an empty event list, because a
+        // narrated book's event list is normally not empty.
+        if (current.narration != null) return
         if (current.scanEvents.isEmpty()) return
 
         val enabledWindows = current.enabledScanEvents()
