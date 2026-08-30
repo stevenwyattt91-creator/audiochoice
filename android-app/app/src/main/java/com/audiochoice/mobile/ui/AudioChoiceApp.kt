@@ -66,6 +66,28 @@ import com.audiochoice.mobile.data.ExploreCatalogBook
 import com.audiochoice.mobile.data.ReaderTimingRange
 import com.audiochoice.mobile.importing.ImportPhase
 import com.audiochoice.mobile.importing.ImportViewModel
+import com.audiochoice.mobile.library.LibraryShelf
+import com.audiochoice.mobile.narration.NarrationConfig
+import com.audiochoice.mobile.narration.voice.RateMeasurementOutcome
+import com.audiochoice.mobile.narration.voice.OnDeviceRateMeasurement
+import com.audiochoice.mobile.narration.voice.OnDeviceRate
+import com.audiochoice.mobile.narration.availableVoiceKinds
+import com.audiochoice.mobile.narration.NarrationViewModel
+import com.audiochoice.mobile.narration.NarrationUiState
+import com.audiochoice.mobile.narration.NarrationTiers
+import com.audiochoice.mobile.narration.NarrationReaderState
+import com.audiochoice.mobile.narration.NarrationReadiness
+import com.audiochoice.mobile.narration.DiscardEstimate
+import com.audiochoice.mobile.narration.FilterChangeImpact
+import com.audiochoice.mobile.narration.FilteredRanges
+import com.audiochoice.mobile.narration.NarrationStorage
+import com.audiochoice.mobile.narration.RerenderImpact
+import com.audiochoice.mobile.narration.RuleRejection
+import com.audiochoice.mobile.narration.RuleScope
+import com.audiochoice.mobile.data.VoiceKind
+import com.audiochoice.mobile.data.SelectedVoice
+import com.audiochoice.mobile.narration.NarrationImportCoordinator
+import com.audiochoice.mobile.library.LibraryShelves
 import com.audiochoice.mobile.library.LibraryViewModel
 import com.audiochoice.mobile.player.PlayerViewModel
 import com.audiochoice.mobile.player.FilterAvailability
@@ -96,6 +118,7 @@ fun AudioChoiceApp(
     library: LibraryViewModel,
     player: PlayerViewModel,
     support: SupportViewModel,
+    narration: NarrationViewModel,
     incomingAudioUri: StateFlow<Uri?>,
     incomingCompanionTransferUri: StateFlow<Uri?>,
     onExternalAudioHandled: () -> Unit,
@@ -122,6 +145,7 @@ fun AudioChoiceApp(
                 library,
                 player,
                 support,
+                narration,
                 auth::logout,
                 incomingAudioUri,
                 incomingCompanionTransferUri,
@@ -225,6 +249,7 @@ private fun LibraryShell(
     library: LibraryViewModel,
     player: PlayerViewModel,
     support: SupportViewModel,
+    narration: NarrationViewModel,
     onLogout: () -> Unit,
     incomingAudioUri: StateFlow<Uri?>,
     incomingCompanionTransferUri: StateFlow<Uri?>,
@@ -234,6 +259,9 @@ private fun LibraryShell(
     val context = androidx.compose.ui.platform.LocalContext.current
     var selected by rememberSaveable { mutableIntStateOf(0) }
     var detailBook by remember { mutableStateOf<LibraryBook?>(null) }
+    // A narrated book opens the reader, not the player. Held separately from detailBook so the
+    // audiobook details path is untouched.
+    var readerBook by remember { mutableStateOf<LibraryBook?>(null) }
     var showingBookFilters by remember { mutableStateOf(false) }
     var profilePage by rememberSaveable { mutableStateOf(ProfilePage.MAIN) }
     var librarySection by rememberSaveable { mutableStateOf(LibrarySection.MY_LIBRARY) }
@@ -322,6 +350,12 @@ private fun LibraryShell(
     LaunchedEffect(importState.savedBook?.id) {
         if (importState.savedBook != null) library.load(accessToken, user.id, force = true)
     }
+    // Every ebook outcome, not only a fresh import. Re-importing a book after moving the file
+    // reports AlreadyInLibrary and carries no saved row, but the list on screen may still predate
+    // the book -- and a listener who just re-picked their file expects to see it either way.
+    LaunchedEffect(importState.ebookOutcome) {
+        if (importState.ebookOutcome != null) library.load(accessToken, user.id, force = true)
+    }
     if (showOnboarding) {
         FirstRunGuide(
             onFinished = {
@@ -364,6 +398,17 @@ private fun LibraryShell(
                 },
             )
         }
+        return
+    }
+    readerBook?.let { book ->
+        EbookReaderScreen(
+            narration = narration,
+            filtersLocked = filtersLocked,
+            onBack = {
+                narration.close()
+                readerBook = null
+            },
+        )
         return
     }
     ModalNavigationDrawer(
@@ -410,7 +455,11 @@ private fun LibraryShell(
                                 player.saveProgress { library.load(accessToken, user.id, force = true) }
                             }
                             if (index == 1 && player.state.value.book == null) {
-                                libraryState.books.firstOrNull()?.let { player.open(it, accessToken) }
+                                // Skips narrated books: the player has no audio for one, and
+                                // would report the listener's book as broken.
+                                libraryState.books
+                                    .firstOrNull { LibraryShelves.shelfFor(it) == LibraryShelf.AUDIOBOOKS }
+                                    ?.let { player.open(it, accessToken) }
                             }
                             if (selected == 2 && index != 2) importer.onImportScreenLeft()
                             selected = index
@@ -470,15 +519,37 @@ private fun LibraryShell(
                     LibraryHome(
                         books = libraryState.books,
                         coverPaths = libraryState.coverPaths,
+                        ebooksWithoutFilterResults = libraryState.ebooksWithoutFilterResults,
                         loading = libraryState.loading,
                         query = searchQuery,
                         onImport = { selected = 2 },
-                        onOpenBook = { book -> player.open(book, accessToken); detailBook = book },
+                        onOpenBook = { book ->
+                            if (NarrationConfig.enabled &&
+                                LibraryShelves.shelfFor(book) == LibraryShelf.EBOOKS
+                            ) {
+                                // Deliberately not player.open: that looks for audio this book
+                                // has none of and would report it as unplayable.
+                                narration.open(book, accessToken)
+                                narration.refreshTier()
+                                readerBook = book
+                            } else {
+                                player.open(book, accessToken)
+                                detailBook = book
+                            }
+                        },
                         // Only the green Continue button skips the details sheet
                         // and resumes in the player.
                         onPlayNow = { book ->
-                            player.openAndStart(book, accessToken, fromBeginning = false)
-                            selected = 1
+                            if (NarrationConfig.enabled &&
+                                LibraryShelves.shelfFor(book) == LibraryShelf.EBOOKS
+                            ) {
+                                narration.open(book, accessToken)
+                                narration.refreshTier()
+                                readerBook = book
+                            } else {
+                                player.openAndStart(book, accessToken, fromBeginning = false)
+                                selected = 1
+                            }
                         },
                     )
                 } else ExploreScannedBooks(
@@ -512,6 +583,11 @@ private fun LibraryShell(
                         onFaq = { profilePage = ProfilePage.FAQ },
                         onSupport = { profilePage = ProfilePage.SUPPORT },
                         onParentalControls = { profilePage = ProfilePage.PARENTAL_CONTROLS },
+                        // Experimental only: a diagnostic for a feature the beta build has no
+                        // access to, so it must not appear there.
+                        onVoiceMeasurement = if (NarrationConfig.enabled) {
+                            { profilePage = ProfilePage.VOICE_MEASUREMENT }
+                        } else null,
                         onLogout = onLogout,
                     )
                     ProfilePage.FAQ -> FaqScreen { profilePage = ProfilePage.MAIN }
@@ -530,6 +606,8 @@ private fun LibraryShell(
                         onEnabledChanged = { filtersLocked = it },
                         onBack = { profilePage = ProfilePage.MAIN },
                     )
+                    ProfilePage.VOICE_MEASUREMENT ->
+                        VoiceMeasurementScreen(onBack = { profilePage = ProfilePage.MAIN })
                 }
             }
         }
@@ -537,7 +615,7 @@ private fun LibraryShell(
     }
 }
 
-private enum class ProfilePage { MAIN, FAQ, SUPPORT, PARENTAL_CONTROLS }
+private enum class ProfilePage { MAIN, FAQ, SUPPORT, PARENTAL_CONTROLS, VOICE_MEASUREMENT }
 private enum class LibrarySection { MY_LIBRARY, EXPLORE }
 private enum class LibrarySort(val label: String) { RECENT("Recently Added"), A_TO_Z("A–Z"), Z_TO_A("Z–A") }
 
@@ -597,6 +675,8 @@ private fun FirstRunGuide(onFinished: () -> Unit) {
 private fun LibraryHome(
     books: List<LibraryBook>,
     coverPaths: Map<String, String>,
+    /** Ebooks with no filter results, by lowercase sha256. */
+    ebooksWithoutFilterResults: Set<String>,
     loading: Boolean,
     query: String,
     onImport: () -> Unit,
@@ -607,6 +687,13 @@ private fun LibraryHome(
 ) {
     var sort by rememberSaveable { mutableStateOf(LibrarySort.RECENT) }
     var sortMenu by remember { mutableStateOf(false) }
+    // The ebook shelf is only offered where narration exists, and only once the listener has an
+    // ebook on it. A beta build has no way to create one, so the tab row never appears there and
+    // the screen below is byte-for-byte what it renders today.
+    val ebooksAvailable = NarrationConfig.enabled && LibraryShelves.hasEbooks(books)
+    var shelf by rememberSaveable { mutableStateOf(LibraryShelf.AUDIOBOOKS) }
+    // A listener who deletes their last ebook must not be left on an empty tab with no way back.
+    if (!ebooksAvailable && shelf != LibraryShelf.AUDIOBOOKS) shelf = LibraryShelf.AUDIOBOOKS
     if (loading) { LinearProgressIndicator(Modifier.fillMaxWidth()); return }
     if (books.isEmpty()) {
         Box(
@@ -622,8 +709,12 @@ private fun LibraryHome(
         }
         return
     }
-    val featured = books.firstOrNull { it.playbackPositionSeconds > 0 && !it.isFinished } ?: books.first()
-    val visibleBooks = books.filter { book ->
+    // Scoped to the shelf on view. A shelf offering to resume a book that is not on it -- and
+    // that opens a different surface when tapped -- would be actively misleading.
+    val shelfBooks = if (ebooksAvailable) LibraryShelves.booksOn(books, shelf) else books
+    val featured = shelfBooks.firstOrNull { it.playbackPositionSeconds > 0 && !it.isFinished }
+        ?: shelfBooks.firstOrNull()
+    val visibleBooks = shelfBooks.filter { book ->
         query.isBlank() || book.title.contains(query, ignoreCase = true) ||
             book.author?.contains(query, ignoreCase = true) == true
     }
@@ -634,6 +725,29 @@ private fun LibraryHome(
     }
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
         Text("My Library", fontSize = 26.sp, fontWeight = FontWeight.Bold)
+        if (ebooksAvailable) {
+            Spacer(Modifier.height(12.dp))
+            TabRow(
+                selectedTabIndex = shelf.ordinal,
+                containerColor = MaterialTheme.colorScheme.background,
+                contentColor = ChoiceGreen,
+            ) {
+                LibraryShelf.entries.forEach { option ->
+                    Tab(
+                        selected = shelf == option,
+                        onClick = { shelf = option },
+                        text = {
+                            Text(
+                                "${option.label} (${LibraryShelves.booksOn(books, option).size})",
+                                fontSize = 13.sp,
+                            )
+                        },
+                        selectedContentColor = ChoiceGreen,
+                        unselectedContentColor = ChoiceMuted,
+                    )
+                }
+            }
+        }
         if (featured != null) {
             Spacer(Modifier.height(16.dp))
             Text("Continue Listening", fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
@@ -653,24 +767,40 @@ private fun LibraryHome(
                         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                             Column(Modifier.weight(1f)) {
                                 Text(featured.title, fontSize = 18.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
-                                Text(featured.author ?: "Imported audiobook", color = ChoiceMuted, fontSize = 12.sp)
+                                Text(
+                                    featured.author
+                                        ?: if (LibraryShelves.shelfFor(featured) == LibraryShelf.EBOOKS) {
+                                            "Imported ebook"
+                                        } else "Imported audiobook",
+                                    color = ChoiceMuted,
+                                    fontSize = 12.sp,
+                                )
                             }
                             FilledIconButton(onClick = { onPlayNow(featured) }, colors = IconButtonDefaults.filledIconButtonColors(containerColor = ChoiceGreen)) {
                                 Icon(Icons.Outlined.PlayArrow, "Resume listening", tint = Color.Black)
                             }
                         }
                         Spacer(Modifier.height(8.dp))
-                        LinearProgressIndicator(
-                            progress = { ((featured.playbackPositionSeconds / (featured.fingerprint.duration ?: 1.0)).coerceIn(0.0, 1.0)).toFloat() },
-                            modifier = Modifier.fillMaxWidth(),
-                        )
+                        // Absent while a narrated book is still rendering: a bar drawn against
+                        // an unknown total reads as "barely started" however far in they are.
+                        LibraryShelves.progressOf(featured)?.let { fraction ->
+                            LinearProgressIndicator(
+                                progress = { fraction },
+                                modifier = Modifier.fillMaxWidth(),
+                            )
+                        }
                     }
                 }
             }
         }
         Spacer(Modifier.height(22.dp))
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            Text("Audiobooks", Modifier.weight(1f), fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
+            Text(
+                if (ebooksAvailable) shelf.label else "Audiobooks",
+                Modifier.weight(1f),
+                fontSize = 18.sp,
+                fontWeight = FontWeight.SemiBold,
+            )
             Box {
                 OutlinedButton(onClick = { sortMenu = true }, contentPadding = PaddingValues(horizontal = 12.dp, vertical = 7.dp)) {
                     Icon(Icons.Outlined.Sort, null, Modifier.size(18.dp)); Spacer(Modifier.width(6.dp)); Text(sort.label, fontSize = 12.sp)
@@ -688,12 +818,20 @@ private fun LibraryHome(
         }
         Spacer(Modifier.height(24.dp))
         if (sortedBooks.isEmpty()) {
-            Text("No audiobooks match “$query”.", color = ChoiceMuted, modifier = Modifier.padding(vertical = 28.dp))
+            Text(
+                if (ebooksAvailable && shelf == LibraryShelf.EBOOKS) {
+                    "No ebooks match “$query”."
+                } else "No audiobooks match “$query”.",
+                color = ChoiceMuted,
+                modifier = Modifier.padding(vertical = 28.dp),
+            )
         } else sortedBooks.forEach { book ->
             LibraryBookRow(
                 book,
                 coverPaths[book.fingerprint.sha256.lowercase()],
                 onOpenBook,
+                filtersUnavailable =
+                    book.fingerprint.sha256.lowercase() in ebooksWithoutFilterResults,
             )
         }
         Spacer(Modifier.height(24.dp))
@@ -705,7 +843,12 @@ private fun LibraryBookRow(
     book: LibraryBook,
     coverPath: String?,
     onOpen: (LibraryBook) -> Unit,
+    filtersUnavailable: Boolean = false,
 ) {
+    // Both shelves share this row, so the labels have to suit whichever book is in it. An ebook has
+    // no running time and was not imported as an audiobook, and saying otherwise about someone's own
+    // book is the kind of small wrongness that makes the whole screen feel unreliable.
+    val isEbook = LibraryShelves.shelfFor(book) == LibraryShelf.EBOOKS
     Card(
         Modifier.fillMaxWidth().padding(bottom = 10.dp).clickable { onOpen(book) },
         colors = CardDefaults.cardColors(containerColor = ChoiceSurface),
@@ -720,9 +863,33 @@ private fun LibraryBookRow(
             Spacer(Modifier.width(13.dp))
             Column(Modifier.weight(1f)) {
                 Text(book.title, fontWeight = FontWeight.SemiBold, maxLines = 2)
-                Text(book.author ?: "Imported audiobook", color = ChoiceMuted, fontSize = 12.sp)
+                Text(
+                    book.author ?: if (isEbook) "Imported ebook" else "Imported audiobook",
+                    color = ChoiceMuted,
+                    fontSize = 12.sp,
+                )
                 Spacer(Modifier.height(6.dp))
-                Text(formatDuration(book.fingerprint.duration), color = ChoiceGreen, fontSize = 11.sp)
+                if (isEbook) {
+                    // An ebook has a length in words, not in hours, and its running time does not
+                    // exist until a voice has read it. "Read aloud" says what the row offers.
+                    Text("Read aloud", color = ChoiceGreen, fontSize = 11.sp)
+                } else {
+                    Text(
+                        formatDuration(book.fingerprint.duration),
+                        color = ChoiceGreen,
+                        fontSize = 11.sp,
+                    )
+                }
+                // Said here rather than only inside the reader, so the listener learns it before
+                // they open the book and press a button that cannot do what they expect.
+                if (filtersUnavailable) {
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        "Filters unavailable",
+                        color = ChoiceMuted,
+                        fontSize = 10.sp,
+                    )
+                }
             }
             Icon(Icons.Outlined.ChevronRight, null, tint = ChoiceMuted)
         }
@@ -929,6 +1096,8 @@ private fun ProfileScreen(
     onFaq: () -> Unit,
     onSupport: () -> Unit,
     onParentalControls: () -> Unit,
+    /** Null outside the experimental build, where the row must not appear at all. */
+    onVoiceMeasurement: (() -> Unit)? = null,
     onLogout: () -> Unit,
 ) {
     val context = androidx.compose.ui.platform.LocalContext.current
@@ -965,6 +1134,15 @@ private fun ProfileScreen(
             ProfileRow(Icons.Outlined.HelpOutline, "FAQs", "Answers about importing, privacy, and filters", onFaq)
             HorizontalDivider(color = ChoiceOutline)
             ProfileRow(Icons.Outlined.SupportAgent, "Support", "Send a message to the AudioChoice team", onSupport)
+            onVoiceMeasurement?.let { openMeasurement ->
+                HorizontalDivider(color = ChoiceOutline)
+                ProfileRow(
+                    Icons.Outlined.RecordVoiceOver,
+                    "Voice speed test",
+                    "Check how fast this phone can read a book aloud",
+                    openMeasurement,
+                )
+            }
         }
         if (BetaConfig.enabled) {
             Spacer(Modifier.height(18.dp))
@@ -2526,6 +2704,12 @@ private fun ReaderSettingsDialog(
     settings: ReaderSettings,
     onSettingsChanged: (ReaderSettings) -> Unit,
     onDismiss: () -> Unit,
+    // Defaulted to the audiobook wording, so the existing call site is unchanged. A narrated book
+    // has no audiobook to follow; what the switch tracks there is a synthetic voice.
+    followLabel: String = "Follow the audiobook",
+    followDescription: String =
+        "Highlights and scrolls to the passage being narrated, and lets you " +
+            "tap a paragraph to jump the audio there.",
 ) {
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -2590,13 +2774,8 @@ private fun ReaderSettingsDialog(
                 Spacer(Modifier.height(20.dp))
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) {
-                        Text("Follow the audiobook", fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
-                        Text(
-                            "Highlights and scrolls to the passage being narrated, and lets you " +
-                                "tap a paragraph to jump the audio there.",
-                            color = ChoiceMuted,
-                            fontSize = 11.sp,
-                        )
+                        Text(followLabel, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+                        Text(followDescription, color = ChoiceMuted, fontSize = 11.sp)
                     }
                     Spacer(Modifier.width(10.dp))
                     Switch(
@@ -2805,7 +2984,7 @@ private fun ImportScreen(importer: ImportViewModel, accessToken: String, showLib
     }
     Text(
         when (state.phase) {
-            ImportPhase.IDLE -> "Import Audiobook"
+            ImportPhase.IDLE -> if (NarrationConfig.enabled) "Import a Book" else "Import Audiobook"
             ImportPhase.AGREEMENT -> "AAX Import"
             ImportPhase.CONVERTING -> "Converting Audiobook"
             ImportPhase.CONVERSION_COMPLETE -> "Conversion Complete"
@@ -2830,16 +3009,44 @@ private fun ImportScreen(importer: ImportViewModel, accessToken: String, showLib
         ) {
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                 Icon(Icons.Outlined.CloudUpload, null, tint = ChoiceGreen, modifier = Modifier.size(62.dp))
-                Text("Choose an audiobook from this device", color = ChoiceMuted)
+                Text(
+                    if (NarrationConfig.enabled) {
+                        "Choose an audiobook or ebook from this device"
+                    } else "Choose an audiobook from this device",
+                    color = ChoiceMuted,
+                )
                 Spacer(Modifier.height(22.dp))
-                Button(onClick = { picker.launch(arrayOf("audio/*", "application/octet-stream")) }) {
+                Button(onClick = {
+                    picker.launch(
+                        if (NarrationConfig.enabled) {
+                            NarrationImportCoordinator.PICKER_MIME_TYPES
+                        } else {
+                            NarrationImportCoordinator.AUDIO_ONLY_PICKER_MIME_TYPES
+                        },
+                    )
+                }) {
                     Text("Browse Files")
                 }
             }
         }
         Spacer(Modifier.height(24.dp))
         Text("Supported Formats", color = ChoiceMuted)
-        Text("MP3   M4B   M4A   AAX", color = ChoiceGreen, fontWeight = FontWeight.SemiBold)
+        Text(
+            if (NarrationConfig.enabled) "MP3   M4B   M4A   AAX   EPUB" else "MP3   M4B   M4A   AAX",
+            color = ChoiceGreen,
+            fontWeight = FontWeight.SemiBold,
+        )
+        if (NarrationConfig.enabled) {
+            Spacer(Modifier.height(6.dp))
+            Text(
+                "An EPUB with no audiobook is read aloud by a synthetic voice and lands in your " +
+                    "Ebooks library. To read along with an audiobook you already have, open that " +
+                    "audiobook and attach the EPUB there instead.",
+                color = ChoiceMuted,
+                fontSize = 12.sp,
+                lineHeight = 17.sp,
+            )
+        }
         Spacer(Modifier.height(20.dp))
         Text(
             "Your audiobook is uploaded privately only when a new scan is required. Temporary audio is deleted after processing.",
@@ -3059,4 +3266,1257 @@ private fun AaxOwnershipAgreement(fileName: String, onAgree: () -> Unit, onCance
             TextButton(onClick = onCancel, modifier = Modifier.fillMaxWidth()) { Text("Cancel") }
         }
     }
+}
+
+// region the ebook reader
+//
+// A narrated book opens here rather than in the player. Everything below lives in this file
+// rather than its own so it can reuse `readerPalette`, `readerFontFamily` and
+// `ReaderSettingsDialog`, all of which are private and all of which the beta build's read-along
+// reader depends on. Widening their visibility to move this out would have put the shipping
+// reader's helpers on the public surface for the benefit of an experimental screen.
+
+/**
+ * Full-screen reader for a book with no audiobook.
+ *
+ * Differs from `ReaderScreen` in one structural way that shapes the whole surface: there is no
+ * audio until a voice makes some, so the bottom bar offers to start reading aloud rather than
+ * offering transport over something that already exists. The text, the filtering and the
+ * typography are the same code, because a filtered passage must look identical whichever kind of
+ * book it came from.
+ */
+@Composable
+private fun EbookReaderScreen(
+    narration: NarrationViewModel,
+    filtersLocked: Boolean,
+    onBack: () -> Unit,
+) {
+    val state by narration.state.collectAsStateWithLifecycle()
+    val book = state.book ?: return
+    val readerContext = androidx.compose.ui.platform.LocalContext.current
+    val settings = state.readerSettings
+    val palette = readerPalette(settings.theme)
+    var settingsSheet by remember { mutableStateOf(false) }
+    var filterSheet by remember { mutableStateOf(false) }
+    var voiceSheet by remember { mutableStateOf(false) }
+    var pronunciationSheet by remember { mutableStateOf(false) }
+    var agreementSheet by remember { mutableStateOf(false) }
+
+    val listState = rememberLazyListState(
+        initialFirstVisibleItemIndex = state.readerPosition.paragraphIndex,
+        initialFirstVisibleItemScrollOffset = state.readerPosition.scrollOffset,
+    )
+
+    // Recomputed only when the text or the enabled filter set changes, never per scroll frame.
+    // The masks come from the same FilteredRanges the renderer uses, so what is hidden here and
+    // what is never spoken cannot disagree.
+    val filtered = remember(
+        state.scanEvents,
+        state.disabledCategoryIDs,
+        state.disabledGroupIDs,
+        state.disabledEventKeys,
+        state.disabledAggregateKeys,
+    ) {
+        FilteredRanges.forEnabledEvents(
+            events = state.scanEvents,
+            disabledCategoryIDs = state.disabledCategoryIDs,
+            disabledGroupIDs = state.disabledGroupIDs,
+            disabledEventKeys = state.disabledEventKeys,
+            disabledAggregateKeys = state.disabledAggregateKeys,
+        )
+    }
+
+    var previousHighlight by remember(book.id) { mutableStateOf<Int?>(null) }
+    val view = remember(state.bookText, filtered, state.positionSeconds, state.plan) {
+        val bookText = state.bookText
+        if (bookText == null) {
+            null
+        } else {
+            NarrationReaderState.derive(
+                bookText = bookText,
+                filteredRanges = filtered,
+                narrationTimingRanges = emptyList(),
+                bookTimeSeconds = state.positionSeconds.takeIf { state.isSpeaking },
+                previousHighlightIndex = previousHighlight,
+            )
+        }
+    }
+    LaunchedEffect(view?.highlightedParagraphIndex) {
+        view?.highlightedParagraphIndex?.let { previousHighlight = it }
+    }
+
+    BackHandler(onBack = onBack)
+
+    LaunchedEffect(listState, book.id) {
+        snapshotFlow { listState.firstVisibleItemIndex to listState.firstVisibleItemScrollOffset }
+            .collect { (index, offset) -> narration.saveReaderPosition(index, offset) }
+    }
+
+    val removedCount = view?.displayParagraphs?.sumOf { it.removedPassages } ?: 0
+
+    Column(
+        Modifier.fillMaxSize().background(palette.paper).statusBarsPadding().navigationBarsPadding(),
+    ) {
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            IconButton(onClick = onBack) {
+                Icon(Icons.Outlined.KeyboardArrowDown, "Back to library", tint = ChoiceGreen)
+            }
+            Column(Modifier.weight(1f)) {
+                Text(
+                    book.title,
+                    color = palette.ink,
+                    fontSize = 13.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Text(
+                    buildString {
+                        append("Read aloud")
+                        if (state.totalChapters > 0) {
+                            append(" · ${state.renderedChapters}/${state.totalChapters} chapters")
+                        }
+                        if (removedCount > 0) append(" · $removedCount filtered passages removed")
+                    },
+                    color = palette.mutedInk,
+                    fontSize = 11.sp,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            IconButton(onClick = { filterSheet = true }) {
+                Icon(Icons.Outlined.Shield, "Content filters", tint = ChoiceGreen)
+            }
+            IconButton(onClick = { pronunciationSheet = true }) {
+                Icon(Icons.Outlined.RecordVoiceOver, "How words are said", tint = ChoiceGreen)
+            }
+            IconButton(onClick = { settingsSheet = true }) {
+                Icon(Icons.Outlined.TextFields, "Reading settings", tint = ChoiceGreen)
+            }
+        }
+        HorizontalDivider(color = palette.mutedInk.copy(alpha = .2f))
+
+        // Filtering silently doing nothing is worse than saying so: without this the listener
+        // would assume their filters were applied to what is read aloud.
+        if (state.readiness == NarrationReadiness.AWAITING_FILTERS &&
+            !state.flags.continuedWithoutFilterResults
+        ) {
+            Card(
+                Modifier.fillMaxWidth().padding(12.dp),
+                colors = CardDefaults.cardColors(containerColor = ChoiceSurface),
+            ) {
+                Column(Modifier.padding(14.dp)) {
+                    Text(
+                        NarrationViewModel.FILTERS_UNAVAILABLE_MESSAGE,
+                        color = ChoiceMuted,
+                        fontSize = 12.sp,
+                        lineHeight = 17.sp,
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    TextButton(onClick = narration::continueWithoutFilterResults) {
+                        Text("Read aloud without filters")
+                    }
+                }
+            }
+        }
+
+        if (view == null || view.visibleParagraphs.isEmpty()) {
+            Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
+                Text(
+                    when (state.readiness) {
+                        NarrationReadiness.LOADING -> "Opening this book…"
+                        NarrationReadiness.UNREADABLE ->
+                            state.error ?: "This book's text is no longer on this device."
+                        else -> "This book has no readable text."
+                    },
+                    color = palette.mutedInk,
+                    fontSize = 14.sp,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.padding(28.dp),
+                )
+            }
+        } else {
+            LazyColumn(
+                state = listState,
+                modifier = Modifier.weight(1f).fillMaxWidth(),
+                contentPadding = PaddingValues(
+                    horizontal = (READER_BASE_MARGIN_DP * settings.marginScale).dp,
+                    vertical = 16.dp,
+                ),
+            ) {
+                items(
+                    count = view.visibleParagraphs.size,
+                    key = { index -> view.visibleParagraphs[index].paragraph.startCharacter },
+                ) { index ->
+                    val display = view.visibleParagraphs[index]
+                    val isSpoken = settings.followAudio &&
+                        view.highlightedParagraphIndex ==
+                        view.paragraphs.indexOf(display.paragraph)
+                    Text(
+                        display.displayText,
+                        color = palette.ink,
+                        fontFamily = readerFontFamily(settings.font),
+                        fontSize = (READER_BASE_FONT_SP * settings.fontScale).sp,
+                        lineHeight = (
+                            READER_BASE_LINE_SP * settings.fontScale *
+                                ReaderSettings.lineHeightFactor(settings.font)
+                            ).sp,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .then(
+                                if (isSpoken) {
+                                    Modifier.background(
+                                        ChoiceGreen.copy(alpha = .16f),
+                                        RoundedCornerShape(6.dp),
+                                    ).semantics { stateDescription = "Now being read aloud" }
+                                } else Modifier,
+                            )
+                            .padding(horizontal = 4.dp, vertical = 2.dp)
+                            .padding(bottom = 12.dp),
+                    )
+                }
+            }
+        }
+
+        HorizontalDivider(color = palette.mutedInk.copy(alpha = .2f))
+        // Making a chapter takes a moment even on a fast phone, and silence with no explanation
+        // reads as a button that did nothing.
+        state.message?.let { message ->
+            Row(
+                Modifier.fillMaxWidth().padding(start = 20.dp, end = 20.dp, top = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                CircularProgressIndicator(Modifier.size(14.dp), strokeWidth = 2.dp, color = ChoiceGreen)
+                Spacer(Modifier.width(10.dp))
+                Text(message, color = palette.mutedInk, fontSize = 12.sp)
+            }
+        }
+        state.error?.let { error ->
+            Row(
+                Modifier.fillMaxWidth().padding(start = 20.dp, end = 20.dp, top = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    error,
+                    color = MaterialTheme.colorScheme.error,
+                    fontSize = 12.sp,
+                    lineHeight = 17.sp,
+                    modifier = Modifier.weight(1f),
+                )
+                TextButton(onClick = narration::dismissMessage) { Text("Dismiss", fontSize = 12.sp) }
+            }
+        }
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween,
+        ) {
+            TextButton(onClick = {
+                voiceSheet = true
+                // Choosing a voice is exactly the moment a lapsed subscription or a changed
+                // agreement should be noticed, so both are re-read here rather than trusted.
+                narration.refreshTier(force = true)
+                narration.refreshVoices()
+            }) {
+                Icon(Icons.Outlined.RecordVoiceOver, null, tint = ChoiceGreen, modifier = Modifier.size(19.dp))
+                Spacer(Modifier.width(7.dp))
+                Text(
+                    state.selectedVoice?.let { voiceKindLabel(it.kind) } ?: "Your phone's voice",
+                    color = palette.ink,
+                    fontSize = 12.sp,
+                )
+            }
+            // Only once there is audio to reclaim. Before then this is an action with nothing to
+            // act on, and "0 MB" invites a tap that cannot do anything.
+            if (state.audioBytes > 0) {
+                TextButton(onClick = narration::offerDiscardAllAudio) {
+                    Icon(
+                        Icons.Outlined.Storage,
+                        null,
+                        tint = ChoiceGreen,
+                        modifier = Modifier.size(17.dp),
+                    )
+                    Spacer(Modifier.width(6.dp))
+                    Text(
+                        // Rounded down, which is how a size reads everywhere else on the device.
+                        "${NarrationStorage.displayMegabytes(state.audioBytes)} MB",
+                        color = palette.mutedInk,
+                        fontSize = 12.sp,
+                    )
+                }
+            }
+            // Deliberately disabled rather than hidden while filters are unsettled: a missing
+            // control reads as a broken screen, whereas a disabled one with the explanation
+            // above it reads as a step still to do.
+            Button(
+                onClick = { narration.toggleReadAloud(readerContext) },
+                // A voice is not required to start: with none chosen the phone's own voice is
+                // used, which is the free default and works offline. Requiring a choice first
+                // would put a dialogue between the listener and the button they pressed.
+                enabled = state.mayRender,
+                shape = RoundedCornerShape(50),
+            ) {
+                Icon(
+                    if (state.isSpeaking) Icons.Outlined.Pause else Icons.Outlined.PlayArrow,
+                    if (state.isSpeaking) "Pause" else "Read aloud",
+                    modifier = Modifier.size(22.dp),
+                )
+                Spacer(Modifier.width(7.dp))
+                Text(if (state.isSpeaking) "Pause" else "Read aloud")
+            }
+        }
+    }
+
+    if (settingsSheet) {
+        ReaderSettingsDialog(
+            settings = settings,
+            onSettingsChanged = narration::updateReaderSettings,
+            onDismiss = { settingsSheet = false },
+            // "Follow the audiobook" is the wrong words here: there is no audiobook, and what
+            // the switch controls is whether the reader tracks the synthetic voice.
+            followLabel = "Follow the voice",
+            followDescription = "Highlights and scrolls to the passage being read aloud.",
+        )
+    }
+    if (filterSheet) {
+        NarrationFilterDialog(
+            state = state,
+            filtersLocked = filtersLocked,
+            onChoices = narration::setFilterChoices,
+            onDismiss = { filterSheet = false },
+        )
+    }
+    // Shown over the filter sheet, because it is a consequence of the switch they just moved and
+    // reads as a continuation of it rather than as a new task.
+    if (pronunciationSheet) {
+        NarrationPronunciationDialog(
+            state = state,
+            onRecord = { written, spoken, scope, editing ->
+                narration.recordPronunciationRule(written, spoken, scope, editing)
+            },
+            onDelete = narration::deletePronunciationRule,
+            onPreview = { spoken -> narration.previewPronunciation(readerContext, spoken) },
+            onFormChanged = narration::clearPronunciationRejection,
+            onDismiss = { pronunciationSheet = false },
+        )
+    }
+    state.pendingPronunciationRerender?.let { impact ->
+        NarrationPronunciationRerenderDialog(
+            impact = impact,
+            onConfirm = { narration.confirmPronunciationRerender(readerContext) },
+            onCancel = narration::cancelPronunciationRerender,
+        )
+    }
+    state.pendingDiscardAll?.let { estimate ->
+        NarrationDiscardAudioDialog(
+            estimate = estimate,
+            onConfirm = narration::discardAllAudio,
+            onCancel = narration::cancelDiscardAllAudio,
+        )
+    }
+    state.pendingFilterChange?.let { pending ->
+        NarrationFilterChangeDialog(
+            impact = pending.impact,
+            onConfirm = { narration.confirmFilterChange(readerContext) },
+            onDecline = narration::declineFilterChange,
+        )
+    }
+    if (voiceSheet) {
+        NarrationVoiceDialog(
+            state = state,
+            onSelect = { voice ->
+                if (voice.kind == VoiceKind.PREMIUM &&
+                    !com.audiochoice.mobile.narration.voice.PremiumVoiceAgreement.maySubmit(
+                        state.premiumGate,
+                    )
+                ) {
+                    // Selecting premium never records the choice before the statement has been
+                    // accepted. On decline or dismissal nothing at all changes, which is why the
+                    // selection happens in the dialog's accept handler rather than here.
+                    voiceSheet = false
+                    agreementSheet = true
+                } else {
+                    narration.selectVoice(voice)
+                    voiceSheet = false
+                }
+            },
+            onDismiss = { voiceSheet = false },
+        )
+    }
+    if (agreementSheet) {
+        PremiumAgreementDialog(
+            gate = state.premiumGate,
+            onAccept = {
+                narration.acceptPremiumAgreement()
+                narration.selectVoice(SelectedVoice(VoiceKind.PREMIUM, defaultVoiceID(VoiceKind.PREMIUM)))
+                agreementSheet = false
+            },
+            onDecline = {
+                // Changes nothing: no record, no selected voice, no submission. A listener who
+                // declines is left exactly where they were, still able to read and still able to
+                // use their phone's own voice.
+                agreementSheet = false
+            },
+        )
+    }
+}
+
+/**
+ * Filter controls for a narrated book.
+ *
+ * Builds its tree with the same `PlaybackFilterTaxonomy` an audiobook uses, so the two present
+ * the identical control hierarchy. Written against plain sets and a callback rather than against
+ * `PlayerViewModel`, which is what lets a narrated book reuse the taxonomy without the player
+ * having to know narration exists.
+ */
+@Composable
+private fun NarrationFilterDialog(
+    state: NarrationUiState,
+    filtersLocked: Boolean,
+    onChoices: (Set<String>, Set<String>, Set<String>, Set<String>) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val available = remember(state.scanEvents) {
+        PlaybackFilterTaxonomy.available(state.scanEvents)
+    }
+    var expandedParent by remember { mutableStateOf<String?>(null) }
+    var expandedChild by remember { mutableStateOf<String?>(null) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        icon = { Icon(Icons.Outlined.Shield, null, tint = ChoiceGreen) },
+        title = { Text("Content filters") },
+        text = {
+            Column(Modifier.heightIn(max = 460.dp).verticalScroll(rememberScrollState())) {
+                Text(
+                    when {
+                        state.readiness == NarrationReadiness.AWAITING_FILTERS ->
+                            "Filter results for this book aren't ready, so nothing is being " +
+                                "filtered yet."
+                        filtersLocked ->
+                            "Parental Controls are on. Filter choices are visible but locked."
+                        available.isEmpty() ->
+                            "No filterable content was found in this book."
+                        else ->
+                            "Filtered passages are never read aloud and never appear in the " +
+                                "text. Changing a filter after a chapter is read aloud offers " +
+                                "to make that chapter again."
+                    },
+                    color = ChoiceMuted,
+                    fontSize = 12.sp,
+                    lineHeight = 17.sp,
+                )
+                Spacer(Modifier.height(10.dp))
+                available.forEach { parent ->
+                    HorizontalDivider(color = ChoiceOutline)
+                    val categoryOff = parent.id.lowercase() in state.disabledCategoryIDs
+                    Row(
+                        Modifier.fillMaxWidth().clickable {
+                            expandedParent = if (expandedParent == parent.id) null else parent.id
+                        }.padding(vertical = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(if (expandedParent == parent.id) "⌄" else "›", color = ChoiceMuted)
+                        Spacer(Modifier.width(8.dp))
+                        Column(Modifier.weight(1f)) {
+                            Text(parent.label, fontSize = 14.sp)
+                            Text(
+                                "${parent.children.sumOf { it.events.size }} filter controls",
+                                color = ChoiceMuted,
+                                fontSize = 11.sp,
+                            )
+                        }
+                        Switch(
+                            checked = !categoryOff,
+                            enabled = !filtersLocked,
+                            onCheckedChange = { enabled ->
+                                val categories = state.disabledCategoryIDs.toMutableSet()
+                                if (enabled) {
+                                    categories.remove(parent.id.lowercase())
+                                } else {
+                                    categories.add(parent.id.lowercase())
+                                }
+                                onChoices(
+                                    categories,
+                                    state.disabledGroupIDs,
+                                    state.disabledEventKeys,
+                                    state.disabledAggregateKeys,
+                                )
+                            },
+                            modifier = Modifier.semantics {
+                                contentDescription = "Filter ${parent.label}"
+                                stateDescription = if (categoryOff) "Not filtering" else "Filtering"
+                            },
+                        )
+                    }
+                    if (expandedParent == parent.id) parent.children.forEach { child ->
+                        val groupOff = child.id.lowercase() in state.disabledGroupIDs
+                        Row(
+                            Modifier.fillMaxWidth().clickable {
+                                expandedChild = if (expandedChild == child.id) null else child.id
+                            }.padding(start = 26.dp, top = 6.dp, bottom = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text(if (expandedChild == child.id) "⌄" else "›", color = ChoiceMuted)
+                            Spacer(Modifier.width(8.dp))
+                            Column(Modifier.weight(1f)) {
+                                Text(child.label, fontSize = 13.sp)
+                                Text(
+                                    "${child.events.size} controls",
+                                    color = ChoiceMuted,
+                                    fontSize = 10.sp,
+                                )
+                            }
+                            Switch(
+                                checked = !groupOff && !categoryOff,
+                                enabled = !filtersLocked && !categoryOff,
+                                onCheckedChange = { enabled ->
+                                    val groups = state.disabledGroupIDs.toMutableSet()
+                                    if (enabled) {
+                                        groups.remove(child.id.lowercase())
+                                    } else {
+                                        groups.add(child.id.lowercase())
+                                    }
+                                    onChoices(
+                                        state.disabledCategoryIDs,
+                                        groups,
+                                        state.disabledEventKeys,
+                                        state.disabledAggregateKeys,
+                                    )
+                                },
+                                modifier = Modifier.semantics {
+                                    contentDescription = "Filter ${child.label}"
+                                    stateDescription =
+                                        if (groupOff || categoryOff) "Not filtering" else "Filtering"
+                                },
+                            )
+                        }
+                        // Individual controls, so a listener can switch off one word rather than a
+                        // whole category. Repeated profanity arrives as a single aggregate control
+                        // holding every occurrence, exactly as it does for an audiobook.
+                        if (expandedChild == child.id) child.events.forEach { event ->
+                            val eventOff = event.key in state.disabledEventKeys ||
+                                event.key in state.disabledAggregateKeys
+                            Row(
+                                Modifier.fillMaxWidth()
+                                    .padding(start = 52.dp, top = 4.dp, bottom = 4.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Column(Modifier.weight(1f)) {
+                                    Text(event.label, fontSize = 12.sp)
+                                    // Presented as a position through the book, never as a
+                                    // timestamp. For a narrated book this value is a character
+                                    // offset carried in a time-named field, so formatting it as
+                                    // mm:ss would render offset 84,000 as "23:20:00" -- a number
+                                    // that looks authoritative and means nothing.
+                                    narratedPositionLabel(event.startTime, state.bookText?.length)
+                                        ?.let { label ->
+                                            Text(label, color = ChoiceMuted, fontSize = 10.sp)
+                                        }
+                                }
+                                Switch(
+                                    checked = !eventOff && !groupOff && !categoryOff,
+                                    enabled = !filtersLocked && !groupOff && !categoryOff,
+                                    onCheckedChange = { enabled ->
+                                        val events = state.disabledEventKeys.toMutableSet()
+                                        val aggregates = state.disabledAggregateKeys.toMutableSet()
+                                        val target = if (event.aggregate) aggregates else events
+                                        if (enabled) target.remove(event.key) else target.add(event.key)
+                                        onChoices(
+                                            state.disabledCategoryIDs,
+                                            state.disabledGroupIDs,
+                                            events,
+                                            aggregates,
+                                        )
+                                    },
+                                    modifier = Modifier.semantics {
+                                        contentDescription = "Filter ${event.label}"
+                                        stateDescription =
+                                            if (eventOff) "Not filtering" else "Filtering"
+                                    },
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = onDismiss) { Text("Done") } },
+    )
+}
+
+/**
+ * Records how a word in this book should be said.
+ *
+ * Validation runs before anything is written and a refusal keeps what was typed: making someone
+ * retype a long name because the other field was wrong is its own small insult.
+ */
+@Composable
+private fun NarrationPronunciationDialog(
+    state: NarrationUiState,
+    onRecord: (String, String, RuleScope, String?) -> Unit,
+    onDelete: (String, RuleScope) -> Unit,
+    onPreview: (String) -> Unit,
+    onFormChanged: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    var written by remember { mutableStateOf("") }
+    var spoken by remember { mutableStateOf("") }
+    var scope by remember { mutableStateOf(RuleScope.BOOK) }
+    // Set when an existing rule is being replaced, so validation knows not to treat the rule as a
+    // duplicate of itself.
+    var editing by remember { mutableStateOf<String?>(null) }
+    // Cleared when the view model reports a rule accepted, never on the button press. Recording is
+    // asynchronous, so clearing on press would discard what someone typed precisely when the rule
+    // was refused and they need it back to correct it.
+    var seenAccepted by remember { mutableStateOf(state.pronunciationAccepted) }
+    LaunchedEffect(state.pronunciationAccepted) {
+        if (state.pronunciationAccepted != seenAccepted) {
+            seenAccepted = state.pronunciationAccepted
+            written = ""
+            spoken = ""
+            editing = null
+        }
+    }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        icon = { Icon(Icons.Outlined.RecordVoiceOver, null, tint = ChoiceGreen) },
+        title = { Text("How words are said") },
+        text = {
+            Column {
+                Text(
+                    "Names the voice gets wrong. This changes only what is read aloud, never the " +
+                        "words on the page.",
+                    color = ChoiceMuted,
+                    fontSize = 12.sp,
+                )
+                Spacer(Modifier.height(12.dp))
+                OutlinedTextField(
+                    value = written,
+                    onValueChange = { written = it; onFormChanged() },
+                    label = { Text("Written like") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Spacer(Modifier.height(8.dp))
+                OutlinedTextField(
+                    value = spoken,
+                    onValueChange = { spoken = it; onFormChanged() },
+                    label = { Text("Said like") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                // Said plainly and next to the field it concerns. The entered values stay put.
+                state.pronunciationRejection?.let { rejection ->
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        pronunciationRejectionMessage(rejection),
+                        color = ChoiceGreen,
+                        fontSize = 12.sp,
+                    )
+                    // A duplicate is not a dead end: the rule they are trying to add already
+                    // exists, so the useful next step is editing it.
+                    if (rejection is RuleRejection.Duplicate) {
+                        TextButton(onClick = {
+                            written = rejection.existing.writtenForm
+                            spoken = rejection.existing.replacementForm
+                            editing = rejection.existing.writtenForm
+                            onFormChanged()
+                        }) { Text("Edit the existing one") }
+                    }
+                }
+                Spacer(Modifier.height(10.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    // Hearing it is the only way to tell whether a spelling works, so the preview
+                    // sits next to the field rather than behind the save.
+                    TextButton(
+                        onClick = { onPreview(spoken) },
+                        enabled = spoken.isNotBlank(),
+                    ) {
+                        Icon(
+                            Icons.Outlined.PlayArrow,
+                            null,
+                            tint = ChoiceGreen,
+                            modifier = Modifier.size(17.dp),
+                        )
+                        Spacer(Modifier.width(5.dp))
+                        Text("Hear it", fontSize = 12.sp)
+                    }
+                    Spacer(Modifier.weight(1f))
+                    TextButton(onClick = {
+                        scope = if (scope == RuleScope.BOOK) RuleScope.ACCOUNT else RuleScope.BOOK
+                    }) {
+                        Text(
+                            if (scope == RuleScope.BOOK) "This book" else "All my books",
+                            fontSize = 12.sp,
+                        )
+                    }
+                }
+                if (state.pronunciationRules.isNotEmpty()) {
+                    Spacer(Modifier.height(10.dp))
+                    HorizontalDivider(color = ChoiceMuted.copy(alpha = .2f))
+                    Spacer(Modifier.height(8.dp))
+                    state.pronunciationRules.forEach { scoped ->
+                        Row(
+                            Modifier.fillMaxWidth().padding(vertical = 3.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Column(Modifier.weight(1f)) {
+                                Text(
+                                    "${scoped.rule.writtenForm} → ${scoped.rule.replacementForm}",
+                                    fontSize = 12.sp,
+                                )
+                                Text(
+                                    if (scoped.scope == RuleScope.BOOK) {
+                                        "This book"
+                                    } else {
+                                        "All my books"
+                                    },
+                                    color = ChoiceMuted,
+                                    fontSize = 10.sp,
+                                )
+                            }
+                            TextButton(onClick = {
+                                onDelete(scoped.rule.writtenForm, scoped.scope)
+                            }) { Text("Remove", fontSize = 11.sp) }
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = { onRecord(written, spoken, scope, editing) },
+                enabled = written.isNotBlank() && spoken.isNotBlank(),
+            ) { Text(if (editing == null) "Add" else "Save") }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Done") } },
+    )
+}
+
+/** Says why a rule was refused, in the terms the listener typed it in. */
+private fun pronunciationRejectionMessage(rejection: RuleRejection): String = when (rejection) {
+    is RuleRejection.OutOfBounds -> when (rejection.form) {
+        RuleRejection.OutOfBounds.Form.WRITTEN ->
+            "Fill in how the word is written, up to ${rejection.limit} characters."
+        RuleRejection.OutOfBounds.Form.SPOKEN ->
+            "Fill in how it should be said, up to ${rejection.limit} characters."
+    }
+    is RuleRejection.Duplicate ->
+        "There is already a rule for “${rejection.existing.writtenForm}”."
+    is RuleRejection.ScopeFull ->
+        "That is the limit of ${rejection.limit} rules. Remove one to add another."
+}
+
+/**
+ * Offers to redo audio a pronunciation change affects.
+ *
+ * The rule is already saved and governs everything made from here on. The only question is whether to
+ * redo what already exists, which costs the wait again.
+ */
+@Composable
+private fun NarrationPronunciationRerenderDialog(
+    impact: RerenderImpact,
+    onConfirm: () -> Unit,
+    onCancel: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onCancel,
+        icon = { Icon(Icons.Outlined.Refresh, null, tint = ChoiceGreen) },
+        title = { Text("Update the audio already made?") },
+        text = {
+            val chapters = if (impact.chapterCount == 1) "chapter" else "chapters"
+            Column {
+                Text(
+                    "${impact.chapterCount} $chapters already have audio using the old " +
+                        "pronunciation.",
+                    fontSize = 13.sp,
+                )
+                Spacer(Modifier.height(10.dp))
+                Text(
+                    "Everything read from now on uses your new pronunciation either way.",
+                    color = ChoiceMuted,
+                    fontSize = 12.sp,
+                )
+            }
+        },
+        confirmButton = { TextButton(onClick = onConfirm) { Text("Update them") } },
+        dismissButton = { TextButton(onClick = onCancel) { Text("Leave them") } },
+    )
+}
+
+/**
+ * Confirms reclaiming the space a book's audio occupies.
+ *
+ * Asked because reclaiming is instant and undoing it is not: the audio returns only by waiting for it
+ * to be made again. Everything cheap to keep is kept -- the reading plan, the word timings, the scan
+ * results, the pronunciation rules and their place in the book -- so this trades space for waiting and
+ * nothing else.
+ */
+@Composable
+private fun NarrationDiscardAudioDialog(
+    estimate: DiscardEstimate,
+    onConfirm: () -> Unit,
+    onCancel: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onCancel,
+        icon = { Icon(Icons.Outlined.Storage, null, tint = ChoiceGreen) },
+        title = { Text("Free up this space?") },
+        text = {
+            Column {
+                Text(
+                    "This frees " +
+                        "${NarrationStorage.displayMegabytes(estimate.reclaimableBytes)} MB.",
+                    fontSize = 13.sp,
+                )
+                Spacer(Modifier.height(10.dp))
+                val chapters =
+                    if (estimate.chaptersNeedingRerender == 1) "chapter" else "chapters"
+                Text(
+                    "${estimate.chaptersNeedingRerender} $chapters will need to be made again " +
+                        "before you can hear them.",
+                    color = ChoiceMuted,
+                    fontSize = 12.sp,
+                )
+                Spacer(Modifier.height(10.dp))
+                Text(
+                    "Your place in the book, your filters and your pronunciations are kept.",
+                    color = ChoiceMuted,
+                    fontSize = 12.sp,
+                )
+            }
+        },
+        confirmButton = { TextButton(onClick = onConfirm) { Text("Free up space") } },
+        dismissButton = { TextButton(onClick = onCancel) { Text("Keep the audio") } },
+    )
+}
+
+/**
+ * Confirms a filter change that would invalidate audio already made for this book.
+ *
+ * Asked only when rendered audio is actually affected. A narrated book's audio carries the filters
+ * that were in force when it was made, so changing one afterwards leaves the book saying one thing
+ * and sounding like another until it is re-rendered -- and re-rendering means discarding audio the
+ * listener has already waited for. That is their decision, not one to make quietly on their behalf.
+ */
+@Composable
+private fun NarrationFilterChangeDialog(
+    impact: FilterChangeImpact.Rerender,
+    onConfirm: () -> Unit,
+    onDecline: () -> Unit,
+) {
+    AlertDialog(
+        // Dismissing is declining. The safe reading of a tap outside is "I did not mean to do
+        // that", and nothing has been written or discarded yet.
+        onDismissRequest = onDecline,
+        icon = { Icon(Icons.Outlined.Refresh, null, tint = ChoiceGreen) },
+        title = { Text("Make this audio again?") },
+        text = {
+            Column {
+                val chapters = if (impact.chapterCount == 1) "chapter" else "chapters"
+                Text(
+                    "This filter change affects ${impact.chapterCount} $chapters that already " +
+                        "have audio. That audio was made with your previous filters, so it has " +
+                        "to be made again to match.",
+                    fontSize = 13.sp,
+                )
+                Spacer(Modifier.height(10.dp))
+                val minutes = if (impact.estimatedMinutes == 1) "minute" else "minutes"
+                Text(
+                    "About ${impact.estimatedMinutes} $minutes.",
+                    color = ChoiceMuted,
+                    fontSize = 12.sp,
+                )
+                // Named separately because it is the one part of a re-render that costs more than
+                // waiting: the text of those chapters leaves the device again.
+                if (impact.chaptersResynthesizedByPremiumVoice > 0) {
+                    Spacer(Modifier.height(6.dp))
+                    val sent = impact.chaptersResynthesizedByPremiumVoice
+                    Text(
+                        "$sent will be sent to the premium voice again.",
+                        color = ChoiceMuted,
+                        fontSize = 12.sp,
+                    )
+                }
+                Spacer(Modifier.height(10.dp))
+                Text(
+                    "Your place in the book is kept.",
+                    color = ChoiceMuted,
+                    fontSize = 12.sp,
+                )
+            }
+        },
+        confirmButton = { TextButton(onClick = onConfirm) { Text("Make it again") } },
+        dismissButton = { TextButton(onClick = onDecline) { Text("Keep it as it is") } },
+    )
+}
+
+/**
+ * Where a narrated book's flagged passage sits, expressed as a share of the book.
+ *
+ * A narrated book's scan events carry **character offsets** in the same `startTime` field an
+ * audiobook uses for seconds. That reuse is what lets the whole existing filter stack work
+ * unchanged, and it is also the single most dangerous thing about the contract: formatting one as a
+ * timestamp turns offset 84,000 into "23:20:00", which looks authoritative and means nothing.
+ *
+ * A percentage is the honest reading. It is what a character offset actually tells a listener, it
+ * needs no timings to compute, and it stays correct while a book is only part-rendered — unlike a
+ * time, which does not exist until the audio does.
+ */
+private fun narratedPositionLabel(offset: Double?, bookTextLength: Int?): String? {
+    if (offset == null || bookTextLength == null || bookTextLength <= 0) return null
+    val share = (offset / bookTextLength).coerceIn(0.0, 1.0)
+    // Rounded to whole percent: a flagged passage is a place in a book, not a coordinate, and
+    // decimals would imply a precision the number does not carry.
+    return "${(share * 100).toInt()}% through the book"
+}
+
+/**
+ * Voice selection for a narrated book.
+ *
+ * Presents only what the tier allows, and says which voices keep the text on the device. No
+ * purchase control and no price appear: billing is not built, and offering a listener a way to
+ * buy something that cannot be bought would be worse than offering nothing.
+ */
+@Composable
+private fun NarrationVoiceDialog(
+    state: NarrationUiState,
+    onSelect: (SelectedVoice) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    // Not yet measured on a device, so the local neural voice is withheld rather than offered
+    // and then found to be too slow. NarrationTierStore already models the distinction.
+    val localNeuralSupported = false
+    val kinds = state.availableVoiceKinds(localNeuralSupported)
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        icon = { Icon(Icons.Outlined.RecordVoiceOver, null, tint = ChoiceGreen) },
+        title = { Text("Choose a voice") },
+        text = {
+            Column(Modifier.verticalScroll(rememberScrollState())) {
+                if (state.tier?.isConfirmed == false) {
+                    Text(
+                        "Your subscription could not be checked just now, so premium voices " +
+                            "may not appear. Everything already read aloud keeps playing.",
+                        color = ChoiceMuted,
+                        fontSize = 12.sp,
+                        lineHeight = 17.sp,
+                    )
+                    Spacer(Modifier.height(12.dp))
+                }
+                kinds.forEach { kind ->
+                    val selected = state.selectedVoice?.kind == kind
+                    Card(
+                        Modifier.fillMaxWidth().padding(bottom = 8.dp).clickable {
+                            onSelect(SelectedVoice(kind, defaultVoiceID(kind)))
+                        },
+                        colors = CardDefaults.cardColors(
+                            containerColor = if (selected) Color(0xFF343B38) else ChoiceSurface,
+                        ),
+                        shape = RoundedCornerShape(12.dp),
+                    ) {
+                        Row(
+                            Modifier.fillMaxWidth().padding(14.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Column(Modifier.weight(1f)) {
+                                Text(voiceKindLabel(kind), fontWeight = FontWeight.SemiBold)
+                                Text(
+                                    voiceKindDescription(kind),
+                                    color = ChoiceMuted,
+                                    fontSize = 11.sp,
+                                    lineHeight = 16.sp,
+                                )
+                            }
+                            if (selected) {
+                                Icon(Icons.Outlined.Check, "Selected", tint = ChoiceGreen)
+                            }
+                        }
+                    }
+                }
+                if (!kinds.contains(VoiceKind.PREMIUM)) {
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        "The premium voice is part of a paid plan that is not on sale yet.",
+                        color = ChoiceMuted,
+                        fontSize = 11.sp,
+                    )
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = onDismiss) { Text("Done") } },
+    )
+}
+
+private fun voiceKindLabel(kind: VoiceKind): String = when (kind) {
+    VoiceKind.SYSTEM -> "Your phone's voice"
+    VoiceKind.LOCAL_NEURAL -> "Enhanced on-device voice"
+    VoiceKind.PREMIUM -> "Premium voice"
+}
+
+/**
+ * Says plainly which voices send the book's text off the device.
+ *
+ * The distinction is the one thing a listener choosing a voice most needs to know, and it is
+ * read from [NarrationTiers.sendsTextOffDevice] rather than restated, so the copy cannot end up
+ * claiming something different from what the render path does.
+ */
+private fun voiceKindDescription(kind: VoiceKind): String {
+    val privacy = if (NarrationTiers.sendsTextOffDevice(kind)) {
+        "Sends each chapter's text to AudioChoice to be turned into audio."
+    } else {
+        "Works offline. Nothing from this book leaves your phone."
+    }
+    val quality = when (kind) {
+        VoiceKind.SYSTEM -> "Always available, free."
+        VoiceKind.LOCAL_NEURAL -> "Better than the built-in voice, free."
+        VoiceKind.PREMIUM -> "The most natural voice, closest to a human narrator."
+    }
+    return "$quality $privacy"
+}
+
+private fun defaultVoiceID(kind: VoiceKind): String = when (kind) {
+    VoiceKind.SYSTEM -> "system-default"
+    VoiceKind.LOCAL_NEURAL -> "local-neural-default"
+    // Measured as the clearest of the generative voices during verification.
+    VoiceKind.PREMIUM -> "Ruth"
+}
+
+// endregion
+
+// region the on-device voice measurement
+//
+// A screen rather than an instrumented benchmark because the machine that builds AudioChoice
+// cannot reach a phone: it is an EC2 Mac on a private subnet. Two design values depend on this
+// measurement -- whether to offer an on-device neural voice at all, and how many chapters to keep
+// rendered ahead of the playhead -- and both were specified as measurements rather than estimates.
+// Inventing one was already tried and got a speech rate wrong by a third.
+
+/**
+ * Runs the device's own voice engine over a fixed passage and shows how fast it was.
+ *
+ * The result is presented as a block of text to copy out, because a number that stays on the phone
+ * is not a measurement anybody can act on.
+ */
+@Composable
+private fun VoiceMeasurementScreen(onBack: () -> Unit) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    var running by remember { mutableStateOf(false) }
+    var outcome by remember { mutableStateOf<RateMeasurementOutcome?>(null) }
+    val clipboard = androidx.compose.ui.platform.LocalClipboardManager.current
+
+    Column(
+        Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding()
+            .verticalScroll(rememberScrollState()).padding(18.dp),
+    ) {
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            IconButton(onClick = onBack) { Icon(Icons.Outlined.ArrowBack, "Back") }
+            Text(
+                "Voice speed test",
+                Modifier.weight(1f),
+                textAlign = TextAlign.Center,
+                fontWeight = FontWeight.SemiBold,
+            )
+            Spacer(Modifier.size(48.dp))
+        }
+        Spacer(Modifier.height(14.dp))
+        Text(
+            "Reads a short fixed passage with your phone's own voice and times it. Nothing is " +
+                "uploaded and no audio is kept. Takes about ten seconds.",
+            color = ChoiceMuted,
+            fontSize = 13.sp,
+            lineHeight = 19.sp,
+        )
+        Spacer(Modifier.height(18.dp))
+        Button(
+            onClick = {
+                running = true
+                outcome = null
+            },
+            enabled = !running,
+            modifier = Modifier.fillMaxWidth().height(50.dp),
+            shape = RoundedCornerShape(12.dp),
+        ) {
+            if (running) {
+                CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
+                Spacer(Modifier.width(10.dp))
+                Text("Measuring…")
+            } else {
+                Text("Run the speed test")
+            }
+        }
+
+        if (running) {
+            LaunchedEffect(Unit) {
+                val measurement = OnDeviceRateMeasurement(
+                    context = context,
+                    scratchDirectory = java.io.File(context.cacheDir, "voice-benchmark"),
+                )
+                outcome = measurement.measure()
+                running = false
+            }
+        }
+
+        outcome?.let { result ->
+            Spacer(Modifier.height(20.dp))
+            Card(
+                colors = CardDefaults.cardColors(containerColor = ChoiceSurface),
+                shape = RoundedCornerShape(14.dp),
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Column(Modifier.padding(16.dp)) {
+                    when (result) {
+                        is RateMeasurementOutcome.Measured -> {
+                            Text("Result", fontWeight = FontWeight.SemiBold)
+                            Spacer(Modifier.height(10.dp))
+                            // Monospaced and selectable, because this text exists to be copied
+                            // out accurately rather than skimmed.
+                            androidx.compose.foundation.text.selection.SelectionContainer {
+                                Text(
+                                    result.report,
+                                    fontFamily = FontFamily.Monospace,
+                                    fontSize = 12.sp,
+                                    lineHeight = 18.sp,
+                                )
+                            }
+                            Spacer(Modifier.height(14.dp))
+                            Button(
+                                onClick = {
+                                    clipboard.setText(
+                                        androidx.compose.ui.text.AnnotatedString(result.report),
+                                    )
+                                },
+                                modifier = Modifier.fillMaxWidth(),
+                            ) { Text("Copy result") }
+                            Spacer(Modifier.height(10.dp))
+                            Text(
+                                if (OnDeviceRate.isFastEnough(result.rate.realTimeFactor)) {
+                                    "This phone is fast enough to read books aloud with its own " +
+                                        "voice, keeping " +
+                                        "${OnDeviceRate.renderAheadChapters(result.rate.realTimeFactor)} " +
+                                        "chapter(s) ready ahead of you."
+                                } else {
+                                    "This phone's own voice is too slow to stay ahead of " +
+                                        "listening. It would keep pausing to catch up."
+                                },
+                                color = ChoiceMuted,
+                                fontSize = 12.sp,
+                                lineHeight = 18.sp,
+                            )
+                        }
+
+                        RateMeasurementOutcome.NoEngineInstalled -> Text(
+                            "This phone has no text-to-speech engine installed, or it did not " +
+                                "start. Install Google Text-to-Speech from the Play Store and " +
+                                "try again.",
+                            color = ChoiceMuted,
+                            fontSize = 13.sp,
+                            lineHeight = 19.sp,
+                        )
+
+                        is RateMeasurementOutcome.LanguageUnavailable -> Text(
+                            "The voice engine has no English voice installed " +
+                                "(${result.languageTag}). Add one in Settings, then try again.",
+                            color = ChoiceMuted,
+                            fontSize = 13.sp,
+                            lineHeight = 19.sp,
+                        )
+
+                        is RateMeasurementOutcome.Failed -> Text(
+                            result.message,
+                            color = MaterialTheme.colorScheme.error,
+                            fontSize = 13.sp,
+                            lineHeight = 19.sp,
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+// endregion
+
+
+/**
+ * The statement a listener accepts before any chapter's text leaves the device.
+ *
+ * The wording comes from the server, so a change to who receives the text reaches every client at
+ * once rather than waiting for an app update. Presented before anything is recorded, and on decline
+ * nothing at all changes -- no record, no selected voice, no submission.
+ */
+@Composable
+private fun PremiumAgreementDialog(
+    gate: com.audiochoice.mobile.narration.voice.PremiumVoiceGate,
+    onAccept: () -> Unit,
+    onDecline: () -> Unit,
+) {
+    val changed = gate as? com.audiochoice.mobile.narration.voice.PremiumVoiceGate.AgreementChanged
+    val required = gate as? com.audiochoice.mobile.narration.voice.PremiumVoiceGate.AgreementRequired
+    val statement = changed?.text ?: required?.text.orEmpty()
+
+    if (gate is com.audiochoice.mobile.narration.voice.PremiumVoiceGate.NotEntitled) {
+        AlertDialog(
+            onDismissRequest = onDecline,
+            icon = { Icon(Icons.Outlined.RecordVoiceOver, null, tint = ChoiceGreen) },
+            title = { Text("Premium voice") },
+            text = {
+                Text(
+                    "The premium voice is part of a paid plan that is not on sale yet. Your " +
+                        "phone's own voice reads books aloud for free and sends nothing anywhere.",
+                    color = ChoiceMuted,
+                    fontSize = 13.sp,
+                    lineHeight = 19.sp,
+                )
+            },
+            confirmButton = { TextButton(onClick = onDecline) { Text("Close") } },
+        )
+        return
+    }
+
+    AlertDialog(
+        onDismissRequest = onDecline,
+        icon = { Icon(Icons.Outlined.RecordVoiceOver, null, tint = ChoiceGreen) },
+        title = {
+            Text(
+                if (changed != null) "The premium voice terms have changed" else "Using the premium voice",
+            )
+        },
+        text = {
+            Column(Modifier.heightIn(max = 420.dp).verticalScroll(rememberScrollState())) {
+                if (changed != null) {
+                    Text(
+                        "You agreed to version ${changed.acceptedVersion}. " +
+                            "Version ${changed.currentVersion} is now in force. Chapters already " +
+                            "made stay on your phone and keep playing.",
+                        color = ChoiceMuted,
+                        fontSize = 12.sp,
+                        lineHeight = 18.sp,
+                    )
+                    Spacer(Modifier.height(12.dp))
+                }
+                Text(
+                    statement.ifBlank {
+                        "AudioChoice could not load the premium voice terms just now. Try again " +
+                            "when you have a connection."
+                    },
+                    fontSize = 13.sp,
+                    lineHeight = 20.sp,
+                )
+            }
+        },
+        confirmButton = {
+            Button(onClick = onAccept, enabled = statement.isNotBlank()) {
+                Text(if (changed != null) "Accept and continue" else "Accept")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDecline) { Text("Use my phone's voice") }
+        },
+    )
 }

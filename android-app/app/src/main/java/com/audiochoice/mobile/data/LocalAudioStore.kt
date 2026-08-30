@@ -81,8 +81,126 @@ class LocalAudioStore(private val context: Context) {
     private fun readerPositionKey(sha256: String) = stringPreferencesKey("reader_position_${sha256.lowercase()}")
     private fun playbackSpeedKey(sha256: String) = floatPreferencesKey("playback_speed_${sha256.lowercase()}")
 
+    // EPUB narration, experimental builds only. Small per-book values live here;
+    // the plan, render queue, timelines and audio are files under
+    // filesDir/narration/<sha256>/ because they are far too large to sit in a
+    // preferences document that is rewritten whole on every edit.
+    private fun narrationVoiceKey(sha256: String) = stringPreferencesKey("narration_voice_${sha256.lowercase()}")
+    private fun narrationFlagsKey(sha256: String) = stringPreferencesKey("narration_flags_${sha256.lowercase()}")
+    private fun narrationPronunciationsKey(sha256: String) =
+        stringPreferencesKey("narration_pronunciations_${sha256.lowercase()}")
+
     /** Device-wide rather than per-book, so text size and theme carry across books. */
     private val readerSettingsKey = stringPreferencesKey("reader_settings")
+
+    // Device-wide narration values. Pronunciation rules a listener marked as
+    // applying to every book, the last entitlement read, the two disclosure
+    // acknowledgements, and the measured on-device neural synthesis rate.
+    private val narrationAccountPronunciationsKey = stringPreferencesKey("narration_pronunciations_account")
+    private val narrationTierKey = stringPreferencesKey("narration_tier")
+    private val narrationTierReadAtKey = stringPreferencesKey("narration_tier_read_at")
+    private val narrationTierPlanKey = stringPreferencesKey("narration_tier_plan")
+    private val narrationTextScanAckKey = stringPreferencesKey("narration_text_scan_ack")
+    private val narrationPremiumAckKey = stringPreferencesKey("narration_premium_ack")
+    private val neuralVoiceRateKey = floatPreferencesKey("neural_voice_rate")
+    private val neuralVoiceModelVersionKey = stringPreferencesKey("neural_voice_model_version")
+
+    // region narration accessors
+
+    suspend fun saveNarrationVoice(sha256: String, voice: SelectedVoice) {
+        context.localAudioDataStore.edit { it[narrationVoiceKey(sha256)] = json.encodeToString(voice) }
+    }
+
+    suspend fun narrationVoice(sha256: String): SelectedVoice? =
+        context.localAudioDataStore.data.first()[narrationVoiceKey(sha256)]
+            ?.let { runCatching { json.decodeFromString<SelectedVoice>(it) }.getOrNull() }
+
+    suspend fun saveNarrationFlags(sha256: String, flags: NarrationFlags) {
+        context.localAudioDataStore.edit { it[narrationFlagsKey(sha256)] = json.encodeToString(flags) }
+    }
+
+    suspend fun narrationFlags(sha256: String): NarrationFlags =
+        context.localAudioDataStore.data.first()[narrationFlagsKey(sha256)]
+            ?.let { runCatching { json.decodeFromString<NarrationFlags>(it) }.getOrNull() }
+            ?: NarrationFlags()
+
+    suspend fun saveBookPronunciationRules(sha256: String, rules: List<PronunciationRule>) {
+        context.localAudioDataStore.edit {
+            it[narrationPronunciationsKey(sha256)] = json.encodeToString(rules)
+        }
+    }
+
+    suspend fun bookPronunciationRules(sha256: String): List<PronunciationRule> =
+        context.localAudioDataStore.data.first()[narrationPronunciationsKey(sha256)]
+            ?.let { runCatching { json.decodeFromString<List<PronunciationRule>>(it) }.getOrNull() }
+            .orEmpty()
+
+    suspend fun saveAccountPronunciationRules(rules: List<PronunciationRule>) {
+        context.localAudioDataStore.edit {
+            it[narrationAccountPronunciationsKey] = json.encodeToString(rules)
+        }
+    }
+
+    suspend fun accountPronunciationRules(): List<PronunciationRule> =
+        context.localAudioDataStore.data.first()[narrationAccountPronunciationsKey]
+            ?.let { runCatching { json.decodeFromString<List<PronunciationRule>>(it) }.getOrNull() }
+            .orEmpty()
+
+    /**
+     * The last entitlement read, with the instant it succeeded.
+     *
+     * The timestamp is what the grace period is measured from, so it records when
+     * the tier was last *confirmed* rather than when it was last used. Without it
+     * an offline device could hold a premium tier indefinitely.
+     */
+    suspend fun saveNarrationTier(tier: String, plan: String?, readAtEpochMillis: Long) {
+        context.localAudioDataStore.edit {
+            it[narrationTierKey] = tier
+            it[narrationTierReadAtKey] = readAtEpochMillis.toString()
+            if (plan == null) it.remove(narrationTierPlanKey) else it[narrationTierPlanKey] = plan
+        }
+    }
+
+    suspend fun narrationTier(): Triple<String, String?, Long>? {
+        val preferences = context.localAudioDataStore.data.first()
+        val tier = preferences[narrationTierKey] ?: return null
+        val readAt = preferences[narrationTierReadAtKey]?.toLongOrNull() ?: return null
+        return Triple(tier, preferences[narrationTierPlanKey], readAt)
+    }
+
+    suspend fun saveTextScanAcknowledgement(value: String) {
+        context.localAudioDataStore.edit { it[narrationTextScanAckKey] = value }
+    }
+
+    suspend fun textScanAcknowledgement(): String? =
+        context.localAudioDataStore.data.first()[narrationTextScanAckKey]
+
+    suspend fun savePremiumVoiceAcknowledgement(value: String) {
+        context.localAudioDataStore.edit { it[narrationPremiumAckKey] = value }
+    }
+
+    suspend fun premiumVoiceAcknowledgement(): String? =
+        context.localAudioDataStore.data.first()[narrationPremiumAckKey]
+
+    /**
+     * Measured on-device neural synthesis rate, recorded against the model
+     * version it was measured with so a model update forces a re-measure rather
+     * than inheriting a stale number.
+     */
+    suspend fun saveNeuralVoiceRate(rate: Float, modelVersion: String) {
+        context.localAudioDataStore.edit {
+            it[neuralVoiceRateKey] = rate
+            it[neuralVoiceModelVersionKey] = modelVersion
+        }
+    }
+
+    suspend fun neuralVoiceRate(modelVersion: String): Float? {
+        val preferences = context.localAudioDataStore.data.first()
+        if (preferences[neuralVoiceModelVersionKey] != modelVersion) return null
+        return preferences[neuralVoiceRateKey]
+    }
+
+    // endregion
 
     suspend fun saveReaderSettings(settings: ReaderSettings) {
         context.localAudioDataStore.edit { it[readerSettingsKey] = json.encodeToString(settings) }
@@ -352,7 +470,24 @@ class LocalAudioStore(private val context: Context) {
         }.getOrNull()
     }
 
-    suspend fun remove(sha256: String) {
+    /**
+     * Removes every trace of a book.
+     *
+     * Returns whether everything went. Callers that do not care may ignore it, which is why
+     * this became a returning function rather than gaining an out-parameter or a callback:
+     * every existing call site compiles and behaves identically, while a narrated book's
+     * delete surface can report that some of its data could not be removed.
+     */
+    suspend fun remove(sha256: String): Boolean {
+        // Read before the keys are dropped, because releasing the permission needs the URI.
+        // Only used for a narrated book, where this store is the sole holder of the grant.
+        val narrationDirectory = java.io.File(
+            java.io.File(context.filesDir, com.audiochoice.mobile.narration.NarrationConfig.ROOT_DIRECTORY),
+            sha256.lowercase(),
+        )
+        val wasNarrated = narrationDirectory.isDirectory
+        val narratedSourceUri = if (wasNarrated) epub(sha256) else null
+
         context.localAudioDataStore.edit {
             it.remove(key(sha256))
             it.remove(chapterKey(sha256))
@@ -368,14 +503,45 @@ class LocalAudioStore(private val context: Context) {
             it.remove(pendingBookmarksKey(sha256))
             it.remove(filterSettingsDirtyKey(sha256))
             it.remove(readerPositionKey(sha256))
+            // Narration is keyed by the same SHA-256, so a deleted narrated book
+            // must drop its voice, flags and book-scoped pronunciation rules for
+            // the same reason the three above were added: re-importing the same
+            // file silently re-adopted stale state. Account-scoped pronunciation
+            // rules are deliberately kept, because they are not this book's.
+            it.remove(narrationVoiceKey(sha256))
+            it.remove(narrationFlagsKey(sha256))
+            it.remove(narrationPronunciationsKey(sha256))
         }
         java.io.File(context.filesDir, "book_covers/${sha256.lowercase()}.image").delete()
         epubTextFile(sha256).delete()
+        // Plan, render queue, chapter timelines, cached Book_Text and rendered
+        // chapter audio. A no-op for an imported audiobook, which never has this
+        // directory, so this is safe on every build.
+        //
+        // A failure here does not stop the rest: the book is gone from the library either
+        // way, and leaving the cover and the DataStore keys behind as well would make a
+        // partial failure worse. The result is reported instead.
+        val narrationRemoved = !wasNarrated || narrationDirectory.deleteRecursively()
+
+        // Released only for a narrated book, whose grant exists solely so this feature can
+        // re-read the file. An imported audiobook's EPUB attachment is left exactly as it
+        // was, because the grant there may be shared with a path this store does not know
+        // about, and revoking it is not this function's business to decide.
+        if (narratedSourceUri != null) {
+            runCatching {
+                context.contentResolver.releasePersistableUriPermission(
+                    narratedSourceUri,
+                    android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION,
+                )
+            }
+        }
+
         // The audio file itself is reclaimed by reference count rather than by
         // name: one file is registered under both the source fingerprint and the
         // canonical edition fingerprint, so deleting it directly here would break
         // the surviving entry.
         purgeOrphanedAudioFiles()
+        return narrationRemoved
     }
 
     /**

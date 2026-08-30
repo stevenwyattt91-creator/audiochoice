@@ -13,7 +13,8 @@ public sealed class OpenAIContentAnalysisProvider(
     HttpClient client,
     OpenAIProcessingOptions options,
     AudioChoice.Api.Services.AudioChoiceDataPaths dataPaths,
-    ILogger<OpenAIContentAnalysisProvider> logger) : IContentAnalysisProvider
+    ILogger<OpenAIContentAnalysisProvider> logger)
+    : IContentAnalysisProvider, ITextContentAnalysisProvider
 {
     // Bump this whenever the baseline classification policy changes so cached batch
     // answers cannot silently reintroduce events produced under an older policy.
@@ -187,6 +188,89 @@ public sealed class OpenAIContentAnalysisProvider(
             "Content analysis completed with {EventCount} unique events.",
             result.Length);
         return UserFacingEventPostProcessor.Process(result);
+    }
+
+    /// <summary>
+    /// Classifies passages measured in character offsets, for a book with no audiobook.
+    /// </summary>
+    /// <remarks>
+    /// Deliberately written as its own method rather than by threading a coordinate-space
+    /// flag through <see cref="Analyze"/>. Not one line of <c>Analyze</c> changes, so the
+    /// scanning pipeline that produces the published catalogue is provably untouched by
+    /// narration work. The cost is roughly thirty lines of loop glue duplicated below; the
+    /// parts with real behaviour in them -- <c>RunContentBatches</c>, <c>AddEvent</c>,
+    /// <c>ApplyNarrowViolencePolicy</c>, <c>UserFacingEventPostProcessor</c> -- are called,
+    /// not copied, so the two paths cannot drift apart on taxonomy, confidence or wording.
+    ///
+    /// Four steps <c>Analyze</c> performs are absent, each because it is defined in seconds:
+    /// scene verification (±30-second boundary clamps), <c>SceneEventPostProcessor</c>
+    /// (45-second merge, 8-second padding, 30-second floor), complete-scene coverage
+    /// reporting (which divides by an audiobook duration this book does not have), and the
+    /// large-transcript plausibility check (whose 500-segment threshold counts something
+    /// different here). <c>UserFacingEventPostProcessor</c> is kept: the app's category
+    /// switches read the group and aggregate identifiers it assigns, and its only
+    /// span-sensitive behaviour is a five-unit clustering gap that affects how events are
+    /// labelled in aggregate, never where they begin or end.
+    /// </remarks>
+    public async Task<IReadOnlyList<ScanEvent>> AnalyzeCharacterOffsets(
+        IReadOnlyList<TranscriptSegment> passages,
+        Action<double>? reportProgress,
+        CancellationToken cancellationToken)
+    {
+        if (passages.Count == 0) return [];
+
+        var events = new List<ScanEvent>();
+
+        // Literal word matches are exact in either coordinate space: a profane word is
+        // present or it is not, and the offsets come straight from the passage that
+        // contains it. This is also what gives every occurrence of one word the same
+        // aggregate key, which is what lets the app group them under a single switch.
+        var deterministic = DeterministicContentDetector.DetectProfanity(passages).ToList();
+        for (var index = 0; index < deterministic.Count; index += 1)
+        {
+            var item = deterministic[index];
+            AddEvent(events, item.Label, item.StartTime, item.EndTime,
+                item.Confidence, item.SafeDescription, item.ProfanityWord,
+                item.StartTime, item.EndTime, $"deterministic-text-{index}");
+        }
+
+        var batchSize = Math.Max(1, options.MaximumSegmentsPerAnalysisRequest);
+        var overlap = Math.Max(0, batchSize / 2);
+        var step = Math.Max(1, batchSize - overlap);
+        var batchRanges = Enumerable
+            .Range(0, (int)Math.Ceiling(passages.Count / (double)step))
+            .Select(index => (StartIndex: index * step,
+                EndExclusive: Math.Min(passages.Count, index * step + batchSize)))
+            .ToArray();
+
+        var batchResults = await RunContentBatches(
+            batchRanges, passages, reportProgress, cancellationToken);
+        foreach (var batchResult in batchResults.OrderBy(item => item.Index))
+        {
+            var batch = batchResult.Batch;
+            var batchStart = batch.Min(item => item.StartTime);
+            var batchEnd = batch.Max(item => item.EndTime);
+            foreach (var item in batchResult.Payload.Events)
+            {
+                AddEvent(events, item.Label, item.StartTime, item.EndTime,
+                    item.Confidence, item.SafeDescription, item.ProfanityWord,
+                    batchStart, batchEnd);
+            }
+        }
+
+        var uniqueEvents = events
+            .GroupBy(item => item.StableKey, StringComparer.Ordinal)
+            .Select(group => group.OrderByDescending(item => item.Confidence).First())
+            .OrderBy(item => item.StartTime)
+            .ToArray();
+        uniqueEvents = ApplyNarrowViolencePolicy(uniqueEvents);
+
+        logger.LogInformation(
+            "Text content analysis completed with {EventCount} unique events across " +
+            "{PassageCount} passages.",
+            uniqueEvents.Length,
+            passages.Count);
+        return UserFacingEventPostProcessor.Process(uniqueEvents);
     }
 
     private async Task<IReadOnlyList<ContentBatchResult>> RunContentBatches(

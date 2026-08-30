@@ -29,6 +29,7 @@ import java.io.File
 import java.io.FileOutputStream
 import java.net.HttpURLConnection
 import java.net.URL
+import com.audiochoice.mobile.narration.NarrationConfig
 import java.security.MessageDigest
 
 enum class ImportPhase(val label: String) {
@@ -61,6 +62,13 @@ data class ImportUiState(
     val organizingFile: Boolean = false,
     val organizationMessage: String? = null,
     val organizationComplete: Boolean = false,
+    /**
+     * Set only on the ebook path, and the marker the import screen branches on.
+     *
+     * Null for every audiobook import, which is what keeps the screen below unchanged for the
+     * path that ships today.
+     */
+    val ebookOutcome: com.audiochoice.mobile.narration.NarrationImportOutcome? = null,
 )
 
 class ImportViewModel(
@@ -95,8 +103,99 @@ class ImportViewModel(
         if (fileName.substringAfterLast('.', "").equals("aax", ignoreCase = true)) {
             pendingAaxUri = uri
             mutableState.value = ImportUiState(phase = ImportPhase.AGREEMENT, fileName = fileName)
+        } else if (NarrationConfig.enabled &&
+            com.audiochoice.mobile.narration.NarrationImportCoordinator.isEpub(fileName)
+        ) {
+            // Routed by file name, from the same picker and the same button. The listener does not
+            // choose a kind of import; the file decides which shelf it lands on.
+            //
+            // Gated on the experimental build, so a beta build reaches the audiobook path below
+            // exactly as it does today -- and its picker never offers an EPUB in the first place.
+            importEbook(uri, resolver, accessToken, fileName)
         } else {
             import(uri, resolver, accessToken)
+        }
+    }
+
+    /**
+     * Imports an EPUB as a narrated book.
+     *
+     * Shares no step with the audiobook pipeline below beyond the phase labels: there is no
+     * upload, no transcription and no scan job, because the book's text is read on this device.
+     * The phases reused here are the ones that mean the same thing for both.
+     */
+    private fun importEbook(
+        uri: Uri,
+        resolver: ContentResolver,
+        accessToken: String,
+        fileName: String,
+    ) {
+        val coordinator = com.audiochoice.mobile.narration.NarrationImportCoordinator(
+            api = api,
+            localAudio = localAudio,
+            filesDirectory = appFilesDirectory,
+        )
+        mutableState.value = ImportUiState(
+            phase = ImportPhase.FINGERPRINTING,
+            fileName = fileName,
+            statusMessage = "Reading this ebook…",
+        )
+        viewModelScope.launch {
+            val outcome = runCatching { coordinator.import(uri, resolver, accessToken) }
+                .getOrElse { failure ->
+                    com.audiochoice.mobile.narration.NarrationImportOutcome.Failed(
+                        failure.message ?: "That ebook could not be imported.",
+                    )
+                }
+            mutableState.value = when (outcome) {
+                is com.audiochoice.mobile.narration.NarrationImportOutcome.Imported ->
+                    ImportUiState(
+                        phase = ImportPhase.COMPLETE,
+                        fileName = fileName,
+                        titleFromFilename = outcome.titleWasDerived,
+                        ebookOutcome = outcome,
+                        // Publishing the saved row is what makes the library reload. Without it
+                        // the listener lands on a cached list with no ebook in it, and the Ebooks
+                        // tab -- which only appears once there is one -- never shows up.
+                        savedBook = outcome.libraryBook,
+                        statusMessage = "“${outcome.title}” is in your Ebooks library.",
+                    )
+
+                is com.audiochoice.mobile.narration.NarrationImportOutcome.AlreadyInLibrary ->
+                    ImportUiState(
+                        phase = ImportPhase.COMPLETE,
+                        fileName = fileName,
+                        ebookOutcome = outcome,
+                        // Deliberately not an error. Re-importing a book after moving the file is
+                        // the ordinary way to reach this, and its rendered audio is intact.
+                        statusMessage = "That ebook is already in your library.",
+                    )
+
+                is com.audiochoice.mobile.narration.NarrationImportOutcome.Declined ->
+                    ImportUiState(
+                        phase = ImportPhase.FAILED,
+                        fileName = fileName,
+                        ebookOutcome = outcome,
+                        error = outcome.message.headline,
+                        statusMessage = outcome.message.explanation,
+                    )
+
+                com.audiochoice.mobile.narration.NarrationImportOutcome.PermissionRefused ->
+                    ImportUiState(
+                        phase = ImportPhase.FAILED,
+                        fileName = fileName,
+                        ebookOutcome = outcome,
+                        error = "That file could not be opened for reading.",
+                    )
+
+                is com.audiochoice.mobile.narration.NarrationImportOutcome.Failed ->
+                    ImportUiState(
+                        phase = ImportPhase.FAILED,
+                        fileName = fileName,
+                        ebookOutcome = outcome,
+                        error = outcome.message,
+                    )
+            }
         }
     }
 

@@ -113,7 +113,11 @@ android {
             applicationIdSuffix = ".experimental"
             versionNameSuffix = "-experimental"
             resValue("string", "app_name", "AudioChoice Experimental")
-            buildConfigField("String", "BETA_VERSION", "\"Experimental 1\"")
+            // Advanced for the EPUB narration cycle. The experimental type is
+            // created with initWith(beta), so it already tracks the current beta
+            // configuration; only the cycle identifier changes here. No new
+            // build type and no product flavour is introduced.
+            buildConfigField("String", "BETA_VERSION", "\"Experimental 2\"")
             buildConfigField("boolean", "EXPERIMENTAL_BUILD", "true")
             manifestPlaceholders["companionTransferScheme"] = "audiochoice-experimental"
             // Same reasoning as beta. Its applicationId differs, so signature
@@ -175,6 +179,11 @@ dependencies {
     implementation(libs.androidx.documentfile)
     testImplementation(libs.junit)
     testImplementation(libs.kotlinx.coroutines.test)
+    // Several narration requirements are stated as properties over all inputs
+    // (plan and timeline round-trips, plan idempotence, filter monotonicity), so
+    // they are tested as properties rather than examples. Test-only: nothing here
+    // reaches the APK.
+    testImplementation(libs.kotest.property)
     androidTestImplementation(platform(libs.androidx.compose.bom))
     androidTestImplementation(libs.androidx.compose.ui.test.junit4)
     androidTestImplementation(libs.androidx.espresso.core)
