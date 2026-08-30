@@ -149,6 +149,7 @@ class NarrationImporterTest {
             isAlreadyInLibrary = { false },
             persistSourceLocation = {},
             saveLibraryBook = { requests += it; savedRow(it) },
+            saveLocalLibraryBook = {},
             saveCover = { _, _ -> },
         )
 
@@ -196,6 +197,7 @@ class NarrationImporterTest {
                 isAlreadyInLibrary = { it == sha },
                 persistSourceLocation = { locationsPersisted += 1 },
                 saveLibraryBook = { requests += it; savedRow(it) },
+                saveLocalLibraryBook = {},
                 saveCover = { _, _ -> },
             )
 
@@ -236,6 +238,7 @@ class NarrationImporterTest {
             isAlreadyInLibrary = { false },
             persistSourceLocation = {},
             saveLibraryBook = { requests += it; savedRow(it) },
+            saveLocalLibraryBook = {},
             saveCover = { _, _ -> },
         )
 
@@ -422,13 +425,18 @@ class NarrationImporterTest {
     // region library failure
 
     /**
-     * The library row is what the scan and every sync path key on. Without it the import
-     * stops rather than leaving a book that exists on this device and nowhere else.
+     * An unreachable server no longer costs the listener the book.
+     *
+     * Everything a narrated book needs is on the device, so the import records the library row
+     * itself and carries on. Refusing the import would deny someone a book they already have, and
+     * recording the row only on the server is what let one vanish from the shelf with no way to
+     * bring it back.
      */
     @Test
-    fun `a library failure stops the import and stores no text`(): Unit = runBlocking {
+    fun `an unreachable library still imports and records the row locally`(): Unit = runBlocking {
         val bytes = "text".toByteArray()
         val store = store()
+        val localRows = mutableListOf<com.audiochoice.mobile.data.LibraryBook>()
         val importer = NarrationImporter(
             store = store,
             takePersistablePermission = { true },
@@ -436,14 +444,21 @@ class NarrationImporterTest {
             isAlreadyInLibrary = { false },
             persistSourceLocation = {},
             saveLibraryBook = { throw java.io.IOException("offline") },
+            saveLocalLibraryBook = { localRows += it },
             saveCover = { _, _ -> },
         )
-
         val outcome = importer.import(source(bytes, "Book.epub"))
-
-        assertTrue(outcome is NarrationImportOutcome.Failed)
-        assertNull("Book_Text was stored for a book with no library row",
-            store.bookText(sha256Of(bytes)))
+        assertTrue(
+            "an offline import failed instead of recording the book on the device",
+            outcome is NarrationImportOutcome.Imported,
+        )
+        assertEquals("no local library row was recorded", 1, localRows.size)
+        // The shelf is chosen by this, so an offline import must still land among the ebooks.
+        assertEquals("epub", localRows.single().fingerprint.fileType)
+        assertNotNull(
+            "Book_Text was not stored for a book that imported successfully",
+            store.bookText(sha256Of(bytes)),
+        )
     }
 
     // endregion
@@ -474,6 +489,7 @@ class NarrationImporterTest {
         isAlreadyInLibrary = { false },
         persistSourceLocation = {},
         saveLibraryBook = { requests += it; savedRow(it) },
+            saveLocalLibraryBook = {},
         saveCover = onCover,
     )
 

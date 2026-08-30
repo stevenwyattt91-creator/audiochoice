@@ -35,8 +35,15 @@ class ReimportRepairTest {
             check.contains("store.bookText("),
         )
         assertTrue(
-            "the library record is no longer consulted at all",
-            check.contains("localAudio.find(sha256) != null"),
+            "membership is no longer read from the device's own library row, which is the only " +
+                "source that does not depend on the network",
+            check.contains("store.libraryBook(sha256) != null"),
+        )
+        // The audiobook key answers a different question and is always null for an ebook.
+        assertFalse(
+            "membership is read from localAudio.find, which looks up audio_<hash> -- a key a " +
+                "narrated ebook never writes, so it can never report one as present",
+            check.contains("localAudio.find("),
         )
     }
 

@@ -51,19 +51,21 @@ class NarrationImportCoordinator(
                 }
             },
             isAlreadyInLibrary = { sha256 ->
-                // Library membership only. Leftover narration data deliberately does not count.
+                // The device's own library row, which is now the authority for a narrated book.
                 //
-                // This used to also treat stored Book_Text as membership, to stop a network failure
-                // turning a re-import into a second entry. It does not: the save is an upsert keyed
-                // by this same hash, so repeating it is idempotent. What the extra condition did
-                // instead was make one state unrecoverable -- text on the device but no library
-                // entry, which is what a failed or rolled-back registration leaves behind. The
-                // import would report the book as already present and never register it, so
-                // re-importing could not fix it and nothing else would either.
-                localAudio.find(sha256) != null
+                // Two earlier readings of this were wrong in opposite directions. Stored Book_Text
+                // made a book unrecoverable: the import reported it present and never registered it,
+                // so re-importing could not repair a missing library row. `LocalAudioStore.find` was
+                // no better -- it reads `audio_<hash>`, a key a narrated ebook never writes, so it is
+                // always null for one and answers a question about audiobooks.
+                //
+                // This row is written by the import itself and does not depend on the network, so it
+                // is true exactly when the book is on the shelf.
+                store.libraryBook(sha256) != null
             },
             persistSourceLocation = { sha256 -> localAudio.saveEpub(sha256, uri) },
             saveLibraryBook = { request -> api.saveBook(accessToken, request) },
+            saveLocalLibraryBook = { book -> store.saveLibraryBook(book.fingerprint.sha256, book) },
             saveCover = { sha256, bytes -> localAudio.saveBookCover(sha256, bytes) },
         )
 

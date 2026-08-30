@@ -112,7 +112,7 @@ class LibraryViewModel(
         loadedForToken = accessToken
         viewModelScope.launch {
             mutableState.value = mutableState.value.copy(loading = true, error = null)
-            val cachedBooks = localAudio.librarySnapshot(accountID)
+            val cachedBooks = withNarratedBooks(localAudio.librarySnapshot(accountID))
             if (cachedBooks.isNotEmpty()) {
                 mutableState.value = mutableState.value.copy(
                     loading = true,
@@ -200,7 +200,10 @@ class LibraryViewModel(
                     }
                 }
                 localAudio.saveLibrarySnapshot(accountID, enriched)
-                Triple(enriched, explore, covers.toMap())
+                // Narrated books are added after the snapshot is written, not before. The snapshot
+                // mirrors what the server holds; a locally-held book is not part of that and writing
+                // it there would make the two indistinguishable.
+                Triple(withNarratedBooks(enriched), explore, covers.toMap())
             }.onSuccess {
                 mutableState.value = LibraryUiState(
                     loaded = true,
@@ -221,6 +224,32 @@ class LibraryViewModel(
                     }
                 }
         }
+    }
+
+    /**
+     * Adds narrated books the device holds but the server has not returned.
+     *
+     * A narrated book is entirely local -- the file, its extracted text, its rendered audio -- and its
+     * library row is written by the import without needing the network. So the shelf works whether or
+     * not the server knows about the book, which it may not: registration can fail, the row can be
+     * lost, and the narration endpoints are not yet served at all.
+     *
+     * The server's copy wins where both exist. It carries the identifier and the reading position that
+     * sync between a listener's devices, and the local row is a placeholder for exactly as long as the
+     * server has not answered.
+     *
+     * Returns the list untouched outside the experimental build, where narration does not exist and no
+     * narrated book can have been created.
+     */
+    private suspend fun withNarratedBooks(books: List<LibraryBook>): List<LibraryBook> {
+        if (!com.audiochoice.mobile.narration.NarrationConfig.enabled) return books
+        val narrated = runCatching {
+            com.audiochoice.mobile.narration.NarrationStore(context.filesDir).narratedBooks()
+        }.getOrElse { return books }
+        if (narrated.isEmpty()) return books
+
+        val known = books.map { it.fingerprint.sha256.lowercase() }.toSet()
+        return books + narrated.filter { it.fingerprint.sha256.lowercase() !in known }
     }
 
     /**

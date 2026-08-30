@@ -2,6 +2,7 @@ package com.audiochoice.mobile.narration
 
 import com.audiochoice.mobile.data.NarrationPlan
 import com.audiochoice.mobile.data.ReaderTimingRange
+import com.audiochoice.mobile.data.LibraryBook
 import com.audiochoice.mobile.data.RenderQueue
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -40,6 +41,7 @@ class NarrationStore(private val filesDir: File) {
     private fun queueFile(sha256: String) = File(bookDirectory(sha256), QUEUE_FILE)
     private fun bookTextFile(sha256: String) = File(bookDirectory(sha256), BOOK_TEXT_FILE)
     private fun textScanFile(sha256: String) = File(bookDirectory(sha256), TEXT_SCAN_FILE)
+    private fun libraryBookFile(sha256: String) = File(bookDirectory(sha256), LIBRARY_BOOK_FILE)
     private fun timelineDirectory(sha256: String) = File(bookDirectory(sha256), TIMELINE_DIRECTORY)
     private fun audioDirectory(sha256: String) = File(bookDirectory(sha256), AUDIO_DIRECTORY)
 
@@ -85,6 +87,45 @@ class NarrationStore(private val filesDir: File) {
         textScanFile(sha256).takeIf(File::isFile)?.let { file ->
             runCatching { json.decodeFromString<StoredTextScan>(file.readText()) }.getOrNull()
         }
+    }
+
+    /**
+     * The library row for a narrated book, kept on the device.
+     *
+     * A narrated book is entirely local: the file, its extracted text, its rendered audio. Its place
+     * in the library was the one part that lived only on the server, so a lost or unreachable server
+     * record made a book that is sitting on the device unreachable through it -- and because the
+     * ebook shelf only appears when an ebook is on it, the shelf vanished too.
+     *
+     * Written here rather than in the shared preferences store so it stays inside the narration root,
+     * which the experimental application id already isolates, and so deleting a narrated book removes
+     * its library row with the rest of its directory.
+     */
+    suspend fun saveLibraryBook(sha256: String, book: LibraryBook): Unit = withContext(Dispatchers.IO) {
+        writeAtomically(libraryBookFile(sha256), json.encodeToString(book))
+    }
+
+    suspend fun libraryBook(sha256: String): LibraryBook? = withContext(Dispatchers.IO) {
+        libraryBookFile(sha256).takeIf(File::isFile)?.let { file ->
+            runCatching { json.decodeFromString<LibraryBook>(file.readText()) }.getOrNull()
+        }
+    }
+
+    /**
+     * Every narrated book this device holds a library row for.
+     *
+     * Read by walking the narration root, so a book is listed because its data is present rather than
+     * because an index says so. An index would be a second thing to keep in step, and the failure it
+     * would introduce is the one this whole record exists to remove.
+     */
+    suspend fun narratedBooks(): List<LibraryBook> = withContext(Dispatchers.IO) {
+        NarrationConfig.narrationRoot(filesDir).listFiles().orEmpty()
+            .filter(File::isDirectory)
+            .mapNotNull { directory ->
+                File(directory, LIBRARY_BOOK_FILE).takeIf(File::isFile)?.let { file ->
+                    runCatching { json.decodeFromString<LibraryBook>(file.readText()) }.getOrNull()
+                }
+            }
     }
 
     suspend fun deleteTextScan(sha256: String): Boolean = withContext(Dispatchers.IO) {
@@ -297,6 +338,7 @@ class NarrationStore(private val filesDir: File) {
         const val QUEUE_FILE = "render-queue.json"
         const val BOOK_TEXT_FILE = "book-text.txt"
         const val TEXT_SCAN_FILE = "text-scan.json"
+        const val LIBRARY_BOOK_FILE = "library-book.json"
         const val TIMELINE_DIRECTORY = "timeline"
         const val AUDIO_DIRECTORY = "audio"
         const val AUDIO_EXTENSION = "m4a"
