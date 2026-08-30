@@ -2,6 +2,7 @@ package com.audiochoice.mobile.reader
 
 import android.content.ContentResolver
 import android.net.Uri
+import com.audiochoice.mobile.data.SourceRange
 import java.util.Locale
 import java.util.zip.ZipInputStream
 
@@ -261,7 +262,11 @@ object EpubTextReader {
             author = metadata.author,
             coverImageEntry = metadata.coverEntry,
             resources = resources,
-            nonProseRanges = extraction.nonProseRanges,
+            // Repeated boilerplate is added to whatever the markup already declared non-prose, so
+            // both kinds of "not the book's prose" reach the narrator by the same route.
+            nonProseRanges = mergeRanges(
+                extraction.nonProseRanges + repeatedBoilerplateRanges(extraction.text, resources),
+            ),
             anchorOffsets = extraction.anchorOffsets,
             navigation = navigation,
             declaresNavigation = navigationEntry != null || ncxEntry != null,
@@ -278,6 +283,94 @@ object EpubTextReader {
         val language: String?,
         val coverEntry: String?,
     )
+
+    /**
+     * Ranges holding a short line that repeats across most of the book's documents.
+     *
+     * Publishers, conversion tools and distribution sites all append the same line to every file
+     * they touch: a colophon, a running head, a site name. It is text, so extraction keeps it, and
+     * it is not prose, so a voice reading it says the same thing at the end of every chapter. One
+     * real book carried such a line in all 186 of its documents.
+     *
+     * Identified by how a line behaves rather than by what it says. A rule listing known strings
+     * would need updating for every new source and would say nothing about why the line is not
+     * prose; repetition across a whole book is the actual evidence.
+     *
+     * Three conditions together, because each alone has honest counter-examples:
+     *  - Short. A long passage repeating is far more likely to be something the author wrote, such
+     *    as a refrain or a recurring epigraph.
+     *  - Present in most documents. A line ending two chapters of a novel is prose; a line ending
+     *    nearly all of them is furniture.
+     *  - Present in at least three. In a book of two or three documents "most" means almost nothing,
+     *    and a real repeated line would be silenced on no evidence at all.
+     */
+    private fun repeatedBoilerplateRanges(
+        text: String,
+        resources: List<ResourceSpan>,
+    ): List<SourceRange> {
+        val documentsWithText = resources.filter { !it.range.isEmpty }
+        if (documentsWithText.size < MINIMUM_DOCUMENTS_FOR_BOILERPLATE) return emptyList()
+
+        // Which documents each candidate line appears in, so frequency is counted per document
+        // rather than per occurrence. A line appearing five times in one chapter is not boilerplate.
+        val documentsByLine = mutableMapOf<String, MutableSet<String>>()
+        val occurrences = mutableMapOf<String, MutableList<SourceRange>>()
+        documentsWithText.forEach { resource ->
+            forEachLine(text, resource.range) { line, range ->
+                val trimmed = line.trim()
+                if (trimmed.length in 1..MAXIMUM_BOILERPLATE_LINE_LENGTH) {
+                    documentsByLine.getOrPut(trimmed) { mutableSetOf() } += resource.entryName
+                    occurrences.getOrPut(trimmed) { mutableListOf() } += range
+                }
+            }
+        }
+
+        val threshold = documentsWithText.size * BOILERPLATE_DOCUMENT_SHARE
+        return documentsByLine
+            .filter { (_, documents) ->
+                documents.size >= MINIMUM_DOCUMENTS_FOR_BOILERPLATE && documents.size >= threshold
+            }
+            .keys
+            // Every occurrence goes, including any inside a document that is otherwise prose.
+            .flatMap { line -> occurrences[line].orEmpty() }
+            .sortedBy { it.start }
+    }
+
+    /**
+     * Visits each newline-separated run inside [range], with its offsets in the whole text.
+     *
+     * Offsets are what the narrator works in, so they are carried out rather than recomputed from a
+     * substring, where a repeated line would resolve to the wrong occurrence.
+     */
+    private inline fun forEachLine(
+        text: String,
+        range: SourceRange,
+        action: (String, SourceRange) -> Unit,
+    ) {
+        var start = range.start
+        while (start < range.end) {
+            val newline = text.indexOf('\n', start)
+            val end = if (newline < 0 || newline > range.end) range.end else newline
+            if (end > start) action(text.substring(start, end), SourceRange(start, end))
+            start = end + 1
+        }
+    }
+
+    /** Overlapping or touching ranges combined, so downstream subtraction stays simple. */
+    private fun mergeRanges(ranges: List<SourceRange>): List<SourceRange> {
+        if (ranges.isEmpty()) return ranges
+        val sorted = ranges.sortedWith(compareBy({ it.start }, { it.end }))
+        val merged = mutableListOf(sorted.first())
+        sorted.drop(1).forEach { next ->
+            val last = merged.last()
+            if (next.start <= last.end) {
+                if (next.end > last.end) merged[merged.lastIndex] = SourceRange(last.start, next.end)
+            } else {
+                merged += next
+            }
+        }
+        return merged
+    }
 
     /**
      * The `bodymatter` landmark's target, if the navigation document declares one.
@@ -394,6 +487,20 @@ object EpubTextReader {
         Regex("(?i)<meta\\b(?=[^>]*\\bname=[\"']cover[\"'])(?=[^>]*\\bcontent=[\"']([^\"']+))[^>]*>")
     private val CoverHrefPattern =
         Regex("(?i)<reference[^>]*\\btype=[\"']cover[\"'][^>]*\\bhref=[\"']([^\"']+)")
+    /**
+     * How long a repeating line may be and still be treated as furniture.
+     *
+     * A site name or a colophon is a handful of words. Set generously enough for "Copyright © 2024
+     * by the author, all rights reserved" and well short of a sentence of prose.
+     */
+    private const val MAXIMUM_BOILERPLATE_LINE_LENGTH = 100
+
+    /** The share of a book's documents a line must appear in before it counts as furniture. */
+    private const val BOILERPLATE_DOCUMENT_SHARE = 0.6
+
+    /** Below this, "most documents" is too small a sample to silence anything on. */
+    private const val MINIMUM_DOCUMENTS_FOR_BOILERPLATE = 3
+
     private val LandmarksNavPattern =
         Regex("(?is)<nav\\b[^>]*epub:type=[\"'][^\"']*\\blandmarks\\b[^\"']*[\"'].*?</nav>")
     private val BodyMatterAnchorPattern =
