@@ -81,9 +81,12 @@ jobs:
             --file backend/Dockerfile .
 
       - name: Create runtime secrets in Key Vault
+        id: secrets
         shell: bash
         env:
           DB_PASSWORD: ${{ secrets.AZURE_STAGING_DATABASE_PASSWORD }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
         run: |
           token=$(openssl rand -hex 32)
           connection="Host=${{ steps.database.outputs.host }};Port=5432;Database=audiochoice;Username=audiochoice_admin;Password=$DB_PASSWORD;SSL Mode=Require"
@@ -91,13 +94,39 @@ jobs:
           az keyvault secret set --vault-name "${{ steps.foundation.outputs.vault }}" --name postgres-connection-string --value "$connection" >/dev/null
           echo "API_TOKEN=$token" >> "$GITHUB_ENV"
 
+          # The premium voice is optional. A deployment must never reference a Key Vault secret
+          # that is absent -- that fails the whole revision and takes the working API down with it --
+          # so whether the credentials exist is decided here and passed on, rather than assumed.
+          # Without them the API still deploys and still scans text; only the paid voice is withheld.
+          if [ -n "$AWS_ACCESS_KEY_ID" ] && [ -n "$AWS_SECRET_ACCESS_KEY" ]; then
+            az keyvault secret set --vault-name "${{ steps.foundation.outputs.vault }}" \
+              --name aws-access-key-id --value "$AWS_ACCESS_KEY_ID" >/dev/null
+            az keyvault secret set --vault-name "${{ steps.foundation.outputs.vault }}" \
+              --name aws-secret-access-key --value "$AWS_SECRET_ACCESS_KEY" >/dev/null
+            echo "aws=true" >> "$GITHUB_OUTPUT"
+            echo "Premium voice credentials found; synthesis will be enabled."
+          else
+            echo "aws=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY are not set, so the premium voice stays off. Text scanning is unaffected."
+          fi
+
       - name: Deploy API container
         shell: bash
         run: |
           az deployment group create \
             --resource-group "${{ secrets.AZURE_RESOURCE_GROUP }}" \
             --template-file deploy/azure/api.bicep \
-            --parameters location="$LOCATION" imageTag="$GITHUB_SHA" googleClientID='105248861745-34kh2v9g9825kb1drs3jrgmijjum2p3o.apps.googleusercontent.com,105248861745-hikuiqttbh10okeksf972rk5osdf4d0c.apps.googleusercontent.com' appleClientID='com.audiochoice.website,com.audiochoice.mobile'
+            --parameters location="$LOCATION" imageTag="$GITHUB_SHA" narrationAwsCredentialsPresent=${{ steps.secrets.outputs.aws }} googleClientID='105248861745-34kh2v9g9825kb1drs3jrgmijjum2p3o.apps.googleusercontent.com,105248861745-hikuiqttbh10okeksf972rk5osdf4d0c.apps.googleusercontent.com' appleClientID='com.audiochoice.website,com.audiochoice.mobile'
+
+      - name: Report narration configuration
+        shell: bash
+        run: |
+          echo "Text scanning: enabled"
+          if [ "${{ steps.secrets.outputs.aws }}" = "true" ]; then
+            echo "Premium voice: enabled"
+          else
+            echo "Premium voice: disabled (no AWS credentials in repository secrets)"
+          fi
 
       - name: Show API endpoint
         shell: bash

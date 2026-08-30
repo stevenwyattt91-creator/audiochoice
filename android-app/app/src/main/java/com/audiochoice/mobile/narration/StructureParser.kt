@@ -5,6 +5,7 @@ import com.audiochoice.mobile.data.NarrationPlan
 import com.audiochoice.mobile.data.PlanInputs
 import com.audiochoice.mobile.data.SourceRange
 import com.audiochoice.mobile.reader.EpubDocument
+import com.audiochoice.mobile.reader.NavigationEntry
 import com.audiochoice.mobile.reader.NavigationOutline
 import com.audiochoice.mobile.reader.NavigationSource
 
@@ -30,6 +31,20 @@ object StructureParser {
      * a scroll of thousands of entries, each of which would also be a render job.
      */
     const val MAXIMUM_DERIVED_CHAPTERS = 2_000
+
+    /**
+     * The largest a chapter may be before its nested divisions are used instead.
+     *
+     * A chapter is rendered in full before any of it plays, so this is a bound on waiting rather
+     * than a formatting preference. At the rates measured on a real device -- about 18 spoken
+     * characters a second, synthesised around 28 times faster than real time -- 60,000 characters is
+     * roughly 55 minutes of audio and two minutes of synthesis. That is the upper end of a
+     * believable single chapter, and anything past it is a Part.
+     */
+    const val MAXIMUM_CHAPTER_CHARACTERS = 60_000
+
+    /** Bounds the descent, since each level is re-measured after expanding. */
+    private const val MAXIMUM_EXPANSION_DEPTH = 6
 
     fun deriveChapters(document: EpubDocument): ChapterOutline {
         if (document.text.isEmpty() || document.resources.isEmpty()) {
@@ -77,7 +92,9 @@ object StructureParser {
         navigation: NavigationOutline,
     ): List<Boundary> {
         val spans = document.resources.associateBy { it.entryName }
-        return navigation.entries.mapNotNull { entry ->
+        // Expanded before boundaries are taken, so a division too large to be a render unit is
+        // replaced by the divisions inside it.
+        return flattenToRenderableDepth(navigation.entries, document).mapNotNull { entry ->
             val span = spans[entry.targetEntry] ?: return@mapNotNull null
             // A fragment is what lets two chapters share one spine document, which
             // is the normal shape of a single-file EPUB.
@@ -87,6 +104,68 @@ object StructureParser {
                 ?: span.range.start
             Boundary(start = start, title = entry.title)
         }
+    }
+
+    /**
+     * Replaces any division too large to render with the divisions nested inside it.
+     *
+     * A chapter is the unit that has to be synthesised in full before a word of it can be heard, so
+     * its size is a limit on how long the listener waits, not just a matter of how the contents list
+     * is organised. Plenty of books name Parts at the top level: one real book's first Part came to
+     * 440,000 spoken characters, about seven hours of audio and a quarter of an hour of synthesis
+     * before playback could begin, which reads as a button that does nothing.
+     *
+     * Top-level entries are still preferred wherever they are already a sensible size. A book whose
+     * contents list names every scene break keeps the chapters its author named, which is what the
+     * top-level-only rule was protecting and worth keeping.
+     *
+     * Descends only where there is somewhere to descend to. A single enormous chapter with no
+     * nested entries stays one chapter, because inventing divisions the author did not name would
+     * put chapter rows in front of the listener that correspond to nothing in their book.
+     */
+    private fun flattenToRenderableDepth(
+        entries: List<NavigationEntry>,
+        document: EpubDocument,
+        depth: Int = 0,
+    ): List<NavigationEntry> {
+        if (depth >= MAXIMUM_EXPANSION_DEPTH) return entries
+        // Sizes come from where each entry starts, so they are measured the same way the boundaries
+        // that follow will be. Measured across the whole list at once because an entry's extent is
+        // defined by where the next one begins.
+        val starts: List<Int?> = entries.map { entry -> startOf(entry, document) }
+        val result = mutableListOf<NavigationEntry>()
+        var expanded = false
+        entries.forEachIndexed { index, entry ->
+            val start = starts[index]
+            // An entry whose target is missing cannot be measured, so it is left alone rather than
+            // guessed at.
+            val extent = if (start == null) {
+                null
+            } else {
+                val next = starts.drop(index + 1).filterNotNull().firstOrNull { it > start }
+                (next ?: document.text.length) - start
+            }
+            if (extent != null && extent > MAXIMUM_CHAPTER_CHARACTERS && entry.children.isNotEmpty()) {
+                expanded = true
+                // The parent is kept as the first division of itself. Its own text -- a Part title,
+                // an epigraph opening the Part -- lies before the first child begins and would
+                // otherwise belong to no chapter and never be spoken.
+                result += entry.copy(children = emptyList())
+                result += flattenToRenderableDepth(entry.children, document, depth + 1)
+            } else {
+                result += entry.copy(children = emptyList())
+            }
+        }
+        // Re-measured after expanding, because a child can itself be a Part.
+        return if (expanded) flattenToRenderableDepth(result, document, depth + 1) else result
+    }
+
+    private fun startOf(entry: NavigationEntry, document: EpubDocument): Int? {
+        val span = document.resources.firstOrNull { it.entryName == entry.targetEntry } ?: return null
+        return entry.targetFragment
+            ?.let { document.anchorOffsets["${entry.targetEntry}#$it"] }
+            ?.takeIf { it in span.range.start..span.range.end }
+            ?: span.range.start
     }
 
     private fun boundariesFromSpine(document: EpubDocument): List<Boundary> =
