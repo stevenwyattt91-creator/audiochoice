@@ -274,6 +274,11 @@ private final class QRScannerController: UIViewController, AVCaptureMetadataOutp
 struct ScanProgressScreen: View {
     var record: LibraryBookRecord
     var fileURL: URL
+    /// True when scanning a book already in the library rather than finishing an import.
+    ///
+    /// Changes two things: a failure must not discard the book, and the message must not tell the
+    /// listener their book was not added when it was already there and still is.
+    var isRescan: Bool = false
     @StateObject private var model = CloudScanViewModel()
 
     private var book: MobileBook { record.book }
@@ -392,14 +397,17 @@ struct ScanProgressScreen: View {
                 if let error = model.errorMessage {
                     ACCard {
                         VStack(alignment: .leading, spacing: 12) {
-                            Label(model.isReconnecting ? "Scan paused — reconnecting" : "Import failed", systemImage: "exclamationmark.triangle")
+                            Label(
+                                model.isReconnecting
+                                    ? "Scan paused — reconnecting"
+                                    : (isRescan ? "Scan failed" : "Import failed"),
+                                systemImage: "exclamationmark.triangle"
+                            )
                                 .font(.headline)
                             Text(error)
                                 .font(.subheadline)
                                 .foregroundStyle(ACTheme.secondaryText)
-                            Text(model.isReconnecting
-                                 ? "AudioChoice will retry the backend automatically. Keep this screen open; progress will resume when the connection returns."
-                                 : "The incomplete audiobook was not added to your library. Select the file again to retry.")
+                            Text(explanation(reconnecting: model.isReconnecting))
                                 .font(.caption)
                                 .foregroundStyle(ACTheme.secondaryText)
                         }
@@ -411,6 +419,18 @@ struct ScanProgressScreen: View {
         .background(ACTheme.background)
         .navigationTitle("Analyzing Audiobook")
         .navigationBarTitleDisplayMode(.inline)
-        .task { await model.start(fileURL: fileURL, record: record) }
+        .task { await model.start(fileURL: fileURL, record: record, isRescan: isRescan) }
+    }
+
+    private func explanation(reconnecting: Bool) -> String {
+        if reconnecting {
+            return "AudioChoice will retry the backend automatically. Keep this screen open; " +
+                "progress will resume when the connection returns."
+        }
+        // A rescan leaves the book alone, so saying it was not added would be false and alarming.
+        return isRescan
+            ? "This audiobook is still in your library and still plays. Its filters could not be " +
+                "loaded, so nothing is being filtered. You can try scanning again."
+            : "The incomplete audiobook was not added to your library. Select the file again to retry."
     }
 }

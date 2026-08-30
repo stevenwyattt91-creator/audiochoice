@@ -551,6 +551,7 @@ app.MapPost("/v1/auth/password-reset/request", async (
                 transactionalEmailOptions.ActionBaseURL,
                 "reset-password",
                 reset.Token),
+            reset.Token,
             cancellationToken);
     }
 

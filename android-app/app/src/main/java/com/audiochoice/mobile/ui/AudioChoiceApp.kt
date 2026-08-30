@@ -565,11 +565,23 @@ private fun LibraryShell(
                 // StateFlow directly in composition meant this branch did not
                 // recompose when a book finished loading.
                 if (playerState.book == null) EmptyPlayer { selected = 0 }
-                else PlayerScreen(player, filtersLocked, onBack = {
-                    player.saveProgress()
-                    detailBook = player.state.value.book
-                    selected = 0
-                })
+                else PlayerScreen(
+                    player,
+                    filtersLocked,
+                    onBack = {
+                        player.saveProgress()
+                        detailBook = player.state.value.book
+                        selected = 0
+                    },
+                    // Moves to the import tab, which is where scan progress is shown. Starting a scan
+                    // the listener could not watch would look like the button had done nothing.
+                    onRescan = playerState.localUri?.let { uri ->
+                        {
+                            importer.rescan(uri, context.contentResolver, accessToken)
+                            selected = 2
+                        }
+                    },
+                )
             } else if (selected == 2) {
                 ImportScreen(importer, accessToken) {
                     importer.onImportScreenLeft()
@@ -2046,7 +2058,18 @@ private fun com.audiochoice.mobile.player.PlayerUiState.resultVersion(): String 
 }
 
 @Composable
-private fun PlayerScreen(player: PlayerViewModel, filtersLocked: Boolean, onBack: (() -> Unit)? = null) {
+private fun PlayerScreen(
+    player: PlayerViewModel,
+    filtersLocked: Boolean,
+    onBack: (() -> Unit)? = null,
+    /**
+     * Scans this book again, where its file is still on the device to scan.
+     *
+     * Null when there is no local file, since offering to scan one that is not there would fail after
+     * the listener had already committed to waiting for it.
+     */
+    onRescan: (() -> Unit)? = null,
+) {
     val state by player.state.collectAsStateWithLifecycle()
     val book = state.book ?: return
     var speedMenu by remember { mutableStateOf(false) }
@@ -2156,11 +2179,23 @@ private fun PlayerScreen(player: PlayerViewModel, filtersLocked: Boolean, onBack
                         modifier = Modifier.size(20.dp),
                     )
                     Spacer(Modifier.width(10.dp))
-                    Text(
-                        "Filters are not active. This audiobook's scan could not be loaded.",
-                        color = MaterialTheme.colorScheme.error,
-                        fontSize = 12.sp,
-                    )
+                    Column(Modifier.weight(1f)) {
+                        Text(
+                            "Filters are not active. This audiobook's scan could not be loaded.",
+                            color = MaterialTheme.colorScheme.error,
+                            fontSize = 12.sp,
+                        )
+                        // Named as an action rather than a retry: for an edition nobody has scanned
+                        // before, this is the first attempt rather than a second one.
+                        if (onRescan != null) {
+                            TextButton(
+                                onClick = onRescan,
+                                contentPadding = PaddingValues(horizontal = 0.dp, vertical = 2.dp),
+                            ) {
+                                Text("Scan this audiobook", fontSize = 12.sp)
+                            }
+                        }
+                    }
                 }
             }
             Spacer(Modifier.height(10.dp))

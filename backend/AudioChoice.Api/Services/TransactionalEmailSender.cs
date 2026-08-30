@@ -25,6 +25,7 @@ public interface ITransactionalEmailSender
     Task SendPasswordReset(
         string recipient,
         Uri resetURL,
+        string resetCode,
         CancellationToken cancellationToken);
 
     Task SendSupportMessage(
@@ -52,6 +53,7 @@ public sealed class DisabledTransactionalEmailSender : ITransactionalEmailSender
     public Task SendPasswordReset(
         string recipient,
         Uri resetURL,
+        string resetCode,
         CancellationToken cancellationToken) => Task.CompletedTask;
 
     public Task SendSupportMessage(
@@ -86,10 +88,27 @@ public sealed class ResendTransactionalEmailSender(
     public Task SendPasswordReset(
         string recipient,
         Uri resetURL,
+        string resetCode,
         CancellationToken cancellationToken) => Send(
             recipient,
             "Reset your AudioChoice password",
-            $"Reset your AudioChoice password by opening this link:\n\n{resetURL}\n\nIf you did not request this, you can ignore this message.",
+            // The code comes first, and alone on its line, because the apps complete a reset with it
+            // directly. A link is the wrong primary instruction for someone holding a phone: it
+            // requires a page to land on, and the account it recovers is only reachable in the app.
+            // The link is kept below for anyone reading this on a computer.
+            $"""
+            Your AudioChoice password reset code:
+
+            {resetCode}
+
+            Open AudioChoice, choose "Forgot password", and paste this code with your new password.
+
+            The code lasts one hour and can be used once.
+
+            You can also reset in a browser: {resetURL}
+
+            If you did not ask to reset your password, you can ignore this message and nothing will change.
+            """,
             options.ReplyToAddress,
             cancellationToken);
 

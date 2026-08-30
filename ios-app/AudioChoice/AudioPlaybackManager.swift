@@ -169,6 +169,24 @@ final class AudioPlaybackManager: ObservableObject {
         defaults.set(updatedAt, forKey: timestampKey)
     }
 
+    /// Picks up filter data that arrived for the book already playing.
+    ///
+    /// `load` cannot do this: it returns immediately for the book it is already on, deliberately, so
+    /// that re-entering a screen does not restart playback. That leaves no route for a scan finishing
+    /// mid-book to take effect, which is exactly what happens when a listener scans a book they are
+    /// already listening to. Playback, position and the player are untouched -- only what is being
+    /// filtered changes.
+    func refreshFilterData() {
+        guard let current = currentRecord,
+              let latest = AudiobookLibraryStore.load().first(where: { $0.id == current.id })
+        else { return }
+        self.record = latest
+        self.currentRecord = latest
+        self.filterAvailability = FilterAvailability.of(latest)
+        self.rebuildEnforcedRanges()
+        self.applyContentFilter()
+    }
+
     func load(_ record: LibraryBookRecord) {
         guard currentBookID != record.id,
               let fileName = record.localFileName else { return }

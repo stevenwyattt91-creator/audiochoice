@@ -110,13 +110,26 @@ jobs:
             echo "::notice::AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY are not set, so the premium voice stays off. Text scanning is unaffected."
           fi
 
+          # Transactional email needs a key to send with. Asked rather than assumed, for the same
+          # reason as the AWS credentials: referencing a Key Vault secret that is absent fails the
+          # whole revision and would take the working API down. Without it email stays off, which
+          # keeps the password reset endpoint from accepting requests it cannot act on.
+          if az keyvault secret show --vault-name "${{ steps.foundation.outputs.vault }}" \
+              --name resend-api-key >/dev/null 2>&1; then
+            echo "resend=true" >> "$GITHUB_OUTPUT"
+            echo "Transactional email key found; password reset email will be sent."
+          else
+            echo "resend=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::resend-api-key is not in Key Vault, so transactional email stays off and password reset cannot send. Add it to enable account recovery."
+          fi
+
       - name: Deploy API container
         shell: bash
         run: |
           az deployment group create \
             --resource-group "${{ secrets.AZURE_RESOURCE_GROUP }}" \
             --template-file deploy/azure/api.bicep \
-            --parameters location="$LOCATION" imageTag="$GITHUB_SHA" narrationAwsCredentialsPresent=${{ steps.secrets.outputs.aws }} googleClientID='105248861745-34kh2v9g9825kb1drs3jrgmijjum2p3o.apps.googleusercontent.com,105248861745-hikuiqttbh10okeksf972rk5osdf4d0c.apps.googleusercontent.com' appleClientID='com.audiochoice.website,com.audiochoice.mobile'
+            --parameters location="$LOCATION" imageTag="$GITHUB_SHA" narrationAwsCredentialsPresent=${{ steps.secrets.outputs.aws }} resendApiKeyPresent=${{ steps.secrets.outputs.resend }} googleClientID='105248861745-34kh2v9g9825kb1drs3jrgmijjum2p3o.apps.googleusercontent.com,105248861745-hikuiqttbh10okeksf972rk5osdf4d0c.apps.googleusercontent.com' appleClientID='com.audiochoice.website,com.audiochoice.mobile'
 
       - name: Report narration configuration
         shell: bash
@@ -126,6 +139,11 @@ jobs:
             echo "Premium voice: enabled"
           else
             echo "Premium voice: disabled (no AWS credentials in repository secrets)"
+          fi
+          if [ "${{ steps.secrets.outputs.resend }}" = "true" ]; then
+            echo "Password reset email: enabled"
+          else
+            echo "Password reset email: DISABLED (resend-api-key missing from Key Vault)"
           fi
 
       - name: Show API endpoint

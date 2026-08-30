@@ -364,6 +364,7 @@ struct PlayerScreen: View {
     @State private var showingBookmarks = false
     @State private var showingReader = false
     @State private var importingEpub = false
+    @State private var rescanning = false
 
     /// Loaded once per appearance rather than computed.
     ///
@@ -433,8 +434,11 @@ struct PlayerScreen: View {
                         .padding(.horizontal)
                 }
 
-                FilterAvailabilityNotice(availability: playback.filterAvailability)
-                    .padding(.horizontal)
+                FilterAvailabilityNotice(
+                    availability: playback.filterAvailability,
+                    onRescan: rescanFileURL(for: record) == nil ? nil : { rescanning = true }
+                )
+                .padding(.horizontal)
 
                 if let event = playback.activeFilterEvent,
                    let category = IOSContentTaxonomy.category(for: event) {
@@ -552,6 +556,18 @@ struct PlayerScreen: View {
                 BookmarkSheet(record: record, currentPosition: playback.position)
             }
         }
+        // Re-reads the record on dismissal, so a scan that succeeded shows its filters immediately
+        // rather than after the listener leaves and returns.
+        // Re-read on dismissal so filters that just arrived take effect here, rather than only
+        // after the listener leaves the player and comes back.
+        .sheet(isPresented: $rescanning, onDismiss: {
+            record = AudiobookLibraryStore.load().first { $0.id == book.id }
+            playback.refreshFilterData()
+        }) {
+            if let record, let fileURL = rescanFileURL(for: record) {
+                NavigationStack { ScanProgressScreen(record: record, fileURL: fileURL, isRescan: true) }
+            }
+        }
     }
 
     private func tool(_ value: String, _ label: String, isSymbol: Bool = true) -> some View {
@@ -600,8 +616,27 @@ struct NowPlayingScreen: View {
 /// A book with no scan data plays exactly like a book with nothing to filter, so
 /// without this the two are indistinguishable and someone relying on filtering has no
 /// way to know it is inactive. Shown only when there is something to say.
+/// The file to scan again, when the book still has one on this device.
+///
+/// Returns nil when the audio has gone -- evicted, or never stored -- because offering to scan a file
+/// that is not there would fail after the listener had already committed to waiting.
+func rescanFileURL(for record: LibraryBookRecord?) -> URL? {
+    guard let name = record?.localFileName else { return nil }
+    let url = AudiobookImportService.audioURL(fileName: name)
+    return FileManager.default.fileExists(atPath: url.path) ? url : nil
+}
+
 struct FilterAvailabilityNotice: View {
     let availability: FilterAvailability
+    /// Offered only where the book's file is still on the device to scan again.
+    ///
+    /// A book can reach this state through nothing the listener did wrong: a scan interrupted before
+    /// the server created a job leaves nothing pending for recovery to resume, and an edition nobody
+    /// has scanned has nothing to inherit. Until this existed the notice was a dead end -- it named
+    /// the problem and offered no way out of it, and deleting and re-importing the book was the only
+    /// remedy, which nothing on screen said.
+    var onRescan: (() -> Void)? = nil
+
 
     var body: some View {
         switch availability {
@@ -616,13 +651,24 @@ struct FilterAvailabilityNotice: View {
             .foregroundStyle(ACTheme.secondaryText)
             .multilineTextAlignment(.center)
         case .unavailable:
-            Label(
-                "No filter data for this audiobook, so nothing is being filtered.",
-                systemImage: "exclamationmark.shield.fill"
-            )
-            .font(.footnote.weight(.semibold))
-            .foregroundStyle(.red)
-            .multilineTextAlignment(.center)
+            VStack(spacing: 8) {
+                Label(
+                    "No filter data for this audiobook, so nothing is being filtered.",
+                    systemImage: "exclamationmark.shield.fill"
+                )
+                .font(.footnote.weight(.semibold))
+                .foregroundStyle(.red)
+                .multilineTextAlignment(.center)
+
+                if let onRescan {
+                    Button("Scan this audiobook", action: onRescan)
+                        .font(.footnote.weight(.semibold))
+                        .buttonStyle(.bordered)
+                        .accessibilityHint(
+                            "Sends this audiobook to be scanned so its filters can be applied."
+                        )
+                }
+            }
         }
     }
 }

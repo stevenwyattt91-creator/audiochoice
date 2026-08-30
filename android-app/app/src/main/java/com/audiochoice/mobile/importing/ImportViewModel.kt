@@ -362,6 +362,23 @@ class ImportViewModel(
         import(converted, resolver, accessToken, pendingAaxBetaEdition)
     }
 
+    /**
+     * Scans a book already in the library again.
+     *
+     * A book can end up with no filter data through nothing the listener did: an edition nobody has
+     * scanned has nothing to inherit, and a scan interrupted before the server created a job leaves
+     * nothing for recovery to resume. Without this the warning in the player was a dead end -- it said
+     * filters were inactive and offered no way to change that.
+     *
+     * Runs the ordinary import path. The library row is an upsert keyed by the file's fingerprint, so
+     * repeating it re-scans the same book rather than creating a second one, and every step -- upload,
+     * polling, notification, the active-scan record that survives the app being killed -- behaves
+     * exactly as it does the first time instead of being reimplemented here.
+     */
+    fun rescan(uri: Uri, resolver: ContentResolver, accessToken: String) {
+        import(uri, resolver, accessToken)
+    }
+
     fun resumeActiveScan(resolver: ContentResolver, accessToken: String) {
         if (BetaConfig.enabled && !ownerTestingAccess) {
             activeScanStore.clear()
