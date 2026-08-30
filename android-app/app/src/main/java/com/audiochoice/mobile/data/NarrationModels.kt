@@ -157,7 +157,22 @@ data class NarrationPlan(
          * serves for reader alignment: a persisted plan from a different version
          * is discarded and rebuilt rather than trusted.
          */
-        const val PLAN_VERSION = 1
+        /**
+         * Bumped whenever the same book would now produce a different plan.
+         *
+         * A stored plan is only rebuilt when this changes or the book's text hash does, and a change
+         * to how chapters are divided alters neither the text nor its hash. Without a bump, a book
+         * already imported keeps the plan it was first given: the fix ships and the listener never
+         * sees it, on the one book that showed the problem.
+         *
+         * 2: Parts too large to be a render unit are replaced by the chapters inside them, and text
+         * before a book's declared body start -- along with any short line repeating across most of
+         * its documents -- is no longer narrated. Invalidating the plan also discards the rendered
+         * audio, which is required rather than tidy: chapter boundaries moved, so audio stored
+         * against the old indices belongs to different words. The text scan survives, because the
+         * book's text and every offset in it are unchanged, so nothing needs sending away again.
+         */
+        const val PLAN_VERSION = 2
     }
 }
 

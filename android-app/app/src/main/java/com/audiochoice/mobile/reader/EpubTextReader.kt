@@ -529,5 +529,12 @@ object EpubTextReader {
      * change and the affected plans are rebuilt rather than reinterpreted against
      * text that moved underneath their offsets.
      */
-    const val NARRATION_EXTRACTION_VERSION = 1
+    /**
+     * Bumped when extraction's output changes for the same file.
+     *
+     * 2: front matter before the declared body start, and short lines repeating across most of the
+     * book's documents, are reported as non-prose. Recorded on the plan for diagnosis; invalidation
+     * runs off [NarrationPlan.PLAN_VERSION], which moved with it.
+     */
+    const val NARRATION_EXTRACTION_VERSION = 2
 }
