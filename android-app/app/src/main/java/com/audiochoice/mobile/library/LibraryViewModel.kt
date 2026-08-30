@@ -93,10 +93,40 @@ class LibraryViewModel(
 
     fun delete(accessToken: String, book: LibraryBook, onComplete: () -> Unit = {}) {
         viewModelScope.launch {
-            runCatching {
-                api.deleteBook(accessToken, book.id)
+            // A narrated book is held on the device, so deleting one has to remove its narration
+            // directory too. Without this its local library row survives the deletion and the next
+            // refresh puts the book back on the shelf, which reads as a deletion that did not work.
+            val narrated = com.audiochoice.mobile.narration.NarrationConfig.enabled &&
+                com.audiochoice.mobile.library.LibraryShelves.shelfFor(book) ==
+                com.audiochoice.mobile.library.LibraryShelf.EBOOKS
+
+            if (!narrated) {
+                // Unchanged for an audiobook, which is every book in a beta or release build.
+                runCatching {
+                    api.deleteBook(accessToken, book.id)
+                    localAudio.remove(book.fingerprint.sha256)
+                }.onSuccess {
+                    mutableState.value = mutableState.value.copy(
+                        books = mutableState.value.books.filterNot { it.id == book.id },
+                    )
+                    onComplete()
+                }.onFailure { error ->
+                    mutableState.value = mutableState.value.copy(error = error.message)
+                }
+                return@launch
+            }
+
+            // The device is the authority for a narrated book, in deletion as in import. The server
+            // is told, but its answer cannot decide the outcome: a book that never registered has an
+            // identifier the server has never seen, so requiring the call to succeed would make
+            // exactly those books impossible to delete.
+            runCatching { api.deleteBook(accessToken, book.id) }
+            val removed = runCatching {
                 localAudio.remove(book.fingerprint.sha256)
-            }.onSuccess {
+                com.audiochoice.mobile.narration.NarrationStore(context.filesDir)
+                    .deleteBook(book.fingerprint.sha256)
+            }
+            removed.onSuccess {
                 mutableState.value = mutableState.value.copy(
                     books = mutableState.value.books.filterNot { it.id == book.id },
                 )
