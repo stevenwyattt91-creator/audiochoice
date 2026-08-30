@@ -18,7 +18,15 @@ final class CloudScanViewModel: ObservableObject {
     @Published private(set) var reconnectAttempt = 0
     @Published private(set) var connectionStatus: String?
 
-    func start(fileURL: URL, record: LibraryBookRecord) async {
+    /// Runs a scan for [record].
+    ///
+    /// [isRescan] distinguishes scanning a book already in the library from finishing an import.
+    /// The difference matters a great deal: an incomplete *import* must not leave a playable,
+    /// unfiltered book behind, so a failure discards it. A failed *rescan* must leave the book
+    /// exactly as it was -- the listener already had it, and destroying a book and its audio file
+    /// because a scan could not be completed would be a far worse outcome than the missing filter
+    /// data they asked to fix.
+    func start(fileURL: URL, record: LibraryBookRecord, isRescan: Bool = false) async {
         guard phase == .idle || phase == .failed else { return }
         errorMessage = nil
         uploadProgress = 0
@@ -82,7 +90,7 @@ final class CloudScanViewModel: ObservableObject {
                     try await Task.sleep(for: .seconds(delay))
                     errorMessage = nil
                 } catch {
-                    discardIncompleteImportIfNeeded(record)
+                    if !isRescan { discardIncompleteImportIfNeeded(record) }
                     errorMessage = error.localizedDescription
                     phase = .failed
                     return
@@ -92,7 +100,7 @@ final class CloudScanViewModel: ObservableObject {
             phase = .idle
             Task { await ScanRecoveryManager.shared.recoverPendingScans() }
         } catch {
-            discardIncompleteImportIfNeeded(record)
+            if !isRescan { discardIncompleteImportIfNeeded(record) }
             errorMessage = error.localizedDescription
             phase = .failed
         }
