@@ -41,6 +41,31 @@ class ReimportRepairTest {
     }
 
     /**
+     * The membership check reads the audiobook key, which an ebook never writes.
+     *
+     * This is the load-bearing and easily-misread part. `LocalAudioStore.find` reads
+     * `audio_<hash>`; a narrated ebook records its location under `epub_<hash>` through `saveEpub`.
+     * So `find` is always null for an ebook, and the stored-text condition was the *only* thing
+     * making a re-import report the book as already present. Anyone reading `find(sha) != null` and
+     * assuming it means "this ebook is in the library" would reintroduce the fault.
+     */
+    @Test
+    fun `the membership check reads a key an ebook never writes`() {
+        val store = read("src/main/java/com/audiochoice/mobile/data/LocalAudioStore.kt")
+        assertTrue(
+            "find no longer reads the audio key, so it may now report an ebook as present and " +
+                "block the re-import that repairs it",
+            store.contains("fun find(sha256: String): Uri? =") &&
+                store.contains("""fun key(sha256: String) = stringPreferencesKey("audio_"""),
+        )
+        assertTrue(
+            "an ebook's location is no longer recorded under its own key, so it may collide with " +
+                "the audiobook key the membership check reads",
+            store.contains("""fun epubKey(sha256: String) = stringPreferencesKey("epub_"""),
+        )
+    }
+
+    /**
      * The duplicate protection that condition was for is not lost.
      *
      * Registration is an upsert keyed by the same hash, so repeating it cannot create a second
