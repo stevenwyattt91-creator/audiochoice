@@ -49,8 +49,12 @@ struct AuthenticationClient {
         baseURL = url
     }
 
-    func register(email: String, password: String, displayName: String) async throws -> AuthResponse {
-        try await post(["email": email, "password": password, "displayName": displayName], path: "v1/auth/register")
+    /// Creates an account.
+    ///
+    /// No display name is sent. The server treats it as optional and derives one from the address, so
+    /// sending an empty string would store a blank name where a derived one is better.
+    func register(email: String, password: String) async throws -> AuthResponse {
+        try await post(["email": email, "password": password], path: "v1/auth/register")
     }
 
     /// Asks for a reset code to be emailed.
