@@ -19,6 +19,12 @@ struct PasswordResetScreen: View {
     @State private var email = ""
     @State private var code = ""
     @State private var newPassword = ""
+    /// Typed a second time and compared before anything is sent.
+    ///
+    /// A mistyped password here is worse than at sign-up: the reset succeeds, the old password stops
+    /// working, and the listener is locked out again by the very thing they used to get back in — with
+    /// a code that has now been spent.
+    @State private var confirmPassword = ""
     /// Advanced only after the request is accepted, so nobody is asked for a code before one is sent.
     @State private var codeRequested = false
     @State private var working = false
@@ -29,7 +35,10 @@ struct PasswordResetScreen: View {
     private var canConfirm: Bool {
         // Six digits exactly, so an incomplete code is not spent as a failed attempt: the rate limit
         // is what keeps a short code safe, and wasting tries on typos eats into it.
-        !working && code.trimmed.count == codeLength && newPassword.count >= minimumPasswordLength
+        !working
+            && code.trimmed.count == codeLength
+            && newPassword.count >= minimumPasswordLength
+            && newPassword == confirmPassword
     }
 
     var body: some View {
@@ -63,14 +72,25 @@ struct PasswordResetScreen: View {
                         .font(.title3.monospaced())
                     SecureField("New password", text: $newPassword)
                         .textContentType(.newPassword)
+                    SecureField("Confirm new password", text: $confirmPassword)
+                        .textContentType(.newPassword)
                     Text("Use at least \(minimumPasswordLength) characters.")
                         .font(.caption)
                         .foregroundStyle(ACTheme.secondaryText)
+                    // Said as soon as they diverge rather than on submit, so nobody spends their
+                    // one-use code to be told the two did not match.
+                    if !confirmPassword.isEmpty && confirmPassword != newPassword {
+                        Text("Those passwords do not match.")
+                            .font(.caption)
+                            .foregroundStyle(.orange)
+                    }
                     Button("Set New Password") { Task { await confirm() } }
                         .disabled(!canConfirm)
                     Button("Send another code") {
                         codeRequested = false
                         code = ""
+                        newPassword = ""
+                        confirmPassword = ""
                         notice = nil
                         errorMessage = nil
                     }
