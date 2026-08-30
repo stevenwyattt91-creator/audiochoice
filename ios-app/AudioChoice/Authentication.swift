@@ -53,6 +53,24 @@ struct AuthenticationClient {
         try await post(["email": email, "password": password, "displayName": displayName], path: "v1/auth/register")
     }
 
+    /// Asks for a reset code to be emailed.
+    ///
+    /// Accepted whether or not the address has an account, deliberately: answering differently would
+    /// tell anyone who asks which addresses are registered here. So a listener who mistypes their
+    /// email is told the same thing as one who did not, and the only honest instruction is to check
+    /// the inbox they meant to use.
+    func requestPasswordReset(email: String) async throws {
+        _ = try await postAction(["email": email], path: "v1/auth/password-reset/request")
+    }
+
+    /// Sets a new password using the emailed code.
+    func confirmPasswordReset(code: String, newPassword: String) async throws {
+        _ = try await postAction(
+            ["token": code, "newPassword": newPassword],
+            path: "v1/auth/password-reset/confirm"
+        )
+    }
+
     func login(email: String, password: String) async throws -> AuthResponse {
         try await post(["email": email, "password": password], path: "v1/auth/login")
     }
@@ -85,6 +103,28 @@ struct AuthenticationClient {
             ),
             path: "v1/auth/external"
         )
+    }
+
+    /// Posts to an endpoint that returns an acknowledgement rather than a session.
+    ///
+    /// Separate from `post` because that decodes an `AuthResponse`, and a reset neither creates nor
+    /// returns one -- reusing it would fail to decode a perfectly successful reply.
+    private func postAction<Input: Encodable>(_ value: Input, path: String) async throws -> Data {
+        var request = URLRequest(url: url(for: path))
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try JSONEncoder().encode(value)
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+            let message = (try? JSONDecoder().decode(ServerMessage.self, from: data).error)
+                ?? "That request was not accepted."
+            throw AuthenticationError.rejected(message)
+        }
+        return data
+    }
+
+    private func url(for path: String) -> URL {
+        path.split(separator: "/").reduce(baseURL) { $0.appendingPathComponent(String($1)) }
     }
 
     private func post<Input: Encodable>(_ value: Input, path: String) async throws -> AuthResponse {

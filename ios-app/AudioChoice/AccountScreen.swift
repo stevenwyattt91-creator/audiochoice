@@ -11,6 +11,7 @@ struct AccountScreen: View {
     @State private var password = ""
     @State private var displayName = ""
     @State private var creatingAccount = false
+    @State private var resettingPassword = false
     @State private var working = false
     @State private var errorMessage: String?
 
@@ -86,11 +87,30 @@ struct AccountScreen: View {
                         creatingAccount.toggle()
                         errorMessage = nil
                     }
+                    // Offered on the sign-in path only. Someone creating an account has no password
+                    // to recover, and until this existed a listener who could not sign in had no
+                    // route back to their library at all -- their only option was a second account
+                    // on a different address, abandoning the books in the first.
+                    if !creatingAccount {
+                        Button("Forgot password?") { resettingPassword = true }
+                    }
                 }
             }
 
             if let errorMessage {
                 Section { Text(errorMessage).foregroundStyle(.orange) }
+            }
+        }
+        .sheet(isPresented: $resettingPassword) {
+            NavigationStack {
+                PasswordResetScreen(initialEmail: email) { restoredEmail in
+                    // Carried back so they are not asked to type it a second time, and the password
+                    // field is left empty rather than prefilled with the one that did not work.
+                    email = restoredEmail
+                    password = ""
+                    resettingPassword = false
+                    errorMessage = nil
+                }
             }
         }
         .navigationTitle(isLaunchScreen ? "" : "Account")

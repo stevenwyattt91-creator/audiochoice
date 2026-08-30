@@ -24,6 +24,12 @@ param narrationAwsCredentialsPresent bool = false
 @description('AWS region for the synthesis provider.')
 param narrationAwsRegion string = 'us-east-1'
 
+@description('Whether the API sends transactional email. Password reset is unusable without it: the endpoint accepts the request either way, so a listener is told to check an inbox nothing was sent to. Requires resend-api-key in Key Vault.')
+param transactionalEmailEnabled bool = true
+
+@description('Whether resend-api-key exists in Key Vault. A deployment must not reference a secret that is absent -- it fails the whole revision -- so email stays off unless the key is there.')
+param resendApiKeyPresent bool = true
+
 var suffix = take(uniqueString(subscription().subscriptionId, resourceGroup().id), 8)
 var registryName = 'audiochoicestg${suffix}'
 var storageName = 'audiochoicestg${suffix}'
@@ -162,7 +168,13 @@ resource api 'Microsoft.App/containerApps@2024-03-01' = {
           keyVaultUrl: '${vault.properties.vaultUri}secrets/apple-client-secret'
           identity: pullIdentity.id
         }
-      ], narrationAwsCredentialsPresent ? [
+      ], resendApiKeyPresent ? [
+        {
+          name: 'resend-api-key'
+          keyVaultUrl: '${vault.properties.vaultUri}secrets/resend-api-key'
+          identity: pullIdentity.id
+        }
+      ] : [], narrationAwsCredentialsPresent ? [
         {
           name: 'aws-access-key-id'
           keyVaultUrl: '${vault.properties.vaultUri}secrets/aws-access-key-id'
@@ -254,8 +266,10 @@ resource api 'Microsoft.App/containerApps@2024-03-01' = {
               secretRef: 'apple-client-secret'
             }
             {
+              // Email only claims to be on when there is a key to send with, so the reset endpoint
+              // cannot accept a request it has no way to act on.
               name: 'AudioChoice__TransactionalEmail__Enabled'
-              value: 'false'
+              value: string(transactionalEmailEnabled && resendApiKeyPresent)
             }
             {
               name: 'AudioChoice__TransactionalEmail__FromAddress'
@@ -284,7 +298,13 @@ resource api 'Microsoft.App/containerApps@2024-03-01' = {
               name: 'AWS_REGION'
               value: narrationAwsRegion
             }
-          ], narrationAwsCredentialsPresent ? [
+          ], resendApiKeyPresent ? [
+        {
+          name: 'resend-api-key'
+          keyVaultUrl: '${vault.properties.vaultUri}secrets/resend-api-key'
+          identity: pullIdentity.id
+        }
+      ] : [], narrationAwsCredentialsPresent ? [
             {
               name: 'AWS_ACCESS_KEY_ID'
               secretRef: 'aws-access-key-id'
