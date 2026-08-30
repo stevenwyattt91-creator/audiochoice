@@ -511,30 +511,34 @@ app.MapPost("/v1/auth/register", async (
         });
     }
 
-    // The account exists by this point, so a failed verification email must not fail the request.
-    // Resend rejects a send for reasons that have nothing to do with the caller -- an unverified
-    // sending domain, an expired key, a recipient domain it refuses -- and EnsureSuccessStatusCode
-    // turns each of those into a 500. That cost every new listener their sign-up: the account was
-    // created and then reported as a failure, so trying again told them the email was already
-    // registered.
-    //
-    // Verification is a side effect of registering, not a condition of it. An unverified account can
-    // still sign in, and another email can be requested later.
-    try
+    // Off by default. Nothing requires a verified address -- sign-in does not check it -- so the
+    // email asked something of every new listener that changed nothing for them.
+    if (transactionalEmailOptions.VerificationEnabled)
     {
-        await emailSender.SendEmailVerification(
-            registration.Verification.Email,
-            BuildActionURL(
-                transactionalEmailOptions.ActionBaseURL,
-                "verify-email",
-                registration.Verification.Token),
-            cancellationToken);
-    }
-    catch (Exception error)
-    {
-        app.Logger.LogError(
-            error,
-            "Registration succeeded but the verification email could not be sent.");
+        // The account exists by this point, so a failed verification email must not fail the request.
+        // Resend rejects a send for reasons that have nothing to do with the caller -- an unverified
+        // sending domain, an expired key, a recipient domain it refuses -- and EnsureSuccessStatusCode
+        // turns each of those into a 500. That cost every new listener their sign-up: the account was
+        // created and then reported as a failure, so trying again told them the email was taken.
+        //
+        // Verification is a side effect of registering, not a condition of it. An unverified account
+        // can still sign in, and another email can be requested later.
+        try
+        {
+            await emailSender.SendEmailVerification(
+                registration.Verification.Email,
+                BuildActionURL(
+                    transactionalEmailOptions.ActionBaseURL,
+                    "verify-email",
+                    registration.Verification.Token),
+                cancellationToken);
+        }
+        catch (Exception error)
+        {
+            app.Logger.LogError(
+                error,
+                "Registration succeeded but the verification email could not be sent.");
+        }
     }
     return Results.Ok(registration.Response);
 }).RequireRateLimiting("authentication");

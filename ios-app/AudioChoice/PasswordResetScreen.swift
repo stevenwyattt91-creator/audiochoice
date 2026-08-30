@@ -27,7 +27,9 @@ struct PasswordResetScreen: View {
 
     private var canRequest: Bool { !working && !email.trimmed.isEmpty }
     private var canConfirm: Bool {
-        !working && !code.trimmed.isEmpty && newPassword.count >= minimumPasswordLength
+        // Six digits exactly, so an incomplete code is not spent as a failed attempt: the rate limit
+        // is what keeps a short code safe, and wasting tries on typos eats into it.
+        !working && code.trimmed.count == codeLength && newPassword.count >= minimumPasswordLength
     }
 
     var body: some View {
@@ -47,16 +49,18 @@ struct PasswordResetScreen: View {
                 }
             } else {
                 Section("Enter Your Code") {
-                    Text("Paste the code from the email, then choose a new password.")
+                    Text("Enter the 6-digit code from the email, then choose a new password.")
                         .font(.footnote)
                         .foregroundStyle(ACTheme.secondaryText)
-                    // Not a SecureField: the code is pasted from an email and hiding it would stop a
-                    // listener seeing whether the paste worked, which is the step most likely to go
-                    // wrong. It is single-use and expires within the hour.
-                    TextField("Reset code", text: $code)
+                    // Not a SecureField: hiding a code someone is copying from an email removes the
+                    // one thing that tells them the entry worked, which is the step most likely to go
+                    // wrong. It is six digits, single-use, and expires in fifteen minutes.
+                    TextField("6-digit code", text: $code)
+                        .keyboardType(.numberPad)
+                        .textContentType(.oneTimeCode)
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
-                        .font(.footnote.monospaced())
+                        .font(.title3.monospaced())
                     SecureField("New password", text: $newPassword)
                         .textContentType(.newPassword)
                     Text("Use at least \(minimumPasswordLength) characters.")
@@ -108,8 +112,8 @@ struct PasswordResetScreen: View {
             codeRequested = true
             // Worded without confirming the address has an account, matching what the server does.
             // Telling someone their email is unknown would let anyone discover who is registered.
-            notice = "If that address has an account, a code is on its way. " +
-                "It can take a minute or two to arrive, and it expires within the hour."
+            notice = "If that address has an account, a 6-digit code is on its way. " +
+                "It can take a minute or two to arrive, and it expires in 15 minutes."
         } catch {
             errorMessage = error.localizedDescription
         }
@@ -134,6 +138,9 @@ struct PasswordResetScreen: View {
 
     /// Matches the server's minimum, so the form refuses what the server would refuse.
     private var minimumPasswordLength: Int { 12 }
+
+    /// Matches the server's code format.
+    private var codeLength: Int { 6 }
 }
 
 private extension String {

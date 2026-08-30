@@ -1,4 +1,5 @@
 #if POSTGRES
+using System.Globalization;
 using System.Security.Cryptography;
 using System.Text;
 using AudioChoice.Api.Contracts;
@@ -173,8 +174,12 @@ public sealed class PostgresAccountStore(NpgsqlDataSource dataSource) : IAccount
         var userID = reader.GetGuid(0);
         var storedEmail = reader.GetString(1);
         reader.Close();
+        // Fifteen minutes, not an hour: a six-digit code is short enough that the window it is
+        // guessable in matters, and a listener who asked for a code reads their email now rather than
+        // later. Another can always be requested.
         var token = CreateActionToken(
-            connection, transaction, userID, storedEmail, "reset_password", TimeSpan.FromHours(1));
+            connection, transaction, userID, storedEmail, "reset_password",
+            TimeSpan.FromMinutes(15), shortCode: true);
         transaction.Commit();
         return token;
     }
@@ -223,13 +228,38 @@ public sealed class PostgresAccountStore(NpgsqlDataSource dataSource) : IAccount
         return new AuthResponse(token, expires, user);
     }
 
+    /// <summary>
+    /// Issues a single-use token for an account action.
+    /// </summary>
+    /// <param name="shortCode">
+    /// When true the token is a six-digit number rather than 96 hex characters.
+    /// <para>
+    /// Used for a password reset, where the token is read out of an email and typed into a phone. A
+    /// 96-character string is not something a person transcribes; they paste it or they give up, and
+    /// pasting from a mail app is exactly where a stray newline creeps in.
+    /// </para>
+    /// <para>
+    /// Six digits is a million possibilities, so the guard is rate and time rather than length. The
+    /// authentication endpoints permit ten requests a minute, and a reset code lives fifteen minutes,
+    /// which allows roughly 150 guesses against a code from one source -- about a 0.015% chance of
+    /// hitting it before it expires. Any change to that rate limit or that lifetime changes this
+    /// arithmetic, so they belong together.
+    /// </para>
+    /// <para>
+    /// Only ever generated with a cryptographic source. A predictable six-digit code would be far
+    /// worse than a short one.
+    /// </para>
+    /// </param>
     private static AccountActionToken CreateActionToken(
         NpgsqlConnection connection, NpgsqlTransaction transaction,
-        Guid userID, string email, string purpose, TimeSpan lifetime)
+        Guid userID, string email, string purpose, TimeSpan lifetime, bool shortCode = false)
     {
         Execute(connection, transaction,
             "delete from account_action_tokens where user_id = $1 and purpose = $2;", userID, purpose);
-        var token = Convert.ToHexString(RandomNumberGenerator.GetBytes(48));
+        var token = shortCode
+            // Uniform across the whole range, unlike taking a modulus of a random integer.
+            ? RandomNumberGenerator.GetInt32(0, 1_000_000).ToString("D6", CultureInfo.InvariantCulture)
+            : Convert.ToHexString(RandomNumberGenerator.GetBytes(48));
         var expires = DateTimeOffset.UtcNow.Add(lifetime);
         Execute(connection, transaction, """
             insert into account_action_tokens(token_hash, user_id, purpose, expires_at, created_at)
