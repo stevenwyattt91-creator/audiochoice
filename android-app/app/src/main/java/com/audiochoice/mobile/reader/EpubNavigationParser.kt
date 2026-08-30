@@ -1,12 +1,19 @@
 package com.audiochoice.mobile.reader
 
 /**
- * Reads a book's top-level chapter list from its navigation document or NCX.
+ * Reads a book's chapter list from its navigation document or NCX.
  *
- * Only top-level entries become chapters. A book that lists every scene break in
+ * Top-level entries are preferred, because a book that lists every scene break in
  * its table of contents would otherwise produce hundreds of chapters, each a
  * separate render job and a separate row in the chapter control, which is worse
  * for the listener than the chapters the author actually named.
+ *
+ * The nested entries are carried alongside rather than discarded, though. Plenty of
+ * books name Parts at the top level and chapters beneath them, and treating a Part
+ * as a chapter makes the render unit the whole Part -- which for one real book came
+ * to 440,000 spoken characters, about seven hours of audio that has to be
+ * synthesised in full before a word of it can be heard. Which depth actually
+ * becomes the chapter list is decided by size, in the structure parser.
  *
  * Depth is tracked explicitly rather than matched with a regex, because "the
  * direct children of this element" is not something a regular expression can
@@ -24,16 +31,34 @@ internal object EpubNavigationParser {
     fun parseEpub3Nav(html: String, resolve: (String) -> String): List<NavigationEntry>? {
         val tocNav = tocNavContent(html) ?: return null
         val list = firstInnerContent(tocNav, "ol") ?: return null
-        val entries = directChildren(list, "li").mapNotNull { item ->
-            // The first anchor in an <li> is its own target; later anchors belong
-            // to a nested list, which is not a top-level entry.
-            val anchor = firstElement(item, "a") ?: return@mapNotNull null
-            val href = EpubHtmlOffsetExtractor.parseAttributes(anchor.openTag)["href"]
-                ?.takeIf { it.isNotBlank() }
-                ?: return@mapNotNull null
-            navigationEntry(href, plainText(anchor.inner), resolve)
+        return navEntriesFromList(list, resolve).takeIf { it.isNotEmpty() }
+    }
+
+    /**
+     * The entries of one `ol`, each carrying whatever list is nested inside it.
+     *
+     * Depth is bounded. A malformed or hostile document could nest lists indefinitely, and this
+     * runs during import on a file the listener supplied.
+     */
+    private fun navEntriesFromList(
+        list: String,
+        resolve: (String) -> String,
+        depth: Int = 0,
+    ): List<NavigationEntry> = directChildren(list, "li").mapNotNull { item ->
+        // The first anchor in an <li> is its own target; later anchors belong to the nested list,
+        // which is read separately below rather than mistaken for this entry's target.
+        val anchor = firstElement(item, "a") ?: return@mapNotNull null
+        val href = EpubHtmlOffsetExtractor.parseAttributes(anchor.openTag)["href"]
+            ?.takeIf { it.isNotBlank() }
+            ?: return@mapNotNull null
+        val nested = if (depth < MAXIMUM_NAVIGATION_DEPTH) {
+            firstInnerContent(item, "ol")
+                ?.let { navEntriesFromList(it, resolve, depth + 1) }
+                .orEmpty()
+        } else {
+            emptyList()
         }
-        return entries.takeIf { it.isNotEmpty() }
+        navigationEntry(href, plainText(anchor.inner), resolve).copy(children = nested)
     }
 
     /** Parse an NCX `navMap`'s top-level `navPoint` elements. */
@@ -47,10 +72,47 @@ internal object EpubNavigationParser {
             val label = firstInnerContent(point, "navlabel")
                 ?.let { firstInnerContent(it, "text") }
                 ?.let(::plainText)
-            navigationEntry(source, label, resolve)
+            // Nested navPoints are the NCX's equivalent of a nested ol, and carried for the
+            // same reason.
+            val nested = directChildren(point, "navpoint")
+            navigationEntry(source, label, resolve).copy(
+                children = if (nested.isEmpty()) {
+                    emptyList()
+                } else {
+                    parseNcxPoints(point, resolve, depth = 1)
+                },
+            )
         }
         return entries.takeIf { it.isNotEmpty() }
     }
+
+    private fun parseNcxPoints(
+        container: String,
+        resolve: (String) -> String,
+        depth: Int,
+    ): List<NavigationEntry> {
+        if (depth > MAXIMUM_NAVIGATION_DEPTH) return emptyList()
+        return directChildren(container, "navpoint").mapNotNull { point ->
+            val contentTag = firstElement(point, "content")?.openTag ?: return@mapNotNull null
+            val source = EpubHtmlOffsetExtractor.parseAttributes(contentTag)["src"]
+                ?.takeIf { it.isNotBlank() }
+                ?: return@mapNotNull null
+            val label = firstInnerContent(point, "navlabel")
+                ?.let { firstInnerContent(it, "text") }
+                ?.let(::plainText)
+            navigationEntry(source, label, resolve)
+                .copy(children = parseNcxPoints(point, resolve, depth + 1))
+        }
+    }
+
+    /**
+     * How deep a contents list is followed.
+     *
+     * Bounded because this runs at import on a file the listener supplied, and a document nesting
+     * lists without end would otherwise recurse until the stack gave out. Six is far past any real
+     * book's structure.
+     */
+    private const val MAXIMUM_NAVIGATION_DEPTH = 6
 
     private fun navigationEntry(
         href: String,

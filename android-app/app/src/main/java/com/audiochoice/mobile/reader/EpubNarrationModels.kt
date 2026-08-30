@@ -25,6 +25,15 @@ data class NavigationEntry(
     val title: String?,
     val targetEntry: String,
     val targetFragment: String? = null,
+    /**
+     * The entries nested beneath this one, in order.
+     *
+     * Carried so a division that turns out to be too large to render can be replaced by the
+     * divisions inside it. A book whose contents list names Parts at the top level would otherwise
+     * make each Part a single chapter, and a chapter is the unit that has to be synthesised in full
+     * before any of it can be heard.
+     */
+    val children: List<NavigationEntry> = emptyList(),
 )
 
 data class NavigationOutline(

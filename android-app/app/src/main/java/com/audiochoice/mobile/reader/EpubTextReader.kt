@@ -190,6 +190,31 @@ object EpubTextReader {
             .filter { it.groupValues[1].lowercase(Locale.US).trim() in GUIDE_FRONT_MATTER_TYPES }
             .map { resolveHref(it.groupValues[2].substringBefore('#')) }
             .toSet()
+        // Where the book itself says its body begins. EPUB 2 declares it as the guide reference of
+        // type "text"; EPUB 3 declares it as the landmark of type "bodymatter". Everything in the
+        // spine before that point is front matter by the book's own account, which is a far better
+        // authority than guessing from filenames.
+        //
+        // This matters because a listener pressing Read aloud on a novel expects the novel. One real
+        // book opens with two title pages carrying nothing but a watermark, a dedication, an
+        // epigraph and a contents list -- so the voice began with roughly five minutes of matter
+        // nobody asked to hear before reaching the first sentence.
+        val declaredBodyStart = GuideReferencePattern.findAll(opf)
+            .firstOrNull { it.groupValues[1].lowercase(Locale.US).trim() == "text" }
+            ?.let { resolveHref(it.groupValues[2].substringBefore('#')) }
+            ?: navigationEntry
+                ?.let(textEntries::get)
+                ?.let(::landmarkBodyStart)
+                ?.let { resolveHref(it.substringBefore('#')) }
+        val frontMatterBeforeBody = declaredBodyStart
+            ?.let { start ->
+                val index = declaredSpine.indexOf(start)
+                // Only when the declared start is actually in the spine, and not the very first
+                // item. A book declaring its first spine document as the body start has no front
+                // matter to skip, and a declaration pointing nowhere is worse than none.
+                if (index > 0) declaredSpine.take(index).toSet() else emptySet()
+            }
+            .orEmpty()
 
         declaredSpine.forEach { entry ->
             val html = textEntries[entry]
@@ -202,7 +227,9 @@ object EpubTextReader {
             val range = extractor.appendDocument(
                 entryName = entry,
                 html = html,
-                forceNonProse = entry == navigationEntry || entry in guideFrontMatter,
+                forceNonProse = entry == navigationEntry ||
+                    entry in guideFrontMatter ||
+                    entry in frontMatterBeforeBody,
             )
             if (range.isEmpty) unreadable += entry else resources += ResourceSpan(entry, range)
         }
@@ -251,6 +278,17 @@ object EpubTextReader {
         val language: String?,
         val coverEntry: String?,
     )
+
+    /**
+     * The `bodymatter` landmark's target, if the navigation document declares one.
+     *
+     * The EPUB 3 equivalent of the guide's "text" reference. Read from the landmarks nav rather than
+     * the toc nav, because the toc is a reading order and the landmarks are the semantic map.
+     */
+    private fun landmarkBodyStart(navHtml: String): String? {
+        val landmarks = LandmarksNavPattern.find(navHtml)?.value ?: return null
+        return BodyMatterAnchorPattern.find(landmarks)?.groupValues?.get(1)?.takeIf { it.isNotBlank() }
+    }
 
     private fun readMetadata(
         opf: String,
@@ -356,6 +394,10 @@ object EpubTextReader {
         Regex("(?i)<meta\\b(?=[^>]*\\bname=[\"']cover[\"'])(?=[^>]*\\bcontent=[\"']([^\"']+))[^>]*>")
     private val CoverHrefPattern =
         Regex("(?i)<reference[^>]*\\btype=[\"']cover[\"'][^>]*\\bhref=[\"']([^\"']+)")
+    private val LandmarksNavPattern =
+        Regex("(?is)<nav\\b[^>]*epub:type=[\"'][^\"']*\\blandmarks\\b[^\"']*[\"'].*?</nav>")
+    private val BodyMatterAnchorPattern =
+        Regex("(?is)<a\\b(?=[^>]*epub:type=[\"'][^\"']*\\bbodymatter\\b)(?=[^>]*href=[\"']([^\"']+))[^>]*>")
     private val GuideReferencePattern =
         Regex("(?i)<reference\\b(?=[^>]*\\btype=[\"']([^\"']+))(?=[^>]*\\bhref=[\"']([^\"']+))[^>]*>")
 
