@@ -101,6 +101,14 @@ class NarrationImporter(
     /** Records where the file lives, for a fresh import and for a repeat alike. */
     private val persistSourceLocation: suspend (String) -> Unit,
     private val saveLibraryBook: suspend (LibraryBookUpsertRequest) -> LibraryBook,
+    /**
+     * Records the library row on the device.
+     *
+     * The device is the authority for a narrated book. Everything else about one is already local, and
+     * making its place in the library the single exception is what allowed a book sitting on the phone
+     * to become unreachable through it.
+     */
+    private val saveLocalLibraryBook: suspend (LibraryBook) -> Unit,
     private val saveCover: suspend (String, ByteArray) -> Unit,
 ) {
 
@@ -164,16 +172,24 @@ class NarrationImporter(
                 ),
             )
         }
-        val libraryBook = saved.getOrNull()
-        if (libraryBook == null) {
-            // The library row is what the scan and every sync path key on. Without it there
-            // is nothing to attach a plan to, so the import stops here rather than leaving a
-            // book that exists on the device and nowhere else.
-            return NarrationImportOutcome.Failed(
-                "That book could not be added to your library. Please try again.",
-            )
-        }
-
+        // The import no longer fails because the server did. A narrated book's file, its text and its
+        // audio are all on the device; refusing the import over an unreachable library row would deny
+        // a listener a book they already have, and keeping that row only on the server is what let one
+        // disappear from the shelf with no way to bring it back.
+        //
+        // The server's copy is preferred when it answers, because it carries the identifier and the
+        // reading position that sync between a listener's devices.
+        val libraryBook = saved.getOrNull() ?: LibraryBook(
+            // The hash, so the row is stable and recognisable as the same book when a server copy
+            // eventually arrives and replaces it.
+            id = identity.sha256,
+            fingerprint = fingerprint,
+            title = derivedTitle.title,
+            author = derivedTitle.author,
+            addedAt = timestamp(),
+            updatedAt = timestamp(),
+        )
+        saveLocalLibraryBook(libraryBook)
         persistSourceLocation(identity.sha256)
         store.saveBookText(identity.sha256, document.text)
 
@@ -189,6 +205,10 @@ class NarrationImporter(
     }
 
     /** Stores the manifest cover, or leaves the default in place. */
+    /** ISO-8601 UTC, matching the shape the server sends back so the two sort together. */
+    private fun timestamp(): String =
+        java.time.format.DateTimeFormatter.ISO_INSTANT.format(java.time.Instant.now())
+
     private suspend fun storeCover(
         source: NarrationImportSource,
         document: EpubDocument,

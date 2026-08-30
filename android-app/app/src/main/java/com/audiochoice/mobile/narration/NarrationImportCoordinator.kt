@@ -51,14 +51,21 @@ class NarrationImportCoordinator(
                 }
             },
             isAlreadyInLibrary = { sha256 ->
-                // Asked of the device rather than the server: the local record is what a
-                // duplicate would collide with, and it is also the thing whose rendered audio
-                // must not be disturbed. A network failure must not turn a re-import into a
-                // second entry.
-                localAudio.find(sha256) != null || store.bookText(sha256) != null
+                // The device's own library row, which is now the authority for a narrated book.
+                //
+                // Two earlier readings of this were wrong in opposite directions. Stored Book_Text
+                // made a book unrecoverable: the import reported it present and never registered it,
+                // so re-importing could not repair a missing library row. `LocalAudioStore.find` was
+                // no better -- it reads `audio_<hash>`, a key a narrated ebook never writes, so it is
+                // always null for one and answers a question about audiobooks.
+                //
+                // This row is written by the import itself and does not depend on the network, so it
+                // is true exactly when the book is on the shelf.
+                store.libraryBook(sha256) != null
             },
             persistSourceLocation = { sha256 -> localAudio.saveEpub(sha256, uri) },
             saveLibraryBook = { request -> api.saveBook(accessToken, request) },
+            saveLocalLibraryBook = { book -> store.saveLibraryBook(book.fingerprint.sha256, book) },
             saveCover = { sha256, bytes -> localAudio.saveBookCover(sha256, bytes) },
         )
 
