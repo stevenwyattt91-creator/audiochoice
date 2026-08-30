@@ -511,14 +511,31 @@ app.MapPost("/v1/auth/register", async (
         });
     }
 
-    await emailSender.SendEmailVerification(
-        registration.Verification.Email,
-        BuildActionURL(
-            transactionalEmailOptions.ActionBaseURL,
-            "verify-email",
-            registration.Verification.Token),
-        cancellationToken);
-
+    // The account exists by this point, so a failed verification email must not fail the request.
+    // Resend rejects a send for reasons that have nothing to do with the caller -- an unverified
+    // sending domain, an expired key, a recipient domain it refuses -- and EnsureSuccessStatusCode
+    // turns each of those into a 500. That cost every new listener their sign-up: the account was
+    // created and then reported as a failure, so trying again told them the email was already
+    // registered.
+    //
+    // Verification is a side effect of registering, not a condition of it. An unverified account can
+    // still sign in, and another email can be requested later.
+    try
+    {
+        await emailSender.SendEmailVerification(
+            registration.Verification.Email,
+            BuildActionURL(
+                transactionalEmailOptions.ActionBaseURL,
+                "verify-email",
+                registration.Verification.Token),
+            cancellationToken);
+    }
+    catch (Exception error)
+    {
+        app.Logger.LogError(
+            error,
+            "Registration succeeded but the verification email could not be sent.");
+    }
     return Results.Ok(registration.Response);
 }).RequireRateLimiting("authentication");
 
@@ -545,14 +562,32 @@ app.MapPost("/v1/auth/password-reset/request", async (
     var reset = accounts.CreatePasswordReset(request.Email);
     if (reset is not null)
     {
-        await emailSender.SendPasswordReset(
-            reset.Email,
-            BuildActionURL(
-                transactionalEmailOptions.ActionBaseURL,
-                "reset-password",
-                reset.Token),
-            reset.Token,
-            cancellationToken);
+        // Deliberately not swallowed, unlike the verification email. Here the email *is* the
+        // operation: accepting the request and sending nothing leaves someone locked out watching an
+        // inbox, with no way to tell anything went wrong -- the exact failure this feature exists to
+        // remove. A failure they can see is better than silence.
+        //
+        // This discloses nothing either way: a send fault fails identically whether or not the
+        // address has an account, and an unknown address still returns 202 without sending.
+        try
+        {
+            await emailSender.SendPasswordReset(
+                reset.Email,
+                BuildActionURL(
+                    transactionalEmailOptions.ActionBaseURL,
+                    "reset-password",
+                    reset.Token),
+                reset.Token,
+                cancellationToken);
+        }
+        catch (Exception error)
+        {
+            app.Logger.LogError(error, "A password reset code could not be emailed.");
+            return Results.Problem(
+                title: "The reset email could not be sent.",
+                detail: "AudioChoice could not send your reset code. Please try again shortly.",
+                statusCode: StatusCodes.Status502BadGateway);
+        }
     }
 
     return Results.Accepted(
