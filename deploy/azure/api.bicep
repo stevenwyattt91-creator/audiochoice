@@ -12,6 +12,18 @@ param googleClientID string = ''
 @description('Comma-separated Apple client IDs accepted as token audiences (website Services ID and native App ID).')
 param appleClientID string = 'com.audiochoice.website,com.audiochoice.mobile'
 
+@description('Whether POST /v1/narration/text-scans answers. Independent of synthesis: scanning a book\'s text needs no synthesis provider, so filters can work on the free on-device voice before any paid voice is configured.')
+param narrationTextScanEnabled bool = true
+
+@description('Whether the premium synthesis endpoints answer. Requires AWS credentials in Key Vault, so it is off unless narrationAwsCredentialsPresent is also true.')
+param narrationSynthesisEnabled bool = true
+
+@description('Whether aws-access-key-id and aws-secret-access-key exist in Key Vault. The deployment must not reference a Key Vault secret that is absent -- doing so fails the whole revision and takes the working API down with it -- so the workflow sets this only after writing them.')
+param narrationAwsCredentialsPresent bool = false
+
+@description('AWS region for the synthesis provider.')
+param narrationAwsRegion string = 'us-east-1'
+
 var suffix = take(uniqueString(subscription().subscriptionId, resourceGroup().id), 8)
 var registryName = 'audiochoicestg${suffix}'
 var storageName = 'audiochoicestg${suffix}'
@@ -134,7 +146,7 @@ resource api 'Microsoft.App/containerApps@2024-03-01' = {
           server: registry.properties.loginServer
         }
       ]
-      secrets: [
+      secrets: concat([
         {
           name: 'api-token'
           keyVaultUrl: '${vault.properties.vaultUri}secrets/staging-api-token'
@@ -150,14 +162,25 @@ resource api 'Microsoft.App/containerApps@2024-03-01' = {
           keyVaultUrl: '${vault.properties.vaultUri}secrets/apple-client-secret'
           identity: pullIdentity.id
         }
-      ]
+      ], narrationAwsCredentialsPresent ? [
+        {
+          name: 'aws-access-key-id'
+          keyVaultUrl: '${vault.properties.vaultUri}secrets/aws-access-key-id'
+          identity: pullIdentity.id
+        }
+        {
+          name: 'aws-secret-access-key'
+          keyVaultUrl: '${vault.properties.vaultUri}secrets/aws-secret-access-key'
+          identity: pullIdentity.id
+        }
+      ] : [])
     }
     template: {
       containers: [
         {
           name: 'api'
           image: '${registry.properties.loginServer}/audiochoice-api:${imageTag}'
-          env: [
+          env: concat([
             {
               name: 'ASPNETCORE_FORWARDEDHEADERS_ENABLED'
               value: 'true'
@@ -246,7 +269,31 @@ resource api 'Microsoft.App/containerApps@2024-03-01' = {
               name: 'AudioChoice__TransactionalEmail__ActionBaseURL'
               value: 'https://audiochoiceapp.com'
             }
-          ]
+            {
+              name: 'AudioChoice__Narration__TextScanEnabled'
+              value: string(narrationTextScanEnabled)
+            }
+            {
+              // Synthesis needs a provider. Without credentials the endpoints stay closed rather
+              // than answering and then failing per request, which the client reads as an outage
+              // it should retry instead of a voice it cannot offer.
+              name: 'AudioChoice__Narration__SynthesisEnabled'
+              value: string(narrationSynthesisEnabled && narrationAwsCredentialsPresent)
+            }
+            {
+              name: 'AWS_REGION'
+              value: narrationAwsRegion
+            }
+          ], narrationAwsCredentialsPresent ? [
+            {
+              name: 'AWS_ACCESS_KEY_ID'
+              secretRef: 'aws-access-key-id'
+            }
+            {
+              name: 'AWS_SECRET_ACCESS_KEY'
+              secretRef: 'aws-secret-access-key'
+            }
+          ] : [])
           probes: [
             {
               type: 'Liveness'
