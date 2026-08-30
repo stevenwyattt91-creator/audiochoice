@@ -9,7 +9,11 @@ struct AccountScreen: View {
     @ObservedObject private var session = AuthSession.shared
     @State private var email = ""
     @State private var password = ""
-    @State private var displayName = ""
+    /// Typed a second time when creating an account, and compared before anything is sent.
+    ///
+    /// A mistyped password at sign-up is the worst kind: it is accepted, and the listener is then
+    /// locked out of an account they only just made, with the password they meant to use.
+    @State private var confirmPassword = ""
     @State private var creatingAccount = false
     @State private var resettingPassword = false
     @State private var working = false
@@ -46,10 +50,6 @@ struct AccountScreen: View {
                 }
             } else {
                 Section(creatingAccount ? "Create Account" : "Sign In") {
-                    if creatingAccount {
-                        TextField("Username", text: $displayName)
-                            .textContentType(.username)
-                    }
                     TextField("Email", text: $email)
                         .keyboardType(.emailAddress)
                         .textInputAutocapitalization(.never)
@@ -57,14 +57,23 @@ struct AccountScreen: View {
                     SecureField("Password", text: $password)
                         .textContentType(creatingAccount ? .newPassword : .password)
                     if creatingAccount {
+                        SecureField("Confirm password", text: $confirmPassword)
+                            .textContentType(.newPassword)
                         Text("Use at least 12 characters.")
                             .font(.caption)
                             .foregroundStyle(ACTheme.secondaryText)
+                        // Said as soon as they diverge, rather than on submit. Finding out after
+                        // pressing Create means retyping both fields.
+                        if !confirmPassword.isEmpty && confirmPassword != password {
+                            Text("Those passwords do not match.")
+                                .font(.caption)
+                                .foregroundStyle(.orange)
+                        }
                     }
                     Button(creatingAccount ? "Create Account" : "Sign In") {
                         Task { await submitEmail() }
                     }
-                    .disabled(working || email.isEmpty || password.isEmpty)
+                    .disabled(!canSubmit)
                 }
 
                 Section("Or continue with") {
@@ -85,6 +94,7 @@ struct AccountScreen: View {
                 Section {
                     Button(creatingAccount ? "Already have an account? Sign In" : "New to AudioChoice? Create Account") {
                         creatingAccount.toggle()
+                        confirmPassword = ""
                         errorMessage = nil
                     }
                     // Offered on the sign-in path only. Someone creating an account has no password
@@ -119,13 +129,23 @@ struct AccountScreen: View {
         .acScreen()
     }
 
+    /// Whether the form is complete enough to send.
+    ///
+    /// The confirmation and the minimum length are checked here as well as by the server, so the
+    /// button refuses what the server would refuse rather than spending a round trip to be told.
+    private var canSubmit: Bool {
+        if working || email.isEmpty || password.isEmpty { return false }
+        guard creatingAccount else { return true }
+        return password == confirmPassword && password.count >= 12
+    }
+
     private func submitEmail() async {
         working = true
         defer { working = false }
         do {
             let client = try AuthenticationClient()
             let response = creatingAccount
-                ? try await client.register(email: email, password: password, displayName: displayName)
+                ? try await client.register(email: email, password: password)
                 : try await client.login(email: email, password: password)
             session.accept(response)
         } catch { errorMessage = error.localizedDescription }
