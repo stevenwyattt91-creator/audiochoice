@@ -16,8 +16,8 @@ public sealed class PostgresFilterReportStore(NpgsqlDataSource dataSource) : IFi
             insert into filter_reports(
                 id, user_id, fingerprint_version, sha256, file_size, kind,
                 position_seconds, window_seconds, scanner_version, scan_event_id,
-                category_id, reported_at)
-            values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12);
+                category_id, reported_at, position_unit)
+            values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13);
             """, connection);
         command.Parameters.AddWithValue(report.ID);
         command.Parameters.AddWithValue(report.AccountID);
@@ -51,7 +51,7 @@ public sealed class PostgresFilterReportStore(NpgsqlDataSource dataSource) : IFi
         using var command = new NpgsqlCommand($"""
             select id, user_id, fingerprint_version, sha256, file_size, kind,
                    position_seconds, window_seconds, scanner_version, scan_event_id,
-                   category_id, reported_at
+                   category_id, reported_at, position_unit
             from filter_reports
             {(filtered ? "where fingerprint_version = $2 and lower(sha256) = $3 and file_size = $4" : "")}
             order by reported_at desc
@@ -87,7 +87,12 @@ public sealed class PostgresFilterReportStore(NpgsqlDataSource dataSource) : IFi
                 reader.IsDBNull(8) ? null : reader.GetString(8),
                 reader.IsDBNull(9) ? null : reader.GetGuid(9),
                 reader.IsDBNull(10) ? null : reader.GetGuid(10),
-                reader.GetFieldValue<DateTimeOffset>(11)));
+                reader.GetFieldValue<DateTimeOffset>(11),
+                // Defaulted in the column, so a row written before this existed reads as
+                // seconds -- which is what it meant.
+                reader.IsDBNull(12)
+                    ? FilterReportPositionUnits.Seconds
+                    : FilterReportPositionUnits.Normalize(reader.GetString(12))));
         }
         return values;
     }

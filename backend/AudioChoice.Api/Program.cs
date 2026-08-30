@@ -3,6 +3,7 @@ using System.Globalization;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Threading.RateLimiting;
+using Amazon.Polly;
 using AudioChoice.Api.Contracts;
 using AudioChoice.Api.Processing;
 using AudioChoice.Api.Services;
@@ -24,6 +25,16 @@ var externalAuthOptions = builder.Configuration
 var transactionalEmailOptions = builder.Configuration
     .GetSection("AudioChoice:TransactionalEmail")
     .Get<TransactionalEmailOptions>() ?? new TransactionalEmailOptions();
+var narrationOptions = builder.Configuration
+    .GetSection("AudioChoice:Narration")
+    .Get<NarrationOptions>() ?? new NarrationOptions();
+builder.Services.AddSingleton(narrationOptions);
+// Fatal on purpose. Narration synthesis sharing the transcription GPU would slow every
+// audiobook scan, and it would look like load rather than like a misconfiguration, so refusing
+// to start is the only failure mode that cannot be ignored.
+SynthesisRouter.AssertEndpointsAreDistinct(
+    openAIOptions.FasterWhisperEndpoint,
+    narrationOptions.SynthesisEndpoint);
 var databaseOptions = builder.Configuration
     .GetSection("AudioChoice:Database")
     .Get<DatabaseOptions>() ?? new DatabaseOptions();
@@ -271,6 +282,28 @@ else
     builder.Services.AddSingleton<IFilterReportStore>(services =>
         new FileFilterReportStore(services.GetRequiredService<AudioChoiceDataPaths>()));
 }
+// Text-derived filter events for books with no audiobook. Registered regardless of whether
+// narration is switched on, because a stored scan stays readable after the feature is turned
+// off again; the endpoint that creates them is what the flag gates.
+if (databaseOptions.Enabled)
+{
+#if POSTGRES
+    builder.Services.AddSingleton<INarrationTextScanStore, PostgresNarrationTextScanStore>();
+#endif
+}
+else
+{
+    builder.Services.AddSingleton<INarrationTextScanStore>(services =>
+        new FileNarrationTextScanStore(services.GetRequiredService<AudioChoiceDataPaths>()));
+}
+// The measurements this feature refuses to derive. Registered unconditionally: a recorded
+// measurement stays evidence whether or not narration is switched on.
+builder.Services.AddSingleton<INarrationMeasurementStore>(services =>
+    new FileNarrationMeasurementStore(services.GetRequiredService<AudioChoiceDataPaths>()));
+// Which provider and voice made each chapter. Registered unconditionally, because these records
+// explain audio a listener already has and stay meaningful after the feature is switched off.
+builder.Services.AddSingleton<INarrationRenderStore>(services =>
+    new FileNarrationRenderStore(services.GetRequiredService<AudioChoiceDataPaths>()));
 builder.Services.AddSingleton<IEditionAliasStore>(services =>
     new FileEditionAliasStore(services.GetRequiredService<AudioChoiceDataPaths>()));
 // Looked up only for books whose own file carries no description. A short timeout because a
@@ -350,7 +383,36 @@ if (openAIOptions.WorkerEnabled)
             services.GetRequiredService<ILogger<OpenAIContentAnalysisProvider>>()));
 
     builder.Services.AddSingleton<IScanPipeline, ScanPipeline>();
+    // The same provider instance under its character-offset contract, so a text scan and an
+    // audio scan share the prompt, the taxonomy and the confidence floor by construction.
+    builder.Services.AddSingleton<ITextContentAnalysisProvider>(services =>
+        (OpenAIContentAnalysisProvider)services.GetRequiredService<IContentAnalysisProvider>());
+    builder.Services.AddSingleton<TextScanPipeline>();
     builder.Services.AddHostedService<ScanWorker>();
+}
+
+// Premium narration synthesis. Registered independently of the scan worker: a server can read a
+// book's text for filtering without also being the one that speaks it, and vice versa.
+if (narrationOptions.TextScanEnabled || narrationOptions.SynthesisEnabled)
+{
+    builder.Services.AddSingleton<IAmazonPolly>(_ => new AmazonPollyClient());
+    builder.Services.AddSingleton<PollySynthesisProvider>();
+    // Polly is both the primary and the fallback for now, because it is the only provider built.
+    // The router still runs: it enforces the billing-coverage gate and records which provider
+    // spoke each chapter, so introducing a real primary later changes configuration rather than
+    // control flow.
+    builder.Services.AddSingleton<ISynthesisProvider>(services =>
+        services.GetRequiredService<PollySynthesisProvider>());
+    builder.Services.AddSingleton<NarrationChapterJobs>();
+    builder.Services.AddSingleton<INarrationAgreementStore>(services =>
+        new FileNarrationAgreementStore(services.GetRequiredService<AudioChoiceDataPaths>()));
+    builder.Services.AddSingleton(services => new SynthesisRouter(
+        primary: services.GetRequiredService<PollySynthesisProvider>(),
+        fallback: services.GetRequiredService<PollySynthesisProvider>(),
+        options: narrationOptions,
+        logger: services.GetRequiredService<ILogger<SynthesisRouter>>(),
+        // A measured cold-start delay supersedes the configured one.
+        measurements: services.GetRequiredService<INarrationMeasurementStore>()));
 }
 
 var app = builder.Build();
@@ -1594,6 +1656,330 @@ app.MapPost("/v1/reader/alignments", async (
         ranges.FirstOrDefault()?.StartTime ?? -1,
         ranges.LastOrDefault()?.EndTime ?? -1);
     return Results.Ok(new ReaderAlignmentResponse(ranges));
+});
+
+// Finds filterable content in a book that has no audiobook, by reading its text.
+//
+// The text is a parameter and never becomes a file, a column or a log line. It is bound to a
+// local, sliced into passages that are views onto that local, and dropped when the request
+// ends. The response carries character offsets, which is all the client needs, because the
+// client is the only party that has the book.
+//
+// Deliberately synchronous, unlike an audio scan. There is no upload, no transcription and no
+// GPU queue, so there is nothing for a job record to track: the work is one classification
+// pass whose whole cost is the model calls. Making it a job would mean persisting the text
+// between the request that supplied it and the worker that read it, which is the one thing
+// this endpoint must not do.
+app.MapPost("/v1/narration/text-scans", async (
+    NarrationTextScanRequest request,
+    HttpContext context,
+    NarrationOptions narration,
+    INarrationTextScanStore scans,
+    IServiceProvider services,
+    ILogger<Program> logger,
+    CancellationToken cancellationToken) =>
+{
+    var user = CurrentUser(context);
+    if (user is null) return Results.Unauthorized();
+    if (!narration.TextScanEnabled) return Results.NotFound();
+
+    // Resolved through the provider rather than declared as a nullable handler parameter.
+    // The classifier is only registered where the processing worker is configured, and a
+    // minimal-API parameter of an unregistered type is not treated as an absent service --
+    // it is treated as a second body parameter, which fails while routes are being built.
+    // That would turn "this environment has no worker" into "this environment will not
+    // start", for environments that have nothing to do with narration.
+    var pipeline = services.GetService<TextScanPipeline>();
+
+    // A 503 says "not here, try later" rather than reporting the listener's book as the
+    // problem.
+    if (pipeline is null)
+    {
+        return Results.Problem(
+            "Text scanning is not available on this server.",
+            statusCode: StatusCodes.Status503ServiceUnavailable);
+    }
+
+    if (request.Fingerprint is null || string.IsNullOrWhiteSpace(request.Fingerprint.Sha256))
+        return Results.BadRequest(new { error = "A book fingerprint is required." });
+
+    // The same bound the reader-alignment endpoint applies to an EPUB's text, for the same
+    // reason: past this size the request is a mistake rather than a book.
+    var bookText = request.BookText ?? string.Empty;
+    if (bookText.Length is 0 or > TextScanPipeline.MaximumBookTextCharacters)
+        return Results.BadRequest(new { error = "The book text is empty or too large to scan." });
+
+    // Scanned once per book, then handed to everyone who imports it. Two listeners with the
+    // same EPUB produce the same fingerprint, so the second pays nothing.
+    var existing = scans.Load(request.Fingerprint, pipeline.ScannerVersion);
+    if (existing is not null && existing.BookTextCharacters == bookText.Length)
+    {
+        logger.LogInformation(
+            "Reused a stored text scan with {EventCount} events for a {CharacterCount}-character book.",
+            existing.Events.Count,
+            existing.BookTextCharacters);
+        return Results.Ok(existing.ToResponse());
+    }
+
+    using var budget = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+    budget.CancelAfter(TimeSpan.FromSeconds(Math.Max(30, narration.TextScanTimeoutSeconds)));
+    try
+    {
+        var scan = await pipeline.Scan(
+            request.Fingerprint, bookText, request.Language, null, budget.Token);
+        scans.Save(request.Fingerprint, scan);
+        logger.LogInformation(
+            "Text scan produced {EventCount} events for a {CharacterCount}-character book.",
+            scan.Events.Count,
+            scan.BookTextCharacters);
+        return Results.Ok(scan.ToResponse());
+    }
+    catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+    {
+        // The budget expired rather than the listener leaving. 504 rather than 500 because
+        // retrying is reasonable and the book is not at fault.
+        logger.LogWarning(
+            "Text scan exceeded its {TimeoutSeconds}-second budget for a {CharacterCount}-character book.",
+            narration.TextScanTimeoutSeconds,
+            bookText.Length);
+        return Results.Problem(
+            "Scanning this book took too long. Please try again.",
+            statusCode: StatusCodes.Status504GatewayTimeout);
+    }
+});
+
+// The voices a listener may choose, with the agreement premium synthesis requires.
+//
+// Samples are fixed pre-rendered assets rather than made on demand, so browsing voices costs
+// nothing and sends no text anywhere.
+app.MapGet("/v1/narration/voices", async (
+    HttpContext context,
+    NarrationOptions narration,
+    INarrationAgreementStore agreements,
+    IServiceProvider services,
+    CancellationToken cancellationToken) =>
+{
+    var user = CurrentUser(context);
+    if (user is null) return Results.Unauthorized();
+    if (!narration.SynthesisEnabled) return Results.NotFound();
+
+    var router = services.GetService<SynthesisRouter>();
+    if (router is null)
+    {
+        return Results.Problem(
+            "Narration synthesis is not available on this server.",
+            statusCode: StatusCodes.Status503ServiceUnavailable);
+    }
+
+    var voices = await router.ProviderInEffect.Voices(cancellationToken);
+    return Results.Ok(new NarrationVoicesResponse(
+        voices.Select(voice => new NarrationVoiceDescriptor(
+            voice.VoiceID, voice.DisplayName, voice.Language, voice.Provider, voice.SampleUrl))
+            .ToArray(),
+        agreements.Current.Version,
+        agreements.Current.Text));
+});
+
+// Records that a listener accepted the premium synthesis agreement.
+//
+// Idempotent on the version, so the client's offline path can re-send an acceptance it recorded
+// locally without creating a second record or moving the first one's timestamp.
+app.MapPost("/v1/narration/acknowledgements", (
+    NarrationAcknowledgementRequest request,
+    HttpContext context,
+    NarrationOptions narration,
+    INarrationAgreementStore agreements) =>
+{
+    var user = CurrentUser(context);
+    if (user is null) return Results.Unauthorized();
+    if (!narration.SynthesisEnabled) return Results.NotFound();
+    if (string.IsNullOrWhiteSpace(request.AgreementVersion))
+        return Results.BadRequest(new { error = "An agreement version is required." });
+
+    return Results.Ok(agreements.Accept(
+        user.ID, request.AgreementVersion.Trim(), request.AgreementText));
+});
+
+// Asks for one chapter to be spoken.
+//
+// A job rather than a synchronous response, because a chapter can hold twenty thousand characters
+// and take minutes: the client polls instead of holding a request open past every sensible
+// timeout. The units arrive with filtered characters already removed, so nothing the listener
+// asked to have filtered is ever sent.
+app.MapPost("/v1/narration/chapters", (
+    NarrationChapterRequest request,
+    HttpContext context,
+    NarrationOptions narration,
+    IEntitlementStore entitlements,
+    INarrationAgreementStore agreements,
+    NarrationChapterJobs jobs,
+    INarrationRenderStore renders,
+    IServiceProvider services,
+    ILogger<Program> logger) =>
+{
+    var user = CurrentUser(context);
+    if (user is null) return Results.Unauthorized();
+    if (!narration.SynthesisEnabled) return Results.NotFound();
+
+    var router = services.GetService<SynthesisRouter>();
+    if (router is null)
+    {
+        return Results.Problem(
+            "Narration synthesis is not available on this server.",
+            statusCode: StatusCodes.Status503ServiceUnavailable);
+    }
+
+    // Entitlement is read from the server's own record, never from anything the client says. A
+    // receipt on a device says a payment happened, not that it cleared, was not refunded, and
+    // belongs to the account now signed in.
+    var access = entitlements.Access(user.ID);
+    var entitled = access.IsActive &&
+        (access.ExpiresAt is null || access.ExpiresAt > DateTimeOffset.UtcNow);
+    if (!entitled)
+    {
+        return Results.Problem(
+            "The premium voice requires an active subscription.",
+            statusCode: StatusCodes.Status403Forbidden);
+    }
+
+    // A stale agreement is refused rather than silently accepted: the listener agreed to a
+    // different arrangement from the one now in force.
+    if (!agreements.HasAcceptedCurrent(user.ID))
+    {
+        return Results.Problem(
+            "The premium voice agreement has not been accepted, or its wording has changed.",
+            statusCode: StatusCodes.Status403Forbidden);
+    }
+
+    if (request.Fingerprint is null || string.IsNullOrWhiteSpace(request.Fingerprint.Sha256))
+        return Results.BadRequest(new { error = "A book fingerprint is required." });
+    if (request.Units.Count == 0)
+        return Results.BadRequest(new { error = "A chapter needs at least one passage to speak." });
+    if (request.CharacterCount > NarrationSynthesisLimits.MaximumChapterCharacters)
+        return Results.BadRequest(new { error = "That chapter is too long to synthesize." });
+
+    var job = jobs.Create(
+        user.ID, request.Fingerprint.Sha256, request.ChapterIndex, request.VoiceID);
+    if (job is null)
+    {
+        // A whole book queued at once would be a listener spending a great deal in one gesture.
+        return Results.Problem(
+            "Two chapters are already being made. Try again when one finishes.",
+            statusCode: StatusCodes.Status429TooManyRequests);
+    }
+
+    // Started detached on purpose: the response is a 202 and the client polls. The request's
+    // cancellation token must not cancel the work, or closing the app would abandon a chapter the
+    // listener has already been charged for.
+    _ = Task.Run(async () =>
+    {
+        jobs.Update(job.JobID, existing => existing with { Status = NarrationJobStatus.Running });
+        try
+        {
+            var input = new ChapterSynthesisInput(
+                job.JobID,
+                request.ChapterIndex,
+                request.VoiceID,
+                request.Language,
+                request.Units
+                    .Select(unit => new SpokenUnit(unit.StartCharacter, unit.EndCharacter, unit.Text))
+                    .ToArray());
+            var routed = await router.Synthesize(input, CancellationToken.None);
+            jobs.Update(job.JobID, existing => existing with
+            {
+                Status = NarrationJobStatus.Completed,
+                Chapter = routed.Chapter,
+                Route = routed.Route,
+            });
+            // Recorded per chapter, which is what makes a book spanning a subscription lapse
+            // explicable: it legitimately holds two voices, and without this its audio would be a
+            // mystery to whoever is asked about it.
+            renders.Record(new NarrationChapterRender(
+                ID: Guid.NewGuid(),
+                UserID: user.ID,
+                Fingerprint: request.Fingerprint,
+                ChapterIndex: request.ChapterIndex,
+                VoiceID: routed.Chapter.VoiceID,
+                Provider: routed.Chapter.Provider,
+                ModelVersion: routed.Chapter.ModelVersion,
+                DurationSeconds: routed.Chapter.DurationSeconds,
+                // Names where the audio went, not where it is: it was returned to the device and
+                // is kept nowhere on the server.
+                ObjectPath: "device",
+                CreatedAt: DateTimeOffset.UtcNow));
+            logger.LogInformation(
+                "Narration chapter {ChapterIndex} completed by {Provider} via {Route} in " +
+                "{DurationSeconds:F1} seconds of audio.",
+                request.ChapterIndex, routed.Chapter.Provider, routed.Route,
+                routed.Chapter.DurationSeconds);
+        }
+        catch (Exception error)
+        {
+            jobs.Update(job.JobID, existing => existing with
+            {
+                Status = NarrationJobStatus.Failed,
+                Error = "That chapter could not be made into audio. Please try again.",
+            });
+            logger.LogWarning(
+                error, "Narration chapter {ChapterIndex} failed.", request.ChapterIndex);
+        }
+    });
+
+    return Results.Accepted(
+        $"/v1/narration/chapters/{job.JobID}",
+        new NarrationChapterAccepted(job.JobID, job.Status.ToString().ToLowerInvariant()));
+});
+
+// Polls one chapter job, and hands back the audio once there is any.
+//
+// The audio travels in this response rather than through a signed URL to a storage container.
+// Chapter audio is derived closely enough from a listener's book that keeping it in cloud storage
+// would be the same disclosure the text handling is careful to avoid -- and unlike the text it
+// would sit there indefinitely, governed by a retention policy rather than by the absence of
+// anywhere to put it.
+app.MapGet("/v1/narration/chapters/{jobID:guid}", (
+    Guid jobID,
+    HttpContext context,
+    NarrationOptions narration,
+    NarrationChapterJobs jobs) =>
+{
+    var user = CurrentUser(context);
+    if (user is null) return Results.Unauthorized();
+    if (!narration.SynthesisEnabled) return Results.NotFound();
+
+    // Scoped to the account that created it: a job holds a chapter of somebody's book.
+    var job = jobs.Find(jobID, user.ID);
+    if (job is null) return Results.NotFound(new { error = "That narration job was not found." });
+
+    if (job.Status != NarrationJobStatus.Completed || job.Chapter is null)
+    {
+        return Results.Ok(new NarrationChapterStatus(
+            job.JobID,
+            job.ChapterIndex,
+            job.Status.ToString().ToLowerInvariant(),
+            Error: job.Error));
+    }
+
+    var chapter = job.Chapter;
+    var response = new NarrationChapterStatus(
+        JobID: job.JobID,
+        ChapterIndex: job.ChapterIndex,
+        Status: "completed",
+        Provider: chapter.Provider,
+        ModelVersion: chapter.ModelVersion,
+        VoiceID: chapter.VoiceID,
+        DurationSeconds: chapter.DurationSeconds,
+        Timings: chapter.Timings
+            .Select(timing => new NarrationUnitTiming(
+                timing.StartCharacter, timing.EndCharacter,
+                timing.StartSeconds, timing.EndSeconds))
+            .ToArray(),
+        AudioBase64: Convert.ToBase64String(chapter.Audio));
+
+    // Dropped from memory now it has been handed over, so a collected chapter is not held twice.
+    // The record survives so a repeated poll still reports the outcome rather than a 404.
+    jobs.Collected(job.JobID);
+    return Results.Ok(response);
 });
 
 app.MapPut("/v1/library/{bookID:guid}/favorite", (

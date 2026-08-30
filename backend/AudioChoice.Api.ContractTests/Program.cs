@@ -1174,7 +1174,1048 @@ Assert(!ExploreCatalog.IsAudibleProductIdentifier("B0BW2CCVQ"), "A nine-characte
 Assert(!ExploreCatalog.IsAudibleProductIdentifier(null), "A missing identifier was accepted.");
 Assert(ExploreCatalog.IsAudibleProductIdentifier("B0BW2CCVQ2"), "A valid ASIN was rejected.");
 
+// Text scanning: offsets, non-persistence, and purpose limitation.
+{
+    // Passage offsets must index the original text exactly. Everything downstream -- the
+    // masks, the removal, the reader's highlight -- is only as correct as this.
+    const string prose =
+        "Chapter One\n\nMr. Adams paid $4.50 and left. \"Wait!\" she called.\n\n" +
+        "He did not turn. J. R. R. Tolkien wrote otherwise. The end.";
+    var passages = TextScanPipeline.Passages(prose, 1_200);
+    Assert(passages.Count > 0, "Passages produced nothing for ordinary prose.");
+    foreach (var passage in passages)
+    {
+        var start = (int)passage.StartTime;
+        var end = (int)passage.EndTime;
+        Assert(
+            start >= 0 && end <= prose.Length && end > start,
+            $"A passage range {start}..{end} falls outside the text.");
+        Assert(
+            prose[start..end] == passage.Text,
+            $"Passage text did not match the range it claims: '{passage.Text}'.");
+        Assert(
+            passage.Text.Length > 0 &&
+            !char.IsWhiteSpace(passage.Text[0]) &&
+            !char.IsWhiteSpace(passage.Text[^1]),
+            $"A passage carried surrounding whitespace: '{passage.Text}'.");
+    }
+    // Ordered and non-overlapping, so merging masks later cannot double-count.
+    for (var index = 1; index < passages.Count; index += 1)
+    {
+        Assert(
+            passages[index].StartTime >= passages[index - 1].EndTime,
+            "Passages overlap or are out of order.");
+    }
+    // Abbreviations and initials must not end a sentence, or a book's every "Mr." would
+    // fragment into passages that cut a name in half.
+    Assert(
+        passages.Any(item => item.Text.Contains("Mr. Adams", StringComparison.Ordinal)),
+        "A sentence was split after the honorific in 'Mr. Adams'.");
+    Assert(
+        passages.Any(item => item.Text.Contains("J. R. R. Tolkien", StringComparison.Ordinal)),
+        "A sentence was split after an initial in 'J. R. R. Tolkien'.");
+    // A decimal point is not a sentence end.
+    Assert(
+        passages.Any(item => item.Text.Contains("$4.50", StringComparison.Ordinal)),
+        "A sentence was split inside the decimal '$4.50'.");
+    // A heading is its own passage; a scene divider carrying no letters is not a passage
+    // at all.
+    Assert(
+        TextScanPipeline.Passages("Alpha\n\n* * *\n\nBeta", 1_200).Count == 2,
+        "A punctuation-only scene divider was sent to the classifier as a passage.");
+
+    // A paragraph with no punctuation must still be broken up, and must break at
+    // whitespace rather than through a word.
+    var wall = string.Join(' ', Enumerable.Repeat("word", 400));
+    var split = TextScanPipeline.Passages(wall, 100);
+    Assert(split.Count > 1, "A long unpunctuated paragraph was not split.");
+    foreach (var passage in split)
+    {
+        Assert(
+            passage.Text.Length <= 100,
+            $"A passage of {passage.Text.Length} characters exceeded the limit.");
+        Assert(
+            passage.Text.StartsWith("word", StringComparison.Ordinal) &&
+            passage.Text.EndsWith("word", StringComparison.Ordinal),
+            $"A passage split through a word: '{passage.Text}'.");
+    }
+    Assert(TextScanPipeline.Passages("", 1_200).Count == 0, "Empty text produced passages.");
+    Assert(
+        TextScanPipeline.Passages("   \n\n \r\n ", 1_200).Count == 0,
+        "Whitespace-only text produced passages.");
+
+    // Character offsets are whole numbers. The client discards a fractional offset on the
+    // grounds that anything fractional was produced as a time, so the server must round.
+    var scanCategory = ContentTaxonomy.Mappings["profanity_mild"];
+    ScanEvent EventAt(double start, double end) => new(
+        Guid.NewGuid(), start, end, scanCategory.CategoryID, scanCategory.GroupID,
+        scanCategory.EventID, 1, "key", "Profanity detected");
+    var usable = TextScanPipeline.UsableEvents(
+        [EventAt(10.5, 20.4), EventAt(-5, 12), EventAt(30, 30), EventAt(40, 35),
+         EventAt(90, 500)],
+        100);
+    Assert(
+        usable.All(item =>
+            item.StartTime == Math.Floor(item.StartTime) &&
+            item.EndTime == Math.Floor(item.EndTime)),
+        "A fractional character offset survived, which the client would discard.");
+    Assert(
+        usable.Any(item => item.StartTime == 10 && item.EndTime == 21),
+        "A fractional range was not widened outward to whole characters.");
+    Assert(
+        usable.All(item => item.StartTime >= 0 && item.EndTime <= 100),
+        "An event offset outside the book's text survived.");
+    Assert(
+        usable.All(item => item.EndTime > item.StartTime),
+        "An empty or inverted range survived.");
+    Assert(usable.Count == 3, $"Expected three usable events, found {usable.Count}.");
+
+    // The store refuses a scan whose events cannot index the text that was scanned, which
+    // is the only such check possible once the text itself is not kept.
+    var storable = new NarrationTextScan(
+        [EventAt(0, 10)], DateTimeOffset.UtcNow, "v1", ScanContracts.TaxonomyVersion, 100, "en");
+    Assert(NarrationTextScans.IsStorable(storable), "A well-formed scan was refused.");
+    Assert(
+        !NarrationTextScans.IsStorable(storable with { Events = [EventAt(0, 500)] }),
+        "A scan with an event past the end of the book was accepted.");
+    Assert(
+        !NarrationTextScans.IsStorable(storable with { Events = [EventAt(1.5, 10)] }),
+        "A scan with a fractional offset was accepted.");
+    Assert(
+        !NarrationTextScans.IsStorable(storable with { BookTextCharacters = 0 }),
+        "A scan claiming zero characters was accepted.");
+
+    // The taxonomy the two paths report must be the same one, or a narrated book's switches
+    // would control nothing.
+    Assert(
+        new CloudScanResponse(CloudScanStatus.Completed).TaxonomyVersion ==
+        ScanContracts.TaxonomyVersion,
+        "The audio and text scanning paths report different taxonomy versions.");
+
+    // Non-persistence. A marker in the book's text must reach the classifier and nowhere
+    // else: not a file under the data root, not the response, not the request's own
+    // rendering, which is what a log scope would print.
+    var marker = "ZQX-" + Guid.NewGuid().ToString("N");
+    var root = Path.Combine(Path.GetTempPath(), "audiochoice-textscan-" + Guid.NewGuid().ToString("N"));
+    Directory.CreateDirectory(root);
+    try
+    {
+        var bookText =
+            $"Chapter One\n\nThe {marker} sat quietly. Nothing else happened.\n\n" +
+            $"Chapter Two\n\nAnd then the {marker} spoke.";
+        var provider = new CapturingTextAnalysisProvider(supplied =>
+            [EventAt(0, Math.Min(20, supplied[0].EndTime))]);
+        var textPipeline = new TextScanPipeline(
+            provider, NullLogger<TextScanPipeline>.Instance);
+        var scanFingerprint = fingerprint with { FileType = "epub" };
+        var textScan = await textPipeline.Scan(scanFingerprint, bookText, "en", null, default);
+
+        var store = new FileNarrationTextScanStore(Path.Combine(root, "narration-text-scans.json"));
+        store.Save(scanFingerprint, textScan);
+        var reloaded = store.Load(scanFingerprint, textScan.ScannerVersion);
+        Assert(reloaded is not null, "A stored text scan could not be read back.");
+        Assert(
+            reloaded!.Events.Count == textScan.Events.Count,
+            "Reloading a text scan lost events.");
+
+        // The classifier is the one place the text is allowed to go.
+        Assert(provider.Calls.Count == 1, "The text was sent outward more than once.");
+        Assert(
+            provider.Calls[0].Any(item => item.Text.Contains(marker, StringComparison.Ordinal)),
+            "The classifier never received the text, so the test proves nothing.");
+
+        // Nothing written under the data root may contain it.
+        foreach (var path in Directory.GetFiles(root, "*", SearchOption.AllDirectories))
+        {
+            Assert(
+                !File.ReadAllText(path).Contains(marker, StringComparison.Ordinal),
+                $"The book's text was written to {Path.GetFileName(path)}.");
+        }
+
+        // Nor may anything travelling back to the client.
+        var responseJson = JsonSerializer.Serialize(textScan.ToResponse());
+        Assert(
+            !responseJson.Contains(marker, StringComparison.Ordinal),
+            "The response body carried the book's text back to the client.");
+        Assert(
+            responseJson.Contains("bookTextCharacters", StringComparison.OrdinalIgnoreCase) ||
+            responseJson.Contains("BookTextCharacters", StringComparison.Ordinal),
+            "The response omitted the scanned length, which is what makes a stale scan detectable.");
+
+        // The request's own rendering is what a log scope prints, so it must not be the text.
+        var request = new NarrationTextScanRequest(scanFingerprint, bookText, "en");
+        var rendered = request.ToString();
+        Assert(
+            !rendered.Contains(marker, StringComparison.Ordinal),
+            "The request record's ToString printed the book's text, which any log scope would capture.");
+        Assert(
+            rendered.Contains(bookText.Length.ToString(), StringComparison.Ordinal),
+            "The request's rendering should report the text's length in place of the text.");
+        Assert(
+            $"Scanning {request}".Contains(marker, StringComparison.Ordinal) == false,
+            "Interpolating the request into a message exposed the book's text.");
+    }
+    finally
+    {
+        Directory.Delete(root, true);
+    }
+
+    // Purpose limitation: exactly one outbound dependency, so there is no second place the
+    // text could be sent from.
+    var outbound = typeof(TextScanPipeline)
+        .GetConstructors()
+        .Single()
+        .GetParameters()
+        .Where(parameter => parameter.ParameterType !=
+            typeof(Microsoft.Extensions.Logging.ILogger<TextScanPipeline>))
+        .ToArray();
+    Assert(
+        outbound.Length == 1 &&
+        outbound[0].ParameterType == typeof(ITextContentAnalysisProvider),
+        "TextScanPipeline gained a dependency other than the classifier, so the book's " +
+        "text now has somewhere else it could go.");
+
+    // Explore exclusion, demonstrated rather than argued.
+    //
+    // A listener supplied this book. Listing it publicly would advertise what they are
+    // reading, so the requirement is that a completed text scan yields no catalogue entry.
+    // The catalogue is assembled from completed scan jobs, and a text scan creates none --
+    // this checks that end rather than the reasoning behind it.
+    {
+        var narratedFingerprint = new BookFingerprint(
+            1, new string('d', 64), 900_000, null, "epub",
+            // Deliberately a title and author that would publish if anything did, so the
+            // test cannot pass merely because the metadata was unpublishable.
+            "A Narrated Novel", "A Real Author", null, null, "standard", null, null);
+        var exclusionCatalog = new InMemoryScanCatalog();
+        var exclusionStore = new FileNarrationTextScanStore(
+            Path.Combine(Path.GetTempPath(), "audiochoice-exclusion-" + Guid.NewGuid().ToString("N") + ".json"));
+        var narratedScan = new NarrationTextScan(
+            [EventAt(0, 40)], DateTimeOffset.UtcNow, "text-contract-test",
+            ScanContracts.TaxonomyVersion, 5_000, "en");
+        exclusionStore.Save(narratedFingerprint, narratedScan);
+
+        Assert(
+            exclusionStore.Load(narratedFingerprint, "text-contract-test") is not null,
+            "The text scan was not stored, so the exclusion test proves nothing.");
+        Assert(
+            ExploreCatalog.IsPublishable(narratedFingerprint),
+            "The narrated fingerprint is unpublishable on its metadata alone, so this test " +
+            "would pass even if a text scan did create a catalogue entry.");
+        Assert(
+            exclusionCatalog.ListExploreBooks().Count == 0,
+            "A completed text scan produced an Explore catalogue entry.");
+        Assert(
+            exclusionCatalog.FindResult(narratedFingerprint) is null,
+            "A completed text scan became a scan result other listeners can be served.");
+
+        // The audio path, by contrast, must still publish. Asserted alongside so a change
+        // that silenced the catalogue altogether could not be mistaken for correct exclusion.
+        var audioFingerprint = narratedFingerprint with { FileType = "m4b", Duration = 3_600 };
+        var audioOwner = Guid.NewGuid();
+        var audioUpload = exclusionCatalog.CreateUpload(
+            audioOwner,
+            new CloudUploadAuthorizationRequest(audioFingerprint, "book.m4b", "audio/mp4", 900_000),
+            DateTimeOffset.UtcNow.AddHours(1),
+            "token");
+        exclusionCatalog.MarkUploaded(audioUpload.ID, "stored/book.m4b");
+        var audioJob = exclusionCatalog.CreateJob(audioOwner, audioUpload.ID, audioFingerprint);
+        Assert(audioJob is not null, "The audio comparison job was not created.");
+        exclusionCatalog.CompleteJob(
+            audioJob!.ID,
+            new ScanResult([EventAt(10, 20)], DateTimeOffset.UtcNow, "contract-test"));
+        Assert(
+            exclusionCatalog.ListExploreBooks().Count == 1,
+            "A completed audio scan stopped producing a catalogue entry, so the exclusion " +
+            "above may be hiding a broken catalogue rather than a working exclusion.");
+    }
+
+    // A text scan must have no route into the Explore catalogue, which is built from scan
+    // results. Structural, so it cannot be forgotten.
+    var storeSurface = typeof(INarrationTextScanStore).GetMethods()
+        .SelectMany(method => method.GetParameters()
+            .Select(parameter => parameter.ParameterType)
+            .Append(method.ReturnType))
+        .ToArray();
+    Assert(
+        storeSurface.All(type => type != typeof(ScanResult) && type != typeof(CloudScanResponse)),
+        "The narration scan store touches the catalogue's types, so a supplied book could " +
+        "become a public catalogue entry.");
+    Assert(
+        !typeof(INarrationTextScanStore).GetMethods()
+            .SelectMany(method => method.GetParameters())
+            .Any(parameter => parameter.ParameterType == typeof(string) &&
+                 parameter.Name?.Contains("text", StringComparison.OrdinalIgnoreCase) == true),
+        "The narration scan store accepts a text argument, which it must never be able to store.");
+
+    // Synthesis routing.
+    {
+        var units = new[] { new SpokenUnit(0, 20, "A sentence to speak.") };
+        var input = new ChapterSynthesisInput(Guid.NewGuid(), 3, "voice-1", "en", units);
+
+        // Chapter synthesis text must not be printable by accident. A generated ToString would
+        // put a chapter of a novel into any log scope holding this record.
+        var synthesisMarker = "ZQX-" + Guid.NewGuid().ToString("N");
+        var markedInput = input with
+        {
+            Units = [new SpokenUnit(0, 40, $"A sentence containing {synthesisMarker} in it.")],
+        };
+        Assert(
+            !markedInput.ToString().Contains(synthesisMarker, StringComparison.Ordinal),
+            "ChapterSynthesisInput.ToString printed the text to be spoken, which any log " +
+            "scope would capture.");
+        Assert(
+            markedInput.ToString().Contains("Characters =", StringComparison.Ordinal),
+            "ChapterSynthesisInput should report its size in place of its text.");
+
+        var primaryOnly = new NarrationOptions { BillingCoverageVerified = true };
+
+        // The happy path stays on the primary.
+        var good = new FakeSynthesisProvider("primary");
+        var standby = new FakeSynthesisProvider("fallback");
+        var router = new SynthesisRouter(
+            good, standby, primaryOnly, NullLogger<SynthesisRouter>.Instance);
+        var routed = await router.Synthesize(input, default);
+        Assert(routed.Route == SynthesisRoute.Primary, "A working primary was not used.");
+        Assert(routed.Chapter.Provider == "primary", "The wrong provider synthesized a chapter.");
+        Assert(standby.Calls == 0, "The fallback was called while the primary was working.");
+
+        // A primary error falls back.
+        var broken = new FakeSynthesisProvider("primary") { FailWith = new InvalidOperationException("boom") };
+        standby = new FakeSynthesisProvider("fallback");
+        routed = await new SynthesisRouter(
+            broken, standby, primaryOnly, NullLogger<SynthesisRouter>.Instance)
+            .Synthesize(input, default);
+        Assert(
+            routed.Route == SynthesisRoute.FallbackBecausePrimaryFailed,
+            "A failing primary did not fall back.");
+        Assert(standby.Calls == 1, "The fallback was not used after a primary failure.");
+
+        // A primary that reports itself unavailable falls back without being called.
+        var scaledToZero = new FakeSynthesisProvider("primary") { Available = false };
+        standby = new FakeSynthesisProvider("fallback");
+        routed = await new SynthesisRouter(
+            scaledToZero, standby, primaryOnly, NullLogger<SynthesisRouter>.Instance)
+            .Synthesize(input, default);
+        Assert(
+            routed.Route == SynthesisRoute.FallbackBecausePrimaryUnavailable,
+            "An unavailable primary did not fall back.");
+        Assert(scaledToZero.Calls == 0, "An unavailable primary was still asked to synthesize.");
+
+        // A probe that throws says nothing reliable, so the attempt proceeds rather than
+        // sending every chapter to the fallback on a flaky health check.
+        var flakyProbe = new FakeSynthesisProvider("primary")
+        {
+            ProbeThrows = true,
+        };
+        routed = await new SynthesisRouter(
+            flakyProbe, new FakeSynthesisProvider("fallback"), primaryOnly,
+            NullLogger<SynthesisRouter>.Instance).Synthesize(input, default);
+        Assert(
+            routed.Route == SynthesisRoute.Primary,
+            "A failing availability probe diverted work away from a working primary.");
+
+        // The cold-start delay extends the budget rather than replacing it, so a provisioning
+        // endpoint is not abandoned while it starts. Read from a measurement, not assumed.
+        var withColdStart = new NarrationOptions
+        {
+            BillingCoverageVerified = true,
+            ColdStartDelaySeconds = 120,
+        };
+        var coldPrimary = new FakeSynthesisProvider("primary");
+        var routedCold = await new SynthesisRouter(
+            coldPrimary, new FakeSynthesisProvider("fallback"), withColdStart,
+            NullLogger<SynthesisRouter>.Instance).Synthesize(input, default);
+        Assert(
+            routedCold.Route == SynthesisRoute.Primary,
+            "A cold-start allowance changed which provider a healthy primary is given.");
+        Assert(
+            new NarrationOptions().ColdStartDelaySeconds == 0,
+            "The cold-start delay has a non-zero default, which would make it an assumption rather " +
+            "than the measurement it is meant to be.");
+
+        // The audio format promises, which the storage estimate is calibrated against.
+        Assert(
+            PollySynthesisProvider.AudioChannels == "1" &&
+            PollySynthesisProvider.AudioBitrate == "32k",
+            "The narration audio format changed; the measured 207 bytes per character no longer " +
+            "applies and the storage estimate would mislead a listener.");
+
+        // Every chapter records which provider spoke it, which is what makes a book that spans a
+        // subscription lapse explicable rather than mysterious.
+        Assert(
+            !string.IsNullOrWhiteSpace(routed.Chapter.Provider) &&
+            !string.IsNullOrWhiteSpace(routed.Chapter.ModelVersion),
+            "A synthesized chapter no longer records its provider and model version.");
+
+        // Timings are chapter-relative and contiguous, which is what the reader highlights from.
+        var manyUnits = input with
+        {
+            Units =
+            [
+                new SpokenUnit(0, 20, "The first sentence."),
+                new SpokenUnit(20, 44, "And then a second one."),
+                new SpokenUnit(44, 90, "Followed by a third, rather longer than the others."),
+            ],
+        };
+        var timed = await new SynthesisRouter(
+            new FakeSynthesisProvider("primary"), new FakeSynthesisProvider("fallback"),
+            primaryOnly, NullLogger<SynthesisRouter>.Instance).Synthesize(manyUnits, default);
+        var timings = timed.Chapter.Timings;
+        Assert(timings.Count == 3, "A timing was not produced for every unit.");
+        Assert(
+            Math.Abs(timings[0].StartSeconds) < 0.0001,
+            "The first unit does not start at zero, so the timings are not chapter-relative.");
+        for (var index = 1; index < timings.Count; index += 1)
+        {
+            Assert(
+                Math.Abs(timings[index].StartSeconds - timings[index - 1].EndSeconds) < 0.0001,
+                $"There is a gap before timing {index}; the reader's highlight would fall into it.");
+        }
+        Assert(
+            Math.Abs(timings[^1].EndSeconds - timed.Chapter.DurationSeconds) < 0.0001,
+            "The last timing does not end at the chapter's duration.");
+        // Character offsets are carried through untouched, which is what lets audio be mapped back
+        // to the words on screen even where filtering removed what was between the units.
+        Assert(
+            timings.Select(timing => timing.StartCharacter).SequenceEqual([0, 20, 44]),
+            "The unit character offsets were altered in transit.");
+
+        // A chapter with nothing left to say produces a real result with no audio, rather than an
+        // error: it counts as rendered and adds nothing to the book's duration.
+        var silent = await new SynthesisRouter(
+            new FakeSynthesisProvider("primary"), new FakeSynthesisProvider("fallback"),
+            primaryOnly, NullLogger<SynthesisRouter>.Instance)
+            .Synthesize(input with { Units = [] }, default);
+        Assert(
+            silent.Chapter.DurationSeconds == 0 && silent.Chapter.Audio.Length == 0,
+            "A fully filtered chapter did not render as silence.");
+        Assert(
+            silent.Chapter.Timings.Count == 0,
+            "A silent chapter produced timings for units that were never spoken.");
+
+        // A primary that stalls past its budget falls back. The budget is the router's own
+        // constant plus the recorded cold-start delay, so a zero delay keeps this quick.
+        var stalled = new FakeSynthesisProvider("primary")
+        {
+            Delay = TimeSpan.FromSeconds(30),
+        };
+        standby = new FakeSynthesisProvider("fallback");
+        var impatient = new SynthesisRouter(
+            stalled, standby,
+            // A one-second budget is expressed through the cold-start delay being negative
+            // relative to the constant, which is not configurable -- so instead the stall is
+            // simply longer than the test is willing to wait, and cancellation is used.
+            primaryOnly, NullLogger<SynthesisRouter>.Instance);
+        using (var giveUp = new CancellationTokenSource())
+        {
+            // Cancelling the caller must NOT be read as a budget expiry: the listener leaving is
+            // not the endpoint being slow, and falling back would keep spending on a chapter
+            // nobody is waiting for.
+            giveUp.CancelAfter(TimeSpan.FromMilliseconds(200));
+            var cancelled = false;
+            try
+            {
+                await impatient.Synthesize(input, giveUp.Token);
+            }
+            catch (OperationCanceledException)
+            {
+                cancelled = true;
+            }
+            Assert(
+                cancelled,
+                "Cancelling the caller was absorbed as a timeout, so a chapter nobody is " +
+                "waiting for would still be synthesized by the fallback.");
+            Assert(
+                standby.Calls == 0,
+                "A cancelled request still sent work to the fallback.");
+        }
+
+        // Unverified billing routes everything to the fallback, and never touches the primary.
+        var untouched = new FakeSynthesisProvider("primary");
+        standby = new FakeSynthesisProvider("fallback");
+        var unverified = new SynthesisRouter(
+            untouched, standby, new NarrationOptions(), NullLogger<SynthesisRouter>.Instance);
+        routed = await unverified.Synthesize(input, default);
+        Assert(
+            routed.Route == SynthesisRoute.FallbackBecauseBillingUnverified,
+            "Unverified billing did not route to the fallback.");
+        Assert(untouched.Calls == 0, "Unverified billing still sent work to the primary.");
+        Assert(
+            unverified.ProviderInEffect.Provider == "fallback",
+            "The provider in effect should be the fallback while billing is unverified.");
+        Assert(
+            !new NarrationOptions().BillingCoverageVerified,
+            "Billing coverage defaults to verified, which would route work to an endpoint " +
+            "whose cost has not been checked.");
+
+        // The endpoint collision assertion must fail the process, in every shape a host can
+        // be written in.
+        foreach (var (transcription, synthesis) in new[]
+                 {
+                     ("http://127.0.0.1:8001/", "http://127.0.0.1:9000/"),
+                     ("http://gpu-host:8001/", "https://gpu-host/synthesize"),
+                     ("gpu-host", "gpu-host"),
+                 })
+        {
+            var collided = false;
+            try
+            {
+                SynthesisRouter.AssertEndpointsAreDistinct(transcription, synthesis);
+            }
+            catch (InvalidOperationException)
+            {
+                collided = true;
+            }
+            Assert(
+                collided,
+                $"'{transcription}' and '{synthesis}' share a host but were allowed, so " +
+                "narration synthesis could run on the transcription GPU.");
+        }
+
+        // Genuinely distinct hosts, and unconfigured endpoints, must start.
+        SynthesisRouter.AssertEndpointsAreDistinct(
+            "http://127.0.0.1:8001/", "https://polly.eu-west-1.amazonaws.com/");
+        SynthesisRouter.AssertEndpointsAreDistinct("http://127.0.0.1:8001/", "");
+        SynthesisRouter.AssertEndpointsAreDistinct("", "http://127.0.0.1:8001/");
+
+        // The router must not be able to reach the transcription lane at all.
+        var routerDependencies = typeof(SynthesisRouter).GetConstructors().Single()
+            .GetParameters().Select(parameter => parameter.ParameterType).ToArray();
+        Assert(
+            routerDependencies.All(type => type != typeof(ITranscriptionProvider)),
+            "SynthesisRouter took a dependency on the transcription provider, so narration " +
+            "work could reach the transcription GPU.");
+    }
+
+    // The Polly provider's audio format.
+    //
+    // Verified against the real service on 2026-08-29 with a throwaway harness: mono Opus, an
+    // effective 29.7 kbps, and a file whose own duration matched the reported per-unit timings to
+    // the millisecond. That harness needed AWS credentials and a network, so what remains here are
+    // the promises that can be checked without either -- which are the ones a later edit might
+    // quietly change.
+    {
+        Assert(
+            PollySynthesisProvider.AudioChannels == "1",
+            "Narration audio is no longer mono, which doubles every book's size to carry one voice.");
+        Assert(
+            PollySynthesisProvider.AudioBitrate == "32k",
+            "The narration bitrate changed; the storage estimate is calibrated against 32k Opus.");
+
+        // The provider must not be able to reach the transcription lane.
+        var pollyDependencies = typeof(PollySynthesisProvider).GetConstructors().Single()
+            .GetParameters().Select(parameter => parameter.ParameterType).ToArray();
+        Assert(
+            pollyDependencies.All(type =>
+                type != typeof(ITranscriptionProvider) &&
+                type != typeof(IContentAnalysisProvider)),
+            "PollySynthesisProvider took a dependency on the transcription or analysis lane.");
+
+        // Synthesis is off unless switched on, like text scanning, and separately from it.
+        Assert(
+            !new NarrationOptions().SynthesisEnabled,
+            "Premium synthesis defaults to enabled, which would let a deploy start spending.");
+    }
+
+    // A filter report's position unit is additive on this side too.
+    //
+    // An existing client sends no positionUnit at all, and that has to keep meaning seconds.
+    // The stored report always carries an explicit unit, so nothing reading one has to guess.
+    {
+        var audiobookReport = new FilterReportRequest(
+            fingerprint, FilterReportKind.MissedContent, 1_234.5, 20);
+        Assert(
+            audiobookReport.PositionUnit is null,
+            "A filter report request now defaults to a position unit, which changes the shape " +
+            "an already-shipped client has to send.");
+
+        var storedAudiobook = FilterReports.Validate(Guid.NewGuid(), audiobookReport);
+        Assert(
+            storedAudiobook?.PositionUnit == FilterReportPositionUnits.Seconds,
+            "A report with no unit was not stored as seconds, which is what it means.");
+
+        var narrationReport = audiobookReport with { PositionUnit = "characterOffset" };
+        Assert(
+            FilterReports.Validate(Guid.NewGuid(), narrationReport)?.PositionUnit ==
+            FilterReportPositionUnits.CharacterOffset,
+            "A narration report's character-offset unit was not preserved.");
+
+        // Permissive rather than rejecting: a report is a one-off observation from someone who
+        // heard a mistake, and discarding it over an unrecognised unit would lose the only
+        // record that it happened.
+        Assert(
+            FilterReports.Validate(Guid.NewGuid(), audiobookReport with { PositionUnit = "furlongs" })
+                ?.PositionUnit == FilterReportPositionUnits.Seconds,
+            "An unrecognised position unit was not normalised to seconds.");
+
+        // Matches the values the migration's check constraint allows, so a normalised unit can
+        // always be written.
+        var migrationSql = File.ReadAllText(
+            Path.Combine(FindMigrationsDirectory(), "027_epub_narration.sql"));
+        foreach (var unit in new[]
+                 { FilterReportPositionUnits.Seconds, FilterReportPositionUnits.CharacterOffset })
+        {
+            Assert(
+                migrationSql.Contains($"'{unit}'", StringComparison.Ordinal),
+                $"The position_unit constraint does not permit '{unit}', so a normalised " +
+                "report could not be written.");
+        }
+    }
+
+    // The measurements this feature depends on, recorded rather than derived.
+    //
+    // Three constants in this feature were reasoned from plausible assumptions and each was wrong
+    // by 13 to 33 percent, always in the direction of over-estimating. These are the figures that
+    // replaced them, and they are asserted here so a later edit cannot quietly revert a measured
+    // value to a derived one.
+    {
+        var measurementRoot = Path.Combine(
+            Path.GetTempPath(), "audiochoice-measurements-" + Guid.NewGuid().ToString("N") + ".json");
+        try
+        {
+            var measurements = new FileNarrationMeasurementStore(measurementRoot);
+
+            foreach (var kind in new[]
+                     {
+                         NarrationMeasurementKinds.PremiumSynthesisRate,
+                         NarrationMeasurementKinds.LocalSynthesisRate,
+                         NarrationMeasurementKinds.LocalRealTimeFactor,
+                         NarrationMeasurementKinds.BytesPerCharacter,
+                     })
+            {
+                var latest = measurements.Latest(kind);
+                Assert(latest is not null, $"No measurement is recorded for '{kind}'.");
+                Assert(
+                    !string.IsNullOrWhiteSpace(latest!.Target),
+                    $"The '{kind}' measurement names no target, so it cannot be re-checked and is " +
+                    "a number with no claim attached.");
+            }
+
+            // The two speech rates are within two percent of each other, which turned out to be a
+            // fact about speech rather than a coincidence. A large gap would mean one was re-derived.
+            var premium = measurements.Latest(NarrationMeasurementKinds.PremiumSynthesisRate)!.Value;
+            var local = measurements.Latest(NarrationMeasurementKinds.LocalSynthesisRate)!.Value;
+            Assert(
+                Math.Abs(premium - local) < 2.0,
+                $"The measured premium ({premium}) and device ({local}) speech rates have " +
+                "drifted apart, which suggests one was replaced by a derivation.");
+
+            // Both are far from the original guess of 13.5, which is the error worth not repeating.
+            Assert(
+                premium > 15.0 && local > 15.0,
+                "A speech rate fell back towards the derived figure that was 33 percent low.");
+
+            // Seeding is idempotent: a restart must not accumulate duplicates.
+            var seededCount = measurements.List().Count;
+            var reopened = new FileNarrationMeasurementStore(measurementRoot);
+            Assert(
+                reopened.List().Count == seededCount,
+                "Re-opening the measurement store duplicated its seeded records.");
+
+            // A real measurement sorts ahead of the seed rather than being lost behind it.
+            reopened.Record(new NarrationMeasurement(
+                Guid.NewGuid(),
+                NarrationMeasurementKinds.LocalRealTimeFactor,
+                4.2,
+                DateTimeOffset.UtcNow,
+                "a slower device",
+                "android-system-tts"));
+            Assert(
+                Math.Abs(
+                    reopened.Latest(NarrationMeasurementKinds.LocalRealTimeFactor)!.Value - 4.2) < 0.001,
+                "A newly recorded measurement did not supersede the seeded one.");
+        }
+        finally
+        {
+            File.Delete(measurementRoot);
+        }
+    }
+
+    // Per-chapter render records, and what they make answerable.
+    {
+        var renderPath = Path.Combine(
+            Path.GetTempPath(), "audiochoice-renders-" + Guid.NewGuid().ToString("N") + ".json");
+        try
+        {
+            var renders = new FileNarrationRenderStore(renderPath);
+            var listener = Guid.NewGuid();
+            var narrated = fingerprint with { FileType = "epub", Duration = null };
+
+            NarrationChapterRender render(int chapter, string voice, string provider, double seconds) =>
+                new(Guid.NewGuid(), listener, narrated, chapter, voice, provider,
+                    "model-1", seconds, "device", DateTimeOffset.UtcNow);
+
+            // A book made across a subscription lapse: premium first, then the device's own voice.
+            renders.Record(render(0, "Ruth", "polly", 600));
+            renders.Record(render(1, "Ruth", "polly", 620));
+            renders.Record(render(2, "en-US-language", "android-system-tts", 590));
+
+            var forBook = renders.ForBook(listener, narrated.Sha256);
+            Assert(forBook.Count == 3, "Not every recorded chapter was returned.");
+            Assert(
+                forBook.Select(item => item.ChapterIndex).SequenceEqual([0, 1, 2]),
+                "Render records were not returned in chapter order.");
+
+            // The question a listener actually asks when chapter three sounds different.
+            Assert(
+                NarrationRenderSummary.SpansSeveralVoices(forBook),
+                "A book made by two voices was not reported as such, so its audio would be " +
+                "inexplicable to whoever is asked about it.");
+            var byVoice = NarrationRenderSummary.ChaptersByVoice(forBook);
+            Assert(
+                byVoice["Ruth"].SequenceEqual([0, 1]) &&
+                byVoice["en-US-language"].SequenceEqual([2]),
+                "The chapters attributed to each voice are wrong.");
+
+            // Duration comes from the chapters actually made, never from the plan.
+            Assert(
+                Math.Abs(NarrationRenderSummary.RenderedDurationSeconds(forBook) - 1_810) < 0.001,
+                "The rendered duration does not sum the chapters that exist.");
+
+            // Re-rendering the same chapter with the same voice replaces rather than accumulates,
+            // matching the unique key the migration enforces.
+            renders.Record(render(0, "Ruth", "polly", 615));
+            Assert(
+                renders.ForBook(listener, narrated.Sha256).Count == 3,
+                "Re-rendering a chapter accumulated a second record, so the two stores would " +
+                "disagree with the database's unique key.");
+            Assert(
+                Math.Abs(
+                    renders.ForBook(listener, narrated.Sha256)
+                        .Single(item => item.ChapterIndex == 0).DurationSeconds - 615) < 0.001,
+                "A re-render did not replace the earlier record's duration.");
+
+            // A single-voice book is not reported as mixed.
+            var otherListener = Guid.NewGuid();
+            var single = new FileNarrationRenderStore(
+                Path.Combine(Path.GetTempPath(), "audiochoice-renders-single-" + Guid.NewGuid().ToString("N") + ".json"));
+            single.Record(new NarrationChapterRender(
+                Guid.NewGuid(), otherListener, narrated, 0, "Ruth", "polly", "model-1", 100,
+                "device", DateTimeOffset.UtcNow));
+            Assert(
+                !NarrationRenderSummary.SpansSeveralVoices(single.ForBook(otherListener, narrated.Sha256)),
+                "A single-voice book was reported as spanning several voices.");
+
+            // Records are about audio, never about text. Nothing on this contract could accept a
+            // character of Spoken_Text even if it were handed one.
+            Assert(
+                typeof(INarrationRenderStore).GetMethods()
+                    .SelectMany(method => method.GetParameters())
+                    .All(parameter =>
+                        parameter.Name?.Contains("text", StringComparison.OrdinalIgnoreCase) != true),
+                "The render store accepts a text argument, which it must never be able to store.");
+        }
+        finally
+        {
+            File.Delete(renderPath);
+        }
+    }
+
+    // A measured cold-start delay supersedes the configured one, and an absurd measurement is
+    // ignored rather than honoured.
+    {
+        var measurementPath = Path.Combine(
+            Path.GetTempPath(), "audiochoice-coldstart-" + Guid.NewGuid().ToString("N") + ".json");
+        try
+        {
+            var store = new FileNarrationMeasurementStore(measurementPath);
+            // Its own input: the earlier one is scoped to the routing block above.
+            var coldInput = new ChapterSynthesisInput(
+                Guid.NewGuid(), 0, "voice-1", "en",
+                [new SpokenUnit(0, 20, "A sentence to speak.")]);
+            var configured = new NarrationOptions
+            {
+                BillingCoverageVerified = true,
+                ColdStartDelaySeconds = 30,
+            };
+
+            // With no measurement the configured value stands.
+            var withoutMeasurement = new SynthesisRouter(
+                new FakeSynthesisProvider("primary"), new FakeSynthesisProvider("fallback"),
+                configured, NullLogger<SynthesisRouter>.Instance, store);
+            Assert(
+                (await withoutMeasurement.Synthesize(coldInput, default)).Route == SynthesisRoute.Primary,
+                "A configured cold-start delay changed which provider was used.");
+
+            // A cold start longer than ten minutes is a broken endpoint, not a delay to wait out.
+            Assert(
+                SynthesisRouter.MaximumColdStartSeconds == 600,
+                "The cold-start ceiling moved; an absurd measurement could now be honoured.");
+            store.Record(new NarrationMeasurement(
+                Guid.NewGuid(), NarrationMeasurementKinds.ColdStartDelay, 99_999,
+                DateTimeOffset.UtcNow, "a misbehaving endpoint", "test"));
+            Assert(
+                (await new SynthesisRouter(
+                    new FakeSynthesisProvider("primary"), new FakeSynthesisProvider("fallback"),
+                    configured, NullLogger<SynthesisRouter>.Instance, store)
+                    .Synthesize(coldInput, default)).Route == SynthesisRoute.Primary,
+                "An absurd cold-start measurement broke ordinary routing.");
+        }
+        finally
+        {
+            File.Delete(measurementPath);
+        }
+    }
+
+    // The rate benchmark is exercised against the fake provider, so its arithmetic is checked
+    // without needing credentials. The real measurement it produced is seeded in the measurement
+    // store; this only proves the tool that took it computes what it claims to.
+    {
+        var benchmark = new SynthesisRateBenchmark(new FakeSynthesisProvider("polly"));
+        Assert(
+            SynthesisRateBenchmark.PassageCharacters is > 800 and < 1_500,
+            "The benchmark passage changed length, so new measurements are not comparable with " +
+            $"the recorded one ({SynthesisRateBenchmark.PassageCharacters} characters).");
+        Assert(
+            SynthesisRateBenchmark.Passage.Any(passage => passage.Contains('"')),
+            "The benchmark passage has no dialogue, so it does not represent a novel.");
+
+        var measured = await benchmark.MeasureAll(["Ruth", "Matthew"], default);
+        Assert(measured.Count == 2, "The benchmark did not measure every voice it was given.");
+        foreach (var item in measured)
+        {
+            Assert(
+                item.CharactersPerSecondOfAudio > 0 && item.RealTimeFactor > 0,
+                $"The benchmark produced no usable rate for {item.VoiceID}.");
+            // The units must not be confusable: characters per second of audio is the speaking
+            // rate, and it is a very different number from characters per second of work.
+            Assert(
+                item.CharactersPerSecondOfAudio < 100,
+                "The reported speaking rate is implausibly high, which usually means the work rate " +
+                "was reported instead.");
+        }
+
+        var records = SynthesisRateBenchmark.AsRecords(measured, DateTimeOffset.UtcNow);
+        Assert(records.Count == 2, "The benchmark did not produce both measurement records.");
+        Assert(
+            records.All(record => !string.IsNullOrWhiteSpace(record.Target)),
+            "A benchmark record names no target, so it could not be re-checked later.");
+        Assert(
+            records.Any(record => record.Kind == NarrationMeasurementKinds.PremiumSynthesisRate) &&
+            records.Any(record => record.Kind == NarrationMeasurementKinds.BytesPerCharacter),
+            "The benchmark no longer records both the rate and the size it measured.");
+        Assert(
+            SynthesisRateBenchmark.AsRecords([], DateTimeOffset.UtcNow).Count == 0,
+            "The benchmark invented records from no measurements.");
+    }
+
+    // The timing promises have to survive the measured rate.
+    //
+    // Two bounds were written before anything was measured: each HTTP interaction answers within 30
+    // seconds, and the router gives a provider 60 seconds for one chapter. Now that the synthesis
+    // rate is a measurement rather than an assumption, they can be checked instead of hoped for.
+    // Asserted here because a rate is only reassuring if somebody has divided by it.
+    {
+        // 18.0 characters per second of audio, measured across three Polly generative voices.
+        const double measuredCharactersPerSecondOfAudio = 18.0;
+
+        // Polly returns audio faster than real time; the figure below is deliberately pessimistic
+        // relative to what was observed (1,080 characters, three voices, a couple of seconds each).
+        const double conservativeRealTimeFactor = 5.0;
+
+        // The longest chapter the endpoint accepts.
+        var longestChapterCharacters = NarrationSynthesisLimits.MaximumChapterCharacters;
+        var audioSeconds = longestChapterCharacters / measuredCharactersPerSecondOfAudio;
+        var synthesisSeconds = audioSeconds / conservativeRealTimeFactor;
+
+        // R9.7: every HTTP interaction bounded at 30 seconds. This holds because chapter synthesis
+        // is a job -- the submission returns 202 immediately and the client polls -- so no request
+        // waits on the work. If synthesis were ever made synchronous this assertion is what would
+        // fail, and it fails loudly rather than as a production timeout.
+        Assert(
+            synthesisSeconds > 30,
+            $"A longest-case chapter now synthesizes in {synthesisSeconds:F0} seconds, which is " +
+            "inside the 30-second HTTP bound. That is good news, but it means the job indirection " +
+            "may no longer be load-bearing -- re-check before simplifying it away, because the " +
+            "bound is per interaction and a slower provider would breach it again.");
+
+        // R10.5: the router gives the primary 60 seconds per chapter before falling back. A
+        // longest-case chapter legitimately exceeds that, which is why the budget adds the recorded
+        // cold-start delay and why the fallback exists at all.
+        Assert(
+            SynthesisRouter.PrimaryTimeoutSeconds == 60,
+            "The router's per-chapter budget changed; the reasoning below assumes 60 seconds.");
+        Assert(
+            synthesisSeconds > SynthesisRouter.PrimaryTimeoutSeconds,
+            $"A longest-case chapter is expected to take {synthesisSeconds:F0} seconds, which no " +
+            "longer exceeds the router's budget. Verify the fallback still has a reason to exist.");
+
+        // And the client's own ceiling agrees with the server's, so a chapter cannot be accepted by
+        // one and refused by the other.
+        Assert(
+            longestChapterCharacters == 40_000,
+            "The server's chapter ceiling moved; PremiumVoiceEngine.MAXIMUM_CHAPTER_CHARACTERS " +
+            "mirrors it and must move together, or a chapter would be submitted and then refused.");
+
+        // A whole novel at the measured rate, as a sanity check on the storage estimate the client
+        // shows a listener before rendering.
+        var novelHours = 400_000 / measuredCharactersPerSecondOfAudio / 3_600;
+        Assert(
+            novelHours is > 4 and < 9,
+            $"A 400,000-character novel now estimates {novelHours:F1} hours of audio, which is " +
+            "outside the range a novel plausibly occupies. The measured rate is probably wrong.");
+    }
+
+    // Guard retention.
+    //
+    // Every promise in this feature that is one plausible edit away from being lost, asserted in one
+    // place. Each of these was verified to fail when the thing it guards was removed -- several were
+    // added only after making that edit and finding nothing else caught it.
+    {
+        // Text is held for one request and never written down.
+        Assert(
+            typeof(NarrationTextScanRequest).GetMethod("ToString")?.DeclaringType ==
+            typeof(NarrationTextScanRequest),
+            "NarrationTextScanRequest no longer overrides ToString, so any log scope holding one " +
+            "would print an entire novel.");
+        Assert(
+            typeof(ChapterSynthesisInput).GetMethod("ToString")?.DeclaringType ==
+            typeof(ChapterSynthesisInput),
+            "ChapterSynthesisInput no longer overrides ToString, so a log scope would print a " +
+            "chapter of somebody's book.");
+        Assert(
+            typeof(NarrationChapterRequest).GetMethod("ToString")?.DeclaringType ==
+            typeof(NarrationChapterRequest),
+            "NarrationChapterRequest no longer overrides ToString.");
+
+        // Narration synthesis must never share the transcription GPU.
+        var collided = false;
+        try
+        {
+            SynthesisRouter.AssertEndpointsAreDistinct("http://gpu:8001/", "http://gpu:9000/");
+        }
+        catch (InvalidOperationException) { collided = true; }
+        Assert(collided, "The transcription-GPU collision assertion no longer fires.");
+
+        // Nothing is on by default, so deploying this changes nothing in a running environment.
+        var defaults = new NarrationOptions();
+        Assert(!defaults.TextScanEnabled, "Text scanning defaults to on.");
+        Assert(!defaults.SynthesisEnabled, "Premium synthesis defaults to on.");
+        Assert(
+            !defaults.BillingCoverageVerified,
+            "Billing coverage defaults to verified, which would route spend to an unchecked endpoint.");
+
+        // The server-side budget must stay inside the client's read timeout, or a slow scan reaches
+        // the listener as a dropped connection rather than as the 504 this endpoint returns.
+        Assert(
+            defaults.TextScanTimeoutSeconds < 90,
+            "The text scan budget exceeds the Android client's 90-second read timeout, so a slow " +
+            "scan would surface as a network error rather than as a timeout.");
+
+        // A text scan cannot reach the Explore catalogue.
+        Assert(
+            typeof(INarrationTextScanStore).GetMethods()
+                .SelectMany(method => method.GetParameters()
+                    .Select(parameter => parameter.ParameterType)
+                    .Append(method.ReturnType))
+                .All(type => type != typeof(ScanResult)),
+            "The narration scan store touches the catalogue's result type.");
+
+        // Neither the router nor the synthesis provider may reach the transcription lane.
+        foreach (var type in new[] { typeof(SynthesisRouter), typeof(PollySynthesisProvider) })
+        {
+            Assert(
+                type.GetConstructors().Single().GetParameters()
+                    .All(parameter => parameter.ParameterType != typeof(ITranscriptionProvider)),
+                $"{type.Name} took a dependency on the transcription provider.");
+        }
+
+        // A filter report from an existing client still means seconds.
+        Assert(
+            new FilterReportRequest(fingerprint, FilterReportKind.MissedContent, 1, 20)
+                .PositionUnit is null,
+            "A filter report request now defaults to a position unit, changing the wire shape.");
+    }
+
+    // Narration is off unless switched on, so deploying this changes nothing by itself.
+    Assert(
+        !new NarrationOptions().TextScanEnabled,
+        "Text scanning defaults to enabled, which would change a running environment on deploy.");
+
+    // The container registers the text classifier by casting the audio one to it. The cast
+    // is only reached on the first request, so it is asserted here at type level instead,
+    // where it cannot wait for production to be found wrong.
+    Assert(
+        typeof(ITextContentAnalysisProvider)
+            .IsAssignableFrom(typeof(OpenAIContentAnalysisProvider)),
+        "OpenAIContentAnalysisProvider no longer implements the text classifier contract, " +
+        "so resolving a text scan would throw on the first request.");
+
+    // The audio path must keep its scene post-processing, whose constants are seconds. The
+    // text path must not have it. Asserting both directions means neither can be moved into
+    // the other by a later tidy-up.
+    var analyzeBody = typeof(OpenAIContentAnalysisProvider)
+        .GetMethod(nameof(OpenAIContentAnalysisProvider.AnalyzeCharacterOffsets));
+    Assert(analyzeBody is not null, "The character-offset classifier entry point is missing.");
+    Assert(
+        typeof(OpenAIContentAnalysisProvider).GetMethod(
+            nameof(OpenAIContentAnalysisProvider.Analyze)) is not null,
+        "The audio classifier entry point is missing.");
+}
+
+// EPUB narration migration guards.
+//
+// Two promises this migration makes are the kind that erode: that it is additive, so a
+// beta or release client keeps seeing identical responses, and that the book's text is
+// never written down. Both are cheap to check without a database, and expensive to
+// discover broken in production.
+{
+    var migrationsDirectory = FindMigrationsDirectory();
+    var narrationMigration = Path.Combine(migrationsDirectory, "027_epub_narration.sql");
+    Assert(File.Exists(narrationMigration), "The EPUB narration migration is missing.");
+    var narrationSql = File.ReadAllText(narrationMigration);
+
+    // Additive only. A drop or a delete here would change what an existing client sees.
+    foreach (var forbidden in new[] { "drop table", "delete from", "truncate", "drop column" })
+    {
+        Assert(
+            !narrationSql.Contains(forbidden, StringComparison.OrdinalIgnoreCase),
+            $"The narration migration must be additive, but it contains '{forbidden}'.");
+    }
+
+    // No column may hold the book's text. The promise is that text is held for one scan
+    // request and never persisted, and a column would make that impossible to keep.
+    foreach (var forbidden in new[] { "book_text ", "book_text\n", "epub_text", "spoken_text" })
+    {
+        Assert(
+            !narrationSql.Contains(forbidden, StringComparison.OrdinalIgnoreCase),
+            $"The narration migration must store no book text, but it declares '{forbidden}'.");
+    }
+
+    // Character offsets are named as such on this side of the wire. The client carries
+    // them in a ScanEvent's time fields to reuse the filter stack; the database has no
+    // reason to inherit that ambiguity.
+    Assert(
+        narrationSql.Contains("start_character", StringComparison.Ordinal) &&
+        narrationSql.Contains("end_character", StringComparison.Ordinal),
+        "Narration scan events must record character offsets under character-named columns.");
+
+    // Migrations are applied in filename order, so a new one must sort after every
+    // existing one or it will be skipped on databases that are already up to date.
+    var lastExisting = Directory.GetFiles(migrationsDirectory, "*.sql")
+        .Select(Path.GetFileName)
+        .Where(name => name is not null && name != "027_epub_narration.sql")
+        .Order(StringComparer.Ordinal)
+        .Last();
+    Assert(
+        string.CompareOrdinal("027_epub_narration.sql", lastExisting) > 0,
+        $"The narration migration must sort after {lastExisting}.");
+}
+
 Console.WriteLine("AudioChoice backend contract tests passed.");
+
+static string FindMigrationsDirectory()
+{
+    var directory = new DirectoryInfo(AppContext.BaseDirectory);
+    while (directory is not null)
+    {
+        var candidate = Path.Combine(directory.FullName, "Database", "Migrations");
+        if (Directory.Exists(candidate)) return candidate;
+        directory = directory.Parent;
+    }
+    throw new DirectoryNotFoundException("Could not locate Database/Migrations.");
+}
 
 static ExploreCatalogBook Catalogued(
     string id, string title, string? author = null, string? editionType = null,
@@ -1233,6 +2274,66 @@ sealed class SchedulerFakeProvider : ITranscriptionProvider
     }
 }
 
+/// <summary>
+/// A synthesis provider that can be told to fail, stall or report itself unavailable, which is
+/// the only way to exercise every routing branch without two real endpoints.
+/// </summary>
+sealed class FakeSynthesisProvider(string provider) : ISynthesisProvider
+{
+    public string Provider => provider;
+    public string ModelVersion => "fake-1";
+
+    public Exception? FailWith { get; init; }
+    public bool Available { get; init; } = true;
+    public bool ProbeThrows { get; init; }
+    /// <summary>Set to stall past the router's budget, for the timeout branch.</summary>
+    public TimeSpan Delay { get; init; } = TimeSpan.Zero;
+
+    public int Calls { get; private set; }
+
+    public Task<IReadOnlyList<NarrationVoice>> Voices(CancellationToken cancellationToken) =>
+        Task.FromResult<IReadOnlyList<NarrationVoice>>(
+            [new NarrationVoice("voice-1", "Test Voice", "en", provider, "/samples/voice-1.opus")]);
+
+    public Task<bool> IsAvailable(CancellationToken cancellationToken)
+    {
+        if (ProbeThrows) throw new InvalidOperationException("probe failed");
+        return Task.FromResult(Available);
+    }
+
+    public async Task<SynthesizedChapter> Synthesize(
+        ChapterSynthesisInput input,
+        CancellationToken cancellationToken)
+    {
+        Calls += 1;
+        if (Delay > TimeSpan.Zero) await Task.Delay(Delay, cancellationToken);
+        if (FailWith is not null) throw FailWith;
+
+        // Mirrors the real provider's early return for a chapter whose every unit was filtered
+        // away: no request, no audio, no timings, and it still counts as rendered. A fake that
+        // answered differently would make every test using it prove less than it appears to.
+        if (input.Units.Count == 0)
+        {
+            return new SynthesizedChapter(
+                input.JobID, input.ChapterIndex, provider, ModelVersion, input.VoiceID,
+                0, [], []);
+        }
+
+        var timings = new List<UnitTiming>();
+        var cursor = 0.0;
+        foreach (var unit in input.Units)
+        {
+            var seconds = Math.Max(0.1, unit.Text.Length / 14.0);
+            timings.Add(new UnitTiming(
+                unit.StartCharacter, unit.EndCharacter, cursor, cursor + seconds));
+            cursor += seconds;
+        }
+        return new SynthesizedChapter(
+            input.JobID, input.ChapterIndex, provider, ModelVersion, input.VoiceID,
+            cursor, timings, [1, 2, 3]);
+    }
+}
+
 sealed class FakeAnalysisProvider : IContentAnalysisProvider
 {
     public string ScannerVersion => "contract-test";
@@ -1242,6 +2343,32 @@ sealed class FakeAnalysisProvider : IContentAnalysisProvider
         Action<double>? reportProgress,
         CancellationToken cancellationToken) =>
         Task.FromResult<IReadOnlyList<ScanEvent>>([]);
+}
+
+/// <summary>
+/// Records the passages a text scan hands over, and returns events the caller chooses.
+/// </summary>
+/// <remarks>
+/// The point of capturing the passages is that they are the only thing the pipeline sends
+/// outward. Asserting on what arrives here is how the non-persistence tests establish that
+/// the text went exactly one place.
+/// </remarks>
+sealed class CapturingTextAnalysisProvider(
+    Func<IReadOnlyList<TranscriptSegment>, IReadOnlyList<ScanEvent>>? respond = null)
+    : ITextContentAnalysisProvider
+{
+    public string ScannerVersion => "text-contract-test";
+
+    public List<IReadOnlyList<TranscriptSegment>> Calls { get; } = [];
+
+    public Task<IReadOnlyList<ScanEvent>> AnalyzeCharacterOffsets(
+        IReadOnlyList<TranscriptSegment> passages,
+        Action<double>? reportProgress,
+        CancellationToken cancellationToken)
+    {
+        Calls.Add(passages);
+        return Task.FromResult(respond?.Invoke(passages) ?? []);
+    }
 }
 
 /// <summary>

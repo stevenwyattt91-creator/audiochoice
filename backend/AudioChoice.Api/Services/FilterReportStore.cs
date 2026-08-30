@@ -55,7 +55,8 @@ public static class FilterReports
             string.IsNullOrWhiteSpace(request.ScannerVersion) ? null : request.ScannerVersion!.Trim(),
             request.ScanEventID,
             request.CategoryID,
-            DateTimeOffset.UtcNow);
+            DateTimeOffset.UtcNow,
+            FilterReportPositionUnits.Normalize(request.PositionUnit));
     }
 }
 

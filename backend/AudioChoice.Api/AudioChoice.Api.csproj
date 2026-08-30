@@ -20,6 +20,7 @@
     <PackageReference Include="Google.Apis.Auth" Version="1.75.0" />
   </ItemGroup>
   <ItemGroup>
+    <PackageReference Include="AWSSDK.Polly" Version="4.0.100.11" />
     <PackageReference Include="QRCoder" Version="1.6.0" />
     <PackageReference Include="Azure.Identity" Version="1.21.0" />
     <PackageReference Include="Azure.Storage.Blobs" Version="12.29.1" />

@@ -35,7 +35,20 @@ public sealed record FilterReportRequest(
     /// <summary>Set when reporting a specific skip, which is what makes over-filtering reports actionable.</summary>
     Guid? ScanEventID = null,
     /// <summary>Optional category the listener picked, for triage only.</summary>
-    Guid? CategoryID = null);
+    Guid? CategoryID = null,
+    /// <summary>
+    /// What <see cref="PositionSeconds"/> measures: seconds of audio, or a character offset
+    /// into a narrated book's text.
+    /// </summary>
+    /// <remarks>
+    /// Optional with a null default, so a request from any already-shipped client deserialises
+    /// unchanged and the endpoint shape does not move. Null means seconds.
+    ///
+    /// Anything other than the two known values is stored as seconds rather than rejected: a
+    /// report is a one-off observation from someone who heard a mistake, and refusing it over
+    /// an unrecognised unit would lose the only record that it happened.
+    /// </remarks>
+    string? PositionUnit = null);
 
 public sealed record FilterReport(
     Guid ID,
@@ -47,4 +60,32 @@ public sealed record FilterReport(
     string? ScannerVersion,
     Guid? ScanEventID,
     Guid? CategoryID,
-    DateTimeOffset ReportedAt);
+    DateTimeOffset ReportedAt,
+    /// <summary>
+    /// Always populated, unlike the request's, so nothing reading a stored report has to guess.
+    /// Defaulted last so existing positional construction keeps compiling.
+    /// </summary>
+    string PositionUnit = FilterReportPositionUnits.Seconds);
+
+/// <summary>
+/// What a report's position measures. Constrained rather than free text, because triage reading
+/// a character offset as a timestamp is the failure this distinction exists to prevent.
+/// </summary>
+public static class FilterReportPositionUnits
+{
+    public const string Seconds = "seconds";
+    public const string CharacterOffset = "characterOffset";
+
+    /// <summary>
+    /// Normalises a supplied unit, treating anything unrecognised as seconds.
+    /// </summary>
+    /// <remarks>
+    /// Permissive on purpose. A report is a one-off observation from someone who heard a
+    /// mistake, so an unrecognised unit is worth storing under the default rather than
+    /// discarding along with the observation.
+    /// </remarks>
+    public static string Normalize(string? supplied) =>
+        string.Equals(supplied, CharacterOffset, StringComparison.OrdinalIgnoreCase)
+            ? CharacterOffset
+            : Seconds;
+}
