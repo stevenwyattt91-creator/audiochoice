@@ -87,6 +87,7 @@ jobs:
           DB_PASSWORD: ${{ secrets.AZURE_STAGING_DATABASE_PASSWORD }}
           AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
         run: |
           token=$(openssl rand -hex 32)
           connection="Host=${{ steps.database.outputs.host }};Port=5432;Database=audiochoice;Username=audiochoice_admin;Password=$DB_PASSWORD;SSL Mode=Require"
@@ -108,6 +109,16 @@ jobs:
           else
             echo "aws=false" >> "$GITHUB_OUTPUT"
             echo "::notice::AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY are not set, so the premium voice stays off. Text scanning is unaffected."
+          fi
+
+          # Written from the repository secret when one is set, so rotating the sending key is a
+          # change in one place rather than a manual vault edit. Set unconditionally when present,
+          # because a rotated key must replace the stored one rather than be ignored because
+          # something is already there.
+          if [ -n "$RESEND_API_KEY" ]; then
+            az keyvault secret set --vault-name "${{ steps.foundation.outputs.vault }}" \
+              --name resend-api-key --value "$RESEND_API_KEY" >/dev/null
+            echo "Stored the transactional email key from repository secrets."
           fi
 
           # Transactional email needs a key to send with. Asked rather than assumed, for the same
