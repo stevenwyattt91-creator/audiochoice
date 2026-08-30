@@ -51,11 +51,16 @@ class NarrationImportCoordinator(
                 }
             },
             isAlreadyInLibrary = { sha256 ->
-                // Asked of the device rather than the server: the local record is what a
-                // duplicate would collide with, and it is also the thing whose rendered audio
-                // must not be disturbed. A network failure must not turn a re-import into a
-                // second entry.
-                localAudio.find(sha256) != null || store.bookText(sha256) != null
+                // Library membership only. Leftover narration data deliberately does not count.
+                //
+                // This used to also treat stored Book_Text as membership, to stop a network failure
+                // turning a re-import into a second entry. It does not: the save is an upsert keyed
+                // by this same hash, so repeating it is idempotent. What the extra condition did
+                // instead was make one state unrecoverable -- text on the device but no library
+                // entry, which is what a failed or rolled-back registration leaves behind. The
+                // import would report the book as already present and never register it, so
+                // re-importing could not fix it and nothing else would either.
+                localAudio.find(sha256) != null
             },
             persistSourceLocation = { sha256 -> localAudio.saveEpub(sha256, uri) },
             saveLibraryBook = { request -> api.saveBook(accessToken, request) },
