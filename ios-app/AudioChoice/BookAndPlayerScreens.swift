@@ -358,6 +358,18 @@ private struct LegacyPlayerScreen: View {
 struct PlayerScreen: View {
     var book: MobileBook
     var initialPosition: Double? = nil
+    /// True only where this screen is the Player tab's own content.
+    ///
+    /// Everywhere else it is pushed -- from a book's page, a chapter, a bookmark -- and there the tab
+    /// bar sits over the controls at the bottom. A listener starting a book from their library saw the
+    /// speed, chapter, filter and bookmark row behind the bar, and only found it by switching to the
+    /// Player tab.
+    ///
+    /// The tab bar is hidden when pushed rather than padded around, because the amount to pad is the
+    /// bar's height plus the home indicator, which is a number that differs by device and that a
+    /// constant gets wrong somewhere. A pushed player has its own back control, so nothing is lost by
+    /// hiding it; on the tab itself the bar has to stay, or there would be no way out.
+    var isTabRoot: Bool = false
     @ObservedObject private var playback = AudioPlaybackManager.shared
     @State private var sleepTask: Task<Void, Never>?
     @State private var bookmarkSaved = false
@@ -527,6 +539,7 @@ struct PlayerScreen: View {
         }
         .background(ACTheme.background.ignoresSafeArea())
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar(isTabRoot ? .visible : .hidden, for: .tabBar)
         .fullScreenCover(isPresented: $showingReader) {
             if let record {
                 ReadingEditionScreen(record: record) { showingReader = false }
@@ -601,7 +614,7 @@ struct NowPlayingScreen: View {
     var body: some View {
         Group {
             if let record = playback.currentRecord {
-                PlayerScreen(book: record.book)
+                PlayerScreen(book: record.book, isTabRoot: true)
             } else {
                 ContentUnavailableView("Nothing Playing", systemImage: "waveform", description: Text("Choose an audiobook from your Library to open the Beta-style player."))
                     .background(ACTheme.background.ignoresSafeArea())
