@@ -54,12 +54,45 @@ class AuthViewModel(
 
     fun login(email: String, password: String) = authenticate { api.login(LoginRequest(email.trim(), password)) }
 
-    fun register(name: String, email: String, password: String) = authenticate {
+    fun register(email: String, password: String) = authenticate {
         require(password.length >= 12) { "Use at least 12 characters for your password." }
-        api.register(RegisterRequest(email.trim(), password, name.trim().ifBlank { null }))
+        // No display name is sent. The server treats it as optional and derives one from the
+        // address, so sending a blank would store a blank where a derived name is better.
+        api.register(RegisterRequest(email.trim(), password))
     }
 
     fun googleSignIn() = authenticate { api.googleSignIn(google.requestIdToken()) }
+
+    /**
+     * Asks for a reset code, reporting only whether the request was accepted.
+     *
+     * Deliberately says nothing about whether the address is registered, matching the server. Telling
+     * someone their email is unknown would let anyone discover who has an account here.
+     */
+    fun requestPasswordReset(email: String, onResult: (String?) -> Unit) {
+        viewModelScope.launch {
+            mutableState.value = mutableState.value.copy(busy = true, error = null)
+            val failure = runCatching { api.requestPasswordReset(email.trim()) }
+                .exceptionOrNull()
+                ?.let { it.message ?: "That request could not be sent." }
+            mutableState.value = mutableState.value.copy(busy = false, error = failure)
+            onResult(failure)
+        }
+    }
+
+    /** Sets a new password from the emailed code. */
+    fun confirmPasswordReset(code: String, newPassword: String, onResult: (String?) -> Unit) {
+        viewModelScope.launch {
+            mutableState.value = mutableState.value.copy(busy = true, error = null)
+            val failure = runCatching {
+                // Trimmed, because copying a code out of an email very often takes whitespace with
+                // it and a code that fails for an invisible reason is the worst kind.
+                api.confirmPasswordReset(code.trim(), newPassword)
+            }.exceptionOrNull()?.let { it.message ?: "That code was not accepted." }
+            mutableState.value = mutableState.value.copy(busy = false, error = failure)
+            onResult(failure)
+        }
+    }
 
     fun dismissError() {
         mutableState.value = mutableState.value.copy(error = null)

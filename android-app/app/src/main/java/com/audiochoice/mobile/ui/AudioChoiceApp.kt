@@ -137,6 +137,8 @@ fun AudioChoiceApp(
                 onRegister = auth::register,
                 onGoogle = auth::googleSignIn,
                 onDismissError = auth::dismissError,
+                onRequestReset = auth::requestPasswordReset,
+                onConfirmReset = auth::confirmPasswordReset,
             )
             else -> LibraryShell(
                 state.session!!.user,
@@ -161,14 +163,43 @@ private fun AuthScreen(
     busy: Boolean,
     error: String?,
     onLogin: (String, String) -> Unit,
-    onRegister: (String, String, String) -> Unit,
+    onRegister: (String, String) -> Unit,
     onGoogle: () -> Unit,
     onDismissError: () -> Unit,
+    /** Asks for a reset code; reports a failure message, or null when accepted. */
+    onRequestReset: (String, (String?) -> Unit) -> Unit,
+    onConfirmReset: (String, String, (String?) -> Unit) -> Unit,
 ) {
     var registering by rememberSaveable { mutableStateOf(false) }
-    var name by rememberSaveable { mutableStateOf("") }
     var email by rememberSaveable { mutableStateOf("") }
     var password by rememberSaveable { mutableStateOf("") }
+    /**
+     * Typed a second time when creating an account, and compared before anything is sent.
+     *
+     * A mistyped password at sign-up is accepted, and then locks someone out of an account they only
+     * just made, with the password they meant to use.
+     */
+    var confirmPassword by rememberSaveable { mutableStateOf("") }
+    var resetting by rememberSaveable { mutableStateOf(false) }
+
+    if (resetting) {
+        PasswordResetDialog(
+            busy = busy,
+            initialEmail = email,
+            onRequestReset = onRequestReset,
+            onConfirmReset = onConfirmReset,
+            onDone = { restoredEmail ->
+                // Carried back so the address is not typed twice, and the password field is left
+                // empty rather than holding the one that did not work.
+                email = restoredEmail
+                password = ""
+                confirmPassword = ""
+                resetting = false
+                onDismissError()
+            },
+            onDismiss = { resetting = false; onDismissError() },
+        )
+    }
 
     Column(
         Modifier.fillMaxSize().navigationBarsPadding().imePadding().padding(horizontal = 28.dp),
@@ -188,15 +219,35 @@ private fun AuthScreen(
         Text("Listen Your Way", color = ChoiceMuted, fontSize = 14.sp)
         Spacer(Modifier.height(40.dp))
 
-        if (registering) AudioField(name, { name = it }, "Name")
         AudioField(email, { email = it }, "Email address")
         AudioField(password, { password = it }, "Password", password = true)
+        if (registering) {
+            AudioField(confirmPassword, { confirmPassword = it }, "Confirm password", password = true)
+            // Said as soon as they diverge rather than on submit, so the fields are not retyped.
+            if (confirmPassword.isNotEmpty() && confirmPassword != password) {
+                Text(
+                    "Those passwords do not match.",
+                    color = MaterialTheme.colorScheme.error,
+                    fontSize = 12.sp,
+                    modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
+                )
+            }
+            Text(
+                "Use at least 12 characters.",
+                color = ChoiceMuted,
+                fontSize = 12.sp,
+                modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
+            )
+        }
 
         Button(
             onClick = {
-                if (registering) onRegister(name, email, password) else onLogin(email, password)
+                if (registering) onRegister(email, password) else onLogin(email, password)
             },
-            enabled = !busy && email.isNotBlank() && password.isNotBlank(),
+            // The confirmation and the minimum length are checked here as well as by the server, so
+            // the button refuses what the server would refuse rather than spending a round trip.
+            enabled = !busy && email.isNotBlank() && password.isNotBlank() &&
+                (!registering || (password == confirmPassword && password.length >= 12)),
             modifier = Modifier.fillMaxWidth().height(54.dp),
             shape = RoundedCornerShape(12.dp),
         ) {
@@ -216,8 +267,18 @@ private fun AuthScreen(
             modifier = Modifier.fillMaxWidth().height(54.dp),
             shape = RoundedCornerShape(12.dp),
         ) { Text("G", fontWeight = FontWeight.Black); Spacer(Modifier.width(12.dp)); Text("Continue with Google") }
-        TextButton(onClick = { registering = !registering; onDismissError() }, enabled = !busy) {
+        TextButton(onClick = {
+            registering = !registering
+            confirmPassword = ""
+            onDismissError()
+        }, enabled = !busy) {
             Text(if (registering) "Already have an account? Sign in" else "New to AudioChoice? Create an account")
+        }
+        // Offered on the sign-in path only: someone creating an account has no password to recover.
+        if (!registering) {
+            TextButton(onClick = { resetting = true; onDismissError() }, enabled = !busy) {
+                Text("Forgot password?", color = ChoiceMuted, fontSize = 13.sp)
+            }
         }
         error?.let {
             Text(it, color = MaterialTheme.colorScheme.error, textAlign = TextAlign.Center, fontSize = 13.sp)
@@ -227,6 +288,156 @@ private fun AuthScreen(
         Spacer(Modifier.height(20.dp))
     }
 }
+
+/**
+ * Recovers an account whose password no longer works.
+ *
+ * Without this a listener who could not sign in had no route back to their library: their only option
+ * was a second account on another address, which abandons the books in the first.
+ *
+ * The code is typed rather than followed as a link. The account being recovered is only reachable in
+ * the app, so sending someone to a browser adds a page to land on and a hand-off to come back from,
+ * and both can fail.
+ */
+@Composable
+private fun PasswordResetDialog(
+    busy: Boolean,
+    initialEmail: String,
+    onRequestReset: (String, (String?) -> Unit) -> Unit,
+    onConfirmReset: (String, String, (String?) -> Unit) -> Unit,
+    onDone: (String) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    var email by rememberSaveable { mutableStateOf(initialEmail) }
+    var code by rememberSaveable { mutableStateOf("") }
+    var newPassword by rememberSaveable { mutableStateOf("") }
+    /**
+     * A mistyped password here is worse than at sign-up: the reset succeeds, the old password stops
+     * working, and the listener is locked out again by the very thing they used to get back in -- with
+     * a code that has now been spent.
+     */
+    var confirmPassword by rememberSaveable { mutableStateOf("") }
+    /** Advanced only once the request is accepted, so nobody is asked for a code before one is sent. */
+    var codeSent by rememberSaveable { mutableStateOf(false) }
+    var notice by rememberSaveable { mutableStateOf<String?>(null) }
+    var failure by rememberSaveable { mutableStateOf<String?>(null) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        icon = { Icon(Icons.Outlined.LockReset, null, tint = ChoiceGreen) },
+        title = { Text(if (codeSent) "Enter your code" else "Reset password") },
+        text = {
+            Column {
+                if (!codeSent) {
+                    Text(
+                        "Enter the email address on your account. We'll send you a 6-digit code.",
+                        color = ChoiceMuted,
+                        fontSize = 13.sp,
+                    )
+                    Spacer(Modifier.height(12.dp))
+                    AudioField(email, { email = it; failure = null }, "Email address")
+                } else {
+                    Text(
+                        "Enter the 6-digit code from the email, then choose a new password.",
+                        color = ChoiceMuted,
+                        fontSize = 13.sp,
+                    )
+                    Spacer(Modifier.height(12.dp))
+                    OutlinedTextField(
+                        value = code,
+                        // Digits only, so a pasted code carrying stray characters cannot be
+                        // submitted and spend an attempt for an invisible reason.
+                        onValueChange = { entered ->
+                            code = entered.filter(Char::isDigit).take(RESET_CODE_LENGTH)
+                            failure = null
+                        },
+                        label = { Text("6-digit code") },
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
+                        modifier = Modifier.fillMaxWidth().padding(bottom = 14.dp),
+                        shape = RoundedCornerShape(12.dp),
+                    )
+                    AudioField(newPassword, { newPassword = it; failure = null }, "New password", password = true)
+                    AudioField(
+                        confirmPassword,
+                        { confirmPassword = it; failure = null },
+                        "Confirm new password",
+                        password = true,
+                    )
+                    if (confirmPassword.isNotEmpty() && confirmPassword != newPassword) {
+                        Text(
+                            "Those passwords do not match.",
+                            color = MaterialTheme.colorScheme.error,
+                            fontSize = 12.sp,
+                        )
+                    }
+                    Text("Use at least 12 characters.", color = ChoiceMuted, fontSize = 12.sp)
+                }
+                notice?.let {
+                    Spacer(Modifier.height(10.dp))
+                    Text(it, color = ChoiceMuted, fontSize = 12.sp)
+                }
+                failure?.let {
+                    Spacer(Modifier.height(10.dp))
+                    Text(it, color = MaterialTheme.colorScheme.error, fontSize = 12.sp)
+                }
+            }
+        },
+        confirmButton = {
+            if (!codeSent) {
+                TextButton(
+                    onClick = {
+                        onRequestReset(email) { error ->
+                            failure = error
+                            if (error == null) {
+                                codeSent = true
+                                // Worded without confirming the address has an account, matching the
+                                // server. Saying an address is unknown would let anyone discover who
+                                // is registered here.
+                                notice = "If that address has an account, a 6-digit code is on its " +
+                                    "way. It can take a minute or two, and it expires in 15 minutes."
+                            }
+                        }
+                    },
+                    enabled = !busy && email.isNotBlank(),
+                ) { Text("Send code") }
+            } else {
+                TextButton(
+                    onClick = {
+                        onConfirmReset(code, newPassword) { error ->
+                            failure = error
+                            if (error == null) onDone(email.trim())
+                        }
+                    },
+                    enabled = !busy &&
+                        code.length == RESET_CODE_LENGTH &&
+                        newPassword.length >= 12 &&
+                        newPassword == confirmPassword,
+                ) { Text("Set new password") }
+            }
+        },
+        dismissButton = {
+            if (codeSent) {
+                TextButton(
+                    onClick = {
+                        codeSent = false
+                        code = ""
+                        newPassword = ""
+                        confirmPassword = ""
+                        notice = null
+                        failure = null
+                    },
+                    enabled = !busy,
+                ) { Text("Send another") }
+            } else {
+                TextButton(onClick = onDismiss, enabled = !busy) { Text("Cancel") }
+            }
+        },
+    )
+}
+
+/** Matches the server's code format. */
+private const val RESET_CODE_LENGTH = 6
 
 @Composable
 private fun AudioField(value: String, onValueChange: (String) -> Unit, label: String, password: Boolean = false) {
