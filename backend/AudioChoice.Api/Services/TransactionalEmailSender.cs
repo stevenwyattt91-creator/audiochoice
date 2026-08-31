@@ -26,6 +26,9 @@ public sealed class TransactionalEmailOptions
     /// sending configuration, which is the part that is awkward to get right.
     /// </remarks>
     public bool VerificationEnabled { get; init; }
+
+    /// <summary>Where operational alerts are sent.</summary>
+    public string AlertAddress { get; init; } = "admin@audiochoiceapp.com";
 }
 
 public interface ITransactionalEmailSender
@@ -46,6 +49,13 @@ public interface ITransactionalEmailSender
         string displayName,
         string subject,
         string message,
+        CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Tells the team a listener reported a filter as wrong.
+    /// </summary>
+    Task SendFilterReportAlert(
+        FilterReport report,
         CancellationToken cancellationToken);
 
     Task SendNewCatalogScanAlert(
@@ -74,6 +84,10 @@ public sealed class DisabledTransactionalEmailSender : ITransactionalEmailSender
         string displayName,
         string subject,
         string message,
+        CancellationToken cancellationToken) => Task.CompletedTask;
+
+    public Task SendFilterReportAlert(
+        FilterReport report,
         CancellationToken cancellationToken) => Task.CompletedTask;
 
     public Task SendNewCatalogScanAlert(
@@ -142,6 +156,63 @@ public sealed class ResendTransactionalEmailSender(
             userEmail,
             "We received your AudioChoice support message",
             $"Hi {displayName},\n\nWe received your message about “{subject}”. The AudioChoice support team will reach out as soon as possible.\n\nAudioChoice Support",
+            options.ReplyToAddress,
+            cancellationToken);
+    }
+
+    public Task SendFilterReportAlert(
+        FilterReport report,
+        CancellationToken cancellationToken)
+    {
+        var kind = report.Kind == FilterReportKind.MissedContent
+            ? "Something played that should have been removed"
+            : "Something was removed that should have played";
+
+        // A narrated book's position is a character offset into its text, carried in the same field an
+        // audiobook uses for seconds. Formatting one as a timestamp would render offset 84,000 as
+        // "23:20:00" -- a number that looks authoritative and means nothing -- so the unit decides how
+        // it reads.
+        var position = report.PositionUnit == FilterReportPositionUnits.CharacterOffset
+            ? $"character {report.PositionSeconds:F0} of the book's text"
+            : TimeSpan.FromSeconds(report.PositionSeconds).ToString(@"h\:mm\:ss");
+        var window = report.PositionUnit == FilterReportPositionUnits.CharacterOffset
+            ? $"{report.WindowSeconds:F0} characters"
+            : $"{report.WindowSeconds:F1} seconds";
+
+        var text = $"""
+            A listener reported a filter problem in AudioChoice.
+
+            What they reported: {kind}
+            Where: {position}
+            Span: {window}
+
+            Title: {report.Fingerprint.WorkTitle ?? "Not provided"}
+            Author: {report.Fingerprint.Author ?? "Not provided"}
+            Edition: {report.Fingerprint.EditionType ?? "Not provided"}
+            File type: {report.Fingerprint.FileType}
+
+            Scanner version: {report.ScannerVersion ?? "Not recorded"}
+            Scan event: {report.ScanEventID?.ToString() ?? "None -- no control covered that moment"}
+            Category: {report.CategoryID?.ToString() ?? "Not recorded"}
+
+            Reported at: {report.ReportedAt:u}
+            Report ID: {report.ID}
+            Account ID: {report.AccountID}
+            Fingerprint: {report.Fingerprint.Sha256}
+            Fingerprint version: {report.Fingerprint.Version}
+            File size: {report.Fingerprint.FileSize}
+
+            No audio, transcript or text is included, by design: a report says where in which
+            edition and which control was responsible, and the passage is looked up from the scan.
+
+            To see this edition's other reports:
+            GET /v1/admin/filter-reports?sha256={report.Fingerprint.Sha256}&fingerprintVersion={report.Fingerprint.Version}&fileSize={report.Fingerprint.FileSize}
+            """;
+
+        return Send(
+            options.AlertAddress,
+            $"Filter report · {report.Fingerprint.WorkTitle ?? report.Fingerprint.Sha256[..12]}",
+            text,
             options.ReplyToAddress,
             cancellationToken);
     }
