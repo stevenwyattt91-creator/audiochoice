@@ -854,16 +854,39 @@ private enum class LibrarySort(val label: String) { RECENT("Recently Added"), A_
 @Composable
 private fun FirstRunGuide(onFinished: () -> Unit) {
     var page by rememberSaveable { mutableIntStateOf(0) }
+    // Four steps, in the order someone actually meets them: get a book in, get a book in from a
+    // computer, decide what it plays, then the reading edition. Each names the control it is talking
+    // about, because a tour that describes a feature without saying where it lives is a tour someone
+    // has to take twice.
     val slides = listOf(
         Triple(
-            Icons.Outlined.Headphones,
-            "Listen Your Way",
-            "Import audiobook files you already own. AudioChoice finds potentially sensitive moments, then lets you choose what plays or skips for each book.",
+            Icons.Outlined.LibraryAdd,
+            "Bring in a book you own",
+            "Tap Import and choose an audiobook file. It is copied into AudioChoice's private " +
+                "storage on this device — nothing is uploaded unless a scan is needed for that " +
+                "exact recording. MP3 and M4B work directly, and Audible AAX files are converted " +
+                "here using your own account.",
         ),
         Triple(
-            Icons.Outlined.CloudDone,
-            "Scan once, reuse securely",
-            "If AudioChoice already recognizes your exact audiobook edition, its saved filter scan is ready without uploading or transcribing it again. New scans continue privately in the cloud even if you close the app.",
+            Icons.Outlined.Devices,
+            "Downloaded it on a computer?",
+            "Some audiobooks are easiest to get on a computer. Open the AudioChoice transfer tool " +
+                "there and send the file straight to your phone — no cable, no cloud drive. It " +
+                "arrives in Import like any other file.",
+        ),
+        Triple(
+            Icons.Outlined.Shield,
+            "Choose what you hear",
+            "Each audiobook is scanned once, and you pick which kinds of content to remove. " +
+                "Playback skips or mutes those moments. Open the shield in the player to change " +
+                "your choices, and protect them with a PIN under Parental Controls if you like.",
+        ),
+        Triple(
+            Icons.Outlined.MenuBook,
+            "Read along, or be read to",
+            "Import an EPUB and it lands on the Ebooks shelf, opening in the reader instead of the " +
+                "player. Adjust the text, follow along while it is read aloud, or attach it to an " +
+                "audiobook you already own to read and listen together.",
         ),
     )
     val slide = slides[page]

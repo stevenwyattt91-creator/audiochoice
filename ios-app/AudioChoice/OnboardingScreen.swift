@@ -4,10 +4,37 @@ struct OnboardingScreen: View {
     @Binding var completed: Bool
     @State private var page = 0
 
+    // Four steps, in the order someone actually meets them: get a book in, get a book in from a
+    // computer, decide what it plays, then the reading edition. Each names the control it is talking
+    // about, because a tour that describes a feature without saying where it lives is a tour someone
+    // has to take twice.
     private let pages = [
-        OnboardingPage(icon: "headphones", title: "Listen Your Way", detail: "Import audiobooks you own and listen with a clean, focused player."),
-        OnboardingPage(icon: "checkmark.shield", title: "Choose What You Hear", detail: "AudioChoice automatically skips the supported content categories you enable."),
-        OnboardingPage(icon: "lock.shield", title: "Designed for Privacy", detail: "Files stay in private app storage. The server checks fingerprints first and never returns transcripts to your phone.")
+        OnboardingPage(
+            icon: "square.and.arrow.down",
+            title: "Bring in a book you own",
+            detail: "Tap Import and choose an audiobook file. It is copied into AudioChoice's "
+                + "private storage on this device — nothing is uploaded unless a scan is needed for "
+                + "that exact recording. MP3 and M4B work directly, and Audible AAX files are "
+                + "converted here using your own account."),
+        OnboardingPage(
+            icon: "laptopcomputer.and.iphone",
+            title: "Downloaded it on a computer?",
+            detail: "Some audiobooks are easiest to get on a computer. Open the AudioChoice "
+                + "transfer tool there and send the file straight to your phone — no cable, no "
+                + "cloud drive. It arrives in Import like any other file."),
+        OnboardingPage(
+            icon: "checkmark.shield",
+            title: "Choose what you hear",
+            detail: "Each audiobook is scanned once, and you pick which kinds of content to "
+                + "remove. Playback skips or mutes those moments. Open the shield in the player to "
+                + "change your choices, and protect them with a PIN under Parental Controls if you "
+                + "like."),
+        OnboardingPage(
+            icon: "book",
+            title: "Read along, or be read to",
+            detail: "Import an EPUB and it lands on the Ebooks shelf, opening in the reader "
+                + "instead of the player. Adjust the text, follow along while it is read aloud, or "
+                + "attach it to an audiobook you already own to read and listen together."),
     ]
 
     var body: some View {
