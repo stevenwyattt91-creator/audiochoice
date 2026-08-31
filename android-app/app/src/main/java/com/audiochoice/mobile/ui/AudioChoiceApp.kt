@@ -60,6 +60,10 @@ import com.audiochoice.mobile.R
 import com.audiochoice.mobile.BuildConfig
 import com.audiochoice.mobile.beta.BetaConfig
 import com.audiochoice.mobile.beta.BetaDiagnostics
+import com.audiochoice.contracts.FaqEntry
+import com.audiochoice.contracts.FaqResponse
+import com.audiochoice.contracts.FaqSection
+import com.audiochoice.mobile.data.AudioChoiceApi
 import com.audiochoice.mobile.data.AuthUser
 import com.audiochoice.mobile.data.LibraryBook
 import com.audiochoice.mobile.data.ExploreCatalogBook
@@ -114,6 +118,8 @@ import com.audiochoice.mobile.ui.theme.ChoiceSurface
 @Composable
 fun AudioChoiceApp(
     auth: AuthViewModel,
+    /** Passed for the help content, which is fetched rather than compiled in. */
+    api: AudioChoiceApi,
     importer: ImportViewModel,
     library: LibraryViewModel,
     player: PlayerViewModel,
@@ -141,6 +147,7 @@ fun AudioChoiceApp(
                 onConfirmReset = auth::confirmPasswordReset,
             )
             else -> LibraryShell(
+                api = api,
                 state.session!!.user,
                 state.session!!.accessToken,
                 importer,
@@ -454,6 +461,7 @@ private fun AudioField(value: String, onValueChange: (String) -> Unit, label: St
 
 @Composable
 private fun LibraryShell(
+    api: AudioChoiceApi,
     user: AuthUser,
     accessToken: String,
     importer: ImportViewModel,
@@ -814,7 +822,7 @@ private fun LibraryShell(
                         onLogout = onLogout,
                         accountPlan = libraryState.accountPlan,
                     )
-                    ProfilePage.FAQ -> FaqScreen { profilePage = ProfilePage.MAIN }
+                    ProfilePage.FAQ -> FaqScreen(api) { profilePage = ProfilePage.MAIN }
                     ProfilePage.SUPPORT -> SupportScreen(
                         user = user,
                         accessToken = accessToken,
@@ -1603,49 +1611,111 @@ private fun ProfileRow(icon: ImageVector, title: String, subtitle: String, onCli
 
 private data class FaqItem(val question: String, val answer: String)
 
-private val audioChoiceFaqs = listOf(
-    FaqItem("Where can I obtain audiobooks?", "You can buy DRM-free audiobook downloads from stores such as Libro.fm and import the downloaded files. You can also import supported audiobooks you lawfully obtained elsewhere."),
-    FaqItem("How do I import a Libro.fm audiobook?", "Download the audiobook file from your Libro.fm library, open AudioChoice, choose Import, and select the downloaded MP3 or M4B file."),
-    FaqItem(
-        "How do I download an Audible AAX file on Android or iPhone?",
-        "Open Audible's website in Chrome or Safari and sign in. Open the browser menu and turn on Desktop site (Chrome) or Request Desktop Website (Safari). Go to Library, find the audiobook, and choose Download. Save the AAX file in Downloads on Android or in the Files app on iPhone/iPad. Then open AudioChoice, choose Import, and select that AAX file. A download made inside the Audible app is stored privately and normally cannot be selected by AudioChoice.",
+/**
+ * The copy that ships with the app.
+ *
+ * Used only when the served content cannot be fetched. Deliberately kept short: it exists so the help
+ * screen is never empty, not to be a second source of truth that drifts from the server the way the
+ * two apps' hardcoded copies drifted from each other.
+ */
+private val bundledFaq = FaqResponse(
+    version = 1,
+    sections = listOf(
+        FaqSection(
+            "Getting your audiobooks in",
+            listOf(
+                FaqEntry(
+                    "Where can I get audiobooks I can import?",
+                    "Any audiobook you own as a file will work. Stores selling DRM-free downloads, " +
+                        "such as Libro.fm, are simplest: download the file and import it.",
+                ),
+                FaqEntry(
+                    "Which file types work?",
+                    "MP3 and M4B are the usual ones. Audible AAX files can be converted on the " +
+                        "device using your own account's activation. EPUB files are imported as " +
+                        "reading editions rather than audiobooks.",
+                ),
+            ),
+        ),
+        FaqSection(
+            "Filters",
+            listOf(
+                FaqEntry(
+                    "How do filters work?",
+                    "An audiobook is scanned once, and you choose which categories to remove. " +
+                        "Playback skips or mutes those moments.",
+                ),
+                FaqEntry(
+                    "Why does one audiobook say filters are unavailable?",
+                    "Filter results belong to one exact recording, so a different edition needs its " +
+                        "own scan. Open the player and tap \"Scan this audiobook\".",
+                ),
+            ),
+        ),
+        FaqSection(
+            "Your account",
+            listOf(
+                FaqEntry(
+                    "I cannot sign in on a new device.",
+                    "Your account works on every device. If the password is not accepted, choose " +
+                        "\"Forgot password\" and we will email a six-digit code.",
+                ),
+            ),
+        ),
     ),
-    FaqItem(
-        "How do I transfer an Audible audiobook from a computer?",
-        "On a laptop or desktop, sign in at Audible's website, open Library, and choose Download beside the audiobook to save its AAX file. For Android, transfer it with a USB cable, Quick Share, or a cloud drive and save it in Downloads. For iPhone or iPad, use AirDrop, iCloud Drive, Finder, or another cloud drive and save it in the Files app. In AudioChoice, choose Import and select the transferred AAX file.",
-    ),
-    FaqItem("Which file types are supported?", "AudioChoice supports MP3, M4A, M4B, and AAX imports. AAX files are converted locally to M4B before scanning."),
-    FaqItem("Does AudioChoice keep my audiobook?", "No. Your playable audiobook stays on your device. Temporary private processing data is removed after the scan; reusable transcript analysis and filter timing data are retained so the same edition does not need to be scanned again."),
-    FaqItem("Can I close the app during AAX conversion?", "Keep AudioChoice open until the local conversion finishes. If it is interrupted, reopen the app and select the same AAX file to resume or restart safely."),
-    FaqItem("Why must I reimport on another device?", "AudioChoice does not store your audiobook files. Your account data can follow you, but each device needs its own local copy of the audio."),
-    FaqItem("How do playback filters work?", "Every category detected for an audiobook starts on. You can turn off a whole category or an individual subfilter, and AudioChoice remembers those choices for that audiobook only."),
-    FaqItem("Can AudioChoice skip an entire scene?", "Yes. When a scan identifies a complete scene as a filter event, playback can jump from the start of that event to its end."),
-    FaqItem("What if a filter is incorrect?", "Use Support to report the audiobook and category. Never attach the audiobook file; include the title and approximate playback time."),
 )
 
 @Composable
-private fun FaqScreen(onBack: () -> Unit) {
-    var expanded by rememberSaveable { mutableIntStateOf(-1) }
+private fun FaqScreen(api: AudioChoiceApi, onBack: () -> Unit) {
+    var expandedKey by rememberSaveable { mutableStateOf<String?>(null) }
+    // Starts from the bundled copy so the screen has content on the first frame, then prefers the
+    // served one when it arrives. Compared by version rather than assumed newer: an app that has not
+    // been updated in a while should still show the better answers, and a server that has somehow
+    // fallen behind should not replace them with worse ones.
+    var faq by remember { mutableStateOf(bundledFaq) }
+    LaunchedEffect(Unit) {
+        runCatching { api.faq() }.getOrNull()?.let { served ->
+            if (served.sections.isNotEmpty() && served.version >= faq.version) faq = served
+        }
+    }
     Column(Modifier.fillMaxSize()) {
         ScreenHeader("Frequently Asked Questions", onBack)
         Column(Modifier.verticalScroll(rememberScrollState())) {
-            audioChoiceFaqs.forEachIndexed { index, item ->
-                Card(
-                    Modifier.fillMaxWidth().padding(bottom = 9.dp).clickable { expanded = if (expanded == index) -1 else index },
-                    colors = CardDefaults.cardColors(containerColor = ChoiceSurface),
-                    shape = RoundedCornerShape(12.dp),
-                ) {
-                    Column(Modifier.padding(16.dp)) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text(item.question, Modifier.weight(1f), fontWeight = FontWeight.SemiBold)
-                            Icon(if (expanded == index) Icons.Outlined.ExpandLess else Icons.Outlined.ExpandMore, null, tint = ChoiceGreen)
-                        }
-                        if (expanded == index) {
-                            Spacer(Modifier.height(10.dp))
-                            Text(item.answer, color = ChoiceMuted, lineHeight = 20.sp, fontSize = 13.sp)
+            faq.sections.forEach { section ->
+                Text(
+                    section.title,
+                    color = ChoiceGreen,
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier.padding(top = 6.dp, bottom = 8.dp),
+                )
+                section.items.forEach { item ->
+                    val key = "${section.title}/${item.question}"
+                    Card(
+                        Modifier.fillMaxWidth().padding(bottom = 9.dp).clickable {
+                            expandedKey = if (expandedKey == key) null else key
+                        },
+                        colors = CardDefaults.cardColors(containerColor = ChoiceSurface),
+                        shape = RoundedCornerShape(12.dp),
+                    ) {
+                        Column(Modifier.padding(16.dp)) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text(item.question, Modifier.weight(1f), fontWeight = FontWeight.SemiBold)
+                                Icon(
+                                    if (expandedKey == key) Icons.Outlined.ExpandLess
+                                    else Icons.Outlined.ExpandMore,
+                                    null,
+                                    tint = ChoiceGreen,
+                                )
+                            }
+                            if (expandedKey == key) {
+                                Spacer(Modifier.height(10.dp))
+                                Text(item.answer, color = ChoiceMuted, lineHeight = 20.sp, fontSize = 13.sp)
+                            }
                         }
                     }
                 }
+                Spacer(Modifier.height(8.dp))
             }
             Spacer(Modifier.height(20.dp))
         }

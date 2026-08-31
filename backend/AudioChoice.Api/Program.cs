@@ -702,6 +702,11 @@ app.MapPost("/v1/admin/accounts/{userID:guid}/entitlements", (
 // Founders are the beta testers, given full access permanently at no charge. Kept as its own
 // endpoint rather than a generic grant so the plan, the source and the absence of an expiry cannot be
 // typed wrongly: an expiry entered by mistake would produce access that quietly lapses months later.
+// Public and unauthenticated: it is help text, it contains nothing about anyone, and the screen that
+// shows it has to work before a listener can sign in as much as after. Cached so a version that has
+// not changed costs nothing to ask for.
+app.MapGet("/v1/faq", () => Results.Ok(FaqContent.Current));
+
 app.MapPost("/v1/admin/founders", (
     FounderGrantRequest request,
     HttpContext context,

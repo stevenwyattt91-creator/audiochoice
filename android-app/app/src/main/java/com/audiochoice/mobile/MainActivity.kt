@@ -69,6 +69,7 @@ class MainActivity : ComponentActivity() {
             AudioChoiceTheme {
                 AudioChoiceApp(
                     authViewModel,
+                    api,
                     importViewModel,
                     libraryViewModel,
                     playerViewModel,
