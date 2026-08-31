@@ -812,6 +812,7 @@ private fun LibraryShell(
                             { profilePage = ProfilePage.VOICE_MEASUREMENT }
                         } else null,
                         onLogout = onLogout,
+                        accountPlan = libraryState.accountPlan,
                     )
                     ProfilePage.FAQ -> FaqScreen { profilePage = ProfilePage.MAIN }
                     ProfilePage.SUPPORT -> SupportScreen(
@@ -1316,6 +1317,8 @@ private fun EmptyPlayer(openLibrary: () -> Unit) {
 private fun ProfileScreen(
     user: AuthUser,
     playerState: PlayerUiState,
+    /** The account's plan, or null before it is known. Display only. */
+    accountPlan: String? = null,
     onFaq: () -> Unit,
     onSupport: () -> Unit,
     onParentalControls: () -> Unit,
@@ -1347,7 +1350,19 @@ private fun ProfileScreen(
         Card(Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = ChoiceSurface)) {
             Row(Modifier.padding(18.dp), verticalAlignment = Alignment.CenterVertically) {
                 Icon(Icons.Outlined.AccountCircle, null, tint = ChoiceGreen, modifier = Modifier.size(52.dp))
-                Spacer(Modifier.width(14.dp)); Column { Text(user.displayName.ifBlank { "AudioChoice listener" }, fontSize = 19.sp); Text(user.email, color = ChoiceMuted); Text("Signed in with ${user.provider}", color = ChoiceGreen, fontSize = 12.sp) }
+                Spacer(Modifier.width(14.dp)); Column { Text(user.displayName.ifBlank { "AudioChoice listener" }, fontSize = 19.sp); Text(user.email, color = ChoiceMuted); Text("Signed in with ${user.provider}", color = ChoiceGreen, fontSize = 12.sp)
+                    // Shown only for a plan that is never charged. A "Free" label on an ordinary
+                    // account would read as a limitation rather than a fact.
+                    if (com.audiochoice.contracts.AccountPlans.isComplimentary(accountPlan)) {
+                        Spacer(Modifier.height(4.dp))
+                        Text(
+                            "Founder · free for life",
+                            color = ChoiceGreen,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.SemiBold,
+                        )
+                    }
+                }
             }
         }
         Spacer(Modifier.height(18.dp))

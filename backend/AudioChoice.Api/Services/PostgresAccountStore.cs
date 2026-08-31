@@ -216,6 +216,21 @@ public sealed class PostgresAccountStore(NpgsqlDataSource dataSource) : IAccount
         Execute(connection, null, "delete from user_sessions where user_id = $1;", userID);
     }
 
+    public Guid? FindUserIDByEmail(string email)
+    {
+        // Normalised the same way registration and sign-in do, so the address an operator types
+        // matches the stored one regardless of case or surrounding space.
+        var normalized = NormalizeEmail(email);
+        if (normalized is null) return null;
+        using var connection = dataSource.OpenConnection();
+        using var command = new NpgsqlCommand(
+            "select id from users where email = $1;", connection);
+        command.Parameters.AddWithValue(normalized);
+        using var reader = command.ExecuteReader();
+        return reader.Read() ? reader.GetGuid(0) : null;
+    }
+
+
     private static AuthResponse CreateSession(
         NpgsqlConnection connection, NpgsqlTransaction transaction, AuthUser user)
     {

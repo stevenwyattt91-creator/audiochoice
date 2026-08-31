@@ -699,6 +699,34 @@ app.MapPost("/v1/admin/accounts/{userID:guid}/entitlements", (
     catch (ArgumentException error) { return Results.BadRequest(new { error = error.Message }); }
 });
 
+// Founders are the beta testers, given full access permanently at no charge. Kept as its own
+// endpoint rather than a generic grant so the plan, the source and the absence of an expiry cannot be
+// typed wrongly: an expiry entered by mistake would produce access that quietly lapses months later.
+app.MapPost("/v1/admin/founders", (
+    FounderGrantRequest request,
+    HttpContext context,
+    IAccountStore accounts,
+    IEntitlementStore entitlements) =>
+{
+    if (!IsConfiguredApiToken(context, app.Configuration)) return Results.Unauthorized();
+    var userID = accounts.FindUserIDByEmail(request.Email);
+    if (userID is null)
+    {
+        // Named plainly. This is an operator tool, not a public endpoint, so there is nothing to
+        // disclose by saying the address is unknown -- and saying otherwise would leave someone
+        // believing they had granted access they had not.
+        return Results.NotFound(new { error = "No account was found for that email address." });
+    }
+    var granted = entitlements.Grant(userID.Value, new EntitlementGrantRequest(
+        Plan: AccountPlans.Founder,
+        Source: AccountPlans.Founder,
+        // No expiry. The store treats null as never expiring and prefers it over any dated grant,
+        // so a founder who later subscribes by accident is still read as a founder.
+        ExpiresAt: null,
+        ExternalReference: null));
+    return Results.Ok(granted);
+});
+
 app.MapPost("/v1/companion/transfers", async (
     CompanionTransferCreateRequest request,
     HttpContext context,
