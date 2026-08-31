@@ -392,9 +392,13 @@ struct PlayerScreen: View {
     var body: some View {
         GeometryReader { geometry in
             VStack(spacing: 0) {
-                HStack {
-                    Image(systemName: "chevron.down").font(.title3.bold())
-                    Spacer()
+                // The book is centred by stacking, not by balancing it between two Spacers.
+                // The row used to open with a decorative chevron that did nothing -- no Button,
+                // no action -- and its only real job was to occupy the leading edge so the
+                // Spacers either side of the book landed it in the middle. Removing it from the
+                // old layout would have dragged the book off-centre, so the centring no longer
+                // depends on anything sitting opposite.
+                ZStack {
                     // An open book invites opening the reader; adding one invites attaching
                     // an EPUB. The reader's own close button sits in this same position so
                     // the icon does not jump when toggling between the two.
@@ -410,13 +414,16 @@ struct PlayerScreen: View {
                     } else {
                         Image(systemName: "waveform").font(.title2).foregroundStyle(ACTheme.accent)
                     }
-                    Spacer()
-                    Menu {
-                        Button("15 minutes") { setSleepTimer(minutes: 15) }
-                        Button("30 minutes") { setSleepTimer(minutes: 30) }
-                        Button("60 minutes") { setSleepTimer(minutes: 60) }
-                        Button("Turn off", role: .destructive) { sleepTask?.cancel() }
-                    } label: { Image(systemName: "timer").font(.title2) }
+                    HStack {
+                        Spacer()
+                        Menu {
+                            Button("15 minutes") { setSleepTimer(minutes: 15) }
+                            Button("30 minutes") { setSleepTimer(minutes: 30) }
+                            Button("60 minutes") { setSleepTimer(minutes: 60) }
+                            Button("Turn off", role: .destructive) { sleepTask?.cancel() }
+                        } label: { Image(systemName: "timer").font(.title2) }
+                        .accessibilityLabel("Sleep timer")
+                    }
                 }
                 .padding(.top, 8)
 
