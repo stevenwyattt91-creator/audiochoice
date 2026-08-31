@@ -2482,7 +2482,23 @@ private fun PlayerScreen(
         )
         Spacer(Modifier.height(10.dp))
         BookArtwork(state.coverPath, Modifier.fillMaxWidth(.86f).aspectRatio(1f))
-        Spacer(Modifier.height(20.dp))
+        Spacer(Modifier.height(12.dp))
+        // Matches iOS, which puts the chapter between the cover and the scrubber and falls back
+        // to "Audiobook" when a file carries no chapter marks. Held to one line because this
+        // column does not scroll: a wrapped chapter title would push the transport controls off
+        // the bottom edge on a small screen, which is the failure a listener just reported on
+        // the other platform.
+        Text(
+            currentChapter?.title?.takeIf { it.isNotBlank() } ?: "Audiobook",
+            color = ChoiceMuted,
+            fontSize = 15.sp,
+            fontWeight = FontWeight.SemiBold,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            textAlign = TextAlign.Center,
+            modifier = Modifier.fillMaxWidth(.86f),
+        )
+        Spacer(Modifier.height(8.dp))
         // Filtering silently doing nothing is worse than an explicit warning:
         // the listener would otherwise assume their filters were active.
         if (state.filterAvailability == FilterAvailability.UNAVAILABLE) {
