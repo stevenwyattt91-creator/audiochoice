@@ -9,6 +9,22 @@ data class RegisterRequest(val email: String, val password: String, val displayN
 data class LoginRequest(val email: String, val password: String)
 
 @Serializable
+data class PasswordResetRequest(val email: String)
+
+/**
+ * The emailed six-digit code and the password to set.
+ *
+ * The field is named `token` because that is what the server calls it, and renaming it here would
+ * silently stop matching.
+ */
+@Serializable
+data class PasswordResetConfirmRequest(val token: String, val newPassword: String)
+
+/** What the reset endpoints answer with: an acknowledgement, not a session. */
+@Serializable
+data class AuthActionResponse(val status: String? = null)
+
+@Serializable
 data class ExternalLoginRequest(
     val provider: String,
     val authorizationCode: String = "",

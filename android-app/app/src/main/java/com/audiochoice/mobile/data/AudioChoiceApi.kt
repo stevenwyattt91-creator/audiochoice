@@ -48,6 +48,18 @@ class AudioChoiceApi(private val json: Json) {
 
     suspend fun register(request: RegisterRequest): AuthResponse = post("/v1/auth/register", request)
     suspend fun login(request: LoginRequest): AuthResponse = post("/v1/auth/login", request)
+
+    /**
+     * Asks for a reset code to be emailed.
+     *
+     * Accepted whether or not the address has an account, deliberately: answering differently would
+     * tell anyone who asks which addresses are registered here.
+     */
+    suspend fun requestPasswordReset(email: String): AuthActionResponse =
+        post("/v1/auth/password-reset/request", PasswordResetRequest(email))
+
+    suspend fun confirmPasswordReset(code: String, newPassword: String): AuthActionResponse =
+        post("/v1/auth/password-reset/confirm", PasswordResetConfirmRequest(code, newPassword))
     suspend fun googleSignIn(identityToken: String): AuthResponse =
         post("/v1/auth/external", ExternalLoginRequest("google", identityToken = identityToken))
 
