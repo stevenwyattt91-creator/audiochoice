@@ -65,16 +65,39 @@ struct ParentalControlsScreen: View {
 }
 
 struct FAQScreen: View {
+    /// Starts from the bundled copy so the screen has answers on the first frame and offline, then
+    /// prefers the served one when it arrives.
+    @State private var faq = FaqLoader.bundled
+
     var body: some View {
         List {
-            Section("Importing") { faq("How do I add an audiobook?", "Use Import to choose your audiobook. Audio stays in the app’s private storage on your device.") }
-            Section("Filters") { faq("How do filters work?", "AudioChoice uses a saved scan to skip or mute the categories you select. Your choices can be protected with a parental-controls PIN.") }
-            Section("Your library") { faq("Will I lose my library when local audio is removed?", "No. Your book identity and last saved listening time follow your account. Re-import the audio to listen again.") }
-            Section("Privacy") { faq("Is my audiobook public?", "No. Audio stays private. The app uses a fingerprint to find reusable scan results before uploading anything for a new scan.") }
-        }.navigationTitle("FAQs").acScreen()
+            ForEach(faq.sections) { section in
+                Section(section.title) {
+                    ForEach(section.items) { item in
+                        VStack(alignment: .leading, spacing: 7) {
+                            Text(item.question).font(.headline)
+                            Text(item.answer).foregroundStyle(ACTheme.secondaryText)
+                        }
+                        .padding(.vertical, 6)
+                    }
+                }
+            }
+        }
+        .navigationTitle("FAQs")
+        .acScreen()
+        .task {
+            // Compared by version rather than assumed newer: an app that has not been updated should
+            // still show the better answers, and a server that has somehow fallen behind should not
+            // replace them with worse ones. An empty reply is ignored for the same reason.
+            if let served = await FaqLoader.fetch(),
+               !served.sections.isEmpty,
+               served.version >= faq.version {
+                faq = served
+            }
+        }
     }
-    private func faq(_ question: String, _ answer: String) -> some View { VStack(alignment: .leading, spacing: 7) { Text(question).font(.headline); Text(answer).foregroundStyle(ACTheme.secondaryText) }.padding(.vertical, 6) }
 }
+
 
 struct SupportFormScreen: View {
     @State private var subject = ""

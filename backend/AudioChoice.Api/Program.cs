@@ -699,6 +699,39 @@ app.MapPost("/v1/admin/accounts/{userID:guid}/entitlements", (
     catch (ArgumentException error) { return Results.BadRequest(new { error = error.Message }); }
 });
 
+// Founders are the beta testers, given full access permanently at no charge. Kept as its own
+// endpoint rather than a generic grant so the plan, the source and the absence of an expiry cannot be
+// typed wrongly: an expiry entered by mistake would produce access that quietly lapses months later.
+// Public and unauthenticated: it is help text, it contains nothing about anyone, and the screen that
+// shows it has to work before a listener can sign in as much as after. Cached so a version that has
+// not changed costs nothing to ask for.
+app.MapGet("/v1/faq", () => Results.Ok(FaqContent.Current));
+
+app.MapPost("/v1/admin/founders", (
+    FounderGrantRequest request,
+    HttpContext context,
+    IAccountStore accounts,
+    IEntitlementStore entitlements) =>
+{
+    if (!IsConfiguredApiToken(context, app.Configuration)) return Results.Unauthorized();
+    var userID = accounts.FindUserIDByEmail(request.Email);
+    if (userID is null)
+    {
+        // Named plainly. This is an operator tool, not a public endpoint, so there is nothing to
+        // disclose by saying the address is unknown -- and saying otherwise would leave someone
+        // believing they had granted access they had not.
+        return Results.NotFound(new { error = "No account was found for that email address." });
+    }
+    var granted = entitlements.Grant(userID.Value, new EntitlementGrantRequest(
+        Plan: AccountPlans.Founder,
+        Source: AccountPlans.Founder,
+        // No expiry. The store treats null as never expiring and prefers it over any dated grant,
+        // so a founder who later subscribes by accident is still read as a founder.
+        ExpiresAt: null,
+        ExternalReference: null));
+    return Results.Ok(granted);
+});
+
 app.MapPost("/v1/companion/transfers", async (
     CompanionTransferCreateRequest request,
     HttpContext context,
@@ -2096,17 +2129,40 @@ app.MapPut("/v1/library/{bookID:guid}/filter-settings", (
 // over-zealous skip becomes something anyone can act on, so it accepts generously: a
 // malformed report is dropped with 400 rather than retried, because the listener has moved
 // on and a queued retry would report the wrong moment.
-app.MapPost("/v1/filter-reports", (
+app.MapPost("/v1/filter-reports", async (
     FilterReportRequest request,
     HttpContext context,
-    IFilterReportStore reports) =>
+    IFilterReportStore reports,
+    ITransactionalEmailSender emailSender,
+    CancellationToken cancellationToken) =>
 {
     var user = CurrentUser(context);
     if (user is null) return Results.Unauthorized();
     var report = reports.Record(user.ID, request);
-    return report is null
-        ? Results.BadRequest(new { error = "A fingerprint and a playback position are required." })
-        : Results.Created($"/v1/filter-reports/{report.ID}", report);
+    if (report is null)
+    {
+        return Results.BadRequest(new { error = "A fingerprint and a playback position are required." });
+    }
+
+    // Recorded first, then announced. A listener's report is the thing worth keeping, and until now
+    // nothing told anyone it had arrived: no email, and neither portal reads the table, so reports
+    // accumulated unseen.
+    //
+    // A failed send must not lose the report or report failure to the listener. They did their part,
+    // the row exists, and triage can still find it through the admin endpoint.
+    try
+    {
+        await emailSender.SendFilterReportAlert(report, cancellationToken);
+    }
+    catch (Exception error)
+    {
+        app.Logger.LogError(
+            error,
+            "A filter report was recorded but the alert could not be emailed. Report {ReportID}.",
+            report.ID);
+    }
+
+    return Results.Created($"/v1/filter-reports/{report.ID}", report);
 });
 
 app.MapGet("/v1/admin/filter-reports", (

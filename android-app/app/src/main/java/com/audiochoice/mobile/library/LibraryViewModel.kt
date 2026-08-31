@@ -28,6 +28,14 @@ data class LibraryUiState(
      * have made the decision, and repeating it reads as nagging.
      */
     val ebooksWithoutFilterResults: Set<String> = emptySet(),
+    /**
+     * The account's plan, or null before it is known.
+     *
+     * Loaded here because this is the one place that already runs on sign-in with the account's
+     * token. It is read-only display: what the plan permits is decided by the server, never by
+     * whatever this happens to hold.
+     */
+    val accountPlan: String? = null,
     val error: String? = null,
 )
 
@@ -245,6 +253,7 @@ class LibraryViewModel(
                 // worth delaying the whole library for, and a failure to read it must leave the
                 // library intact rather than empty.
                 refreshEbookFilterState(it.first)
+                refreshAccountPlan(accessToken)
             }
                 .onFailure {
                     if (cachedBooks.isEmpty()) {
@@ -280,6 +289,19 @@ class LibraryViewModel(
 
         val known = books.map { it.fingerprint.sha256.lowercase() }.toSet()
         return books + narrated.filter { it.fingerprint.sha256.lowercase() !in known }
+    }
+
+    /**
+     * Reads the account's plan, for display only.
+     *
+     * Best-effort and after the library is published: a listener's books must not be withheld because
+     * an entitlement lookup was slow or failed.
+     */
+    private fun refreshAccountPlan(accessToken: String) {
+        viewModelScope.launch {
+            val plan = runCatching { api.accountAccess(accessToken).plan }.getOrNull() ?: return@launch
+            mutableState.value = mutableState.value.copy(accountPlan = plan)
+        }
     }
 
     /**

@@ -18,6 +18,16 @@ public interface IAccountStore
     bool ResetPassword(string token, string newPassword);
     void Logout(string accessToken);
     void LogoutAll(Guid userID);
+
+    /// <summary>
+    /// The account for an email address, or null when there is none.
+    /// </summary>
+    /// <remarks>
+    /// Exists so an operator can act on the identifier they have. Every other administrative call
+    /// takes a user id, which means reading one out of the database first -- and a mistyped id acts
+    /// on whichever account it happens to match, silently.
+    /// </remarks>
+    Guid? FindUserIDByEmail(string email);
 }
 
 public sealed record RegistrationResult(
@@ -166,6 +176,20 @@ public sealed class FileAccountStore : IAccountStore
             Persist();
         }
     }
+
+    public Guid? FindUserIDByEmail(string email)
+    {
+        var normalized = NormalizeEmail(email);
+        if (normalized is null) return null;
+        lock (_lock)
+        {
+            return _state.Accounts
+                .FirstOrDefault(value =>
+                    string.Equals(value.Email, normalized, StringComparison.OrdinalIgnoreCase))
+                ?.ID;
+        }
+    }
+
 
     public bool VerifyEmail(string token)
     {

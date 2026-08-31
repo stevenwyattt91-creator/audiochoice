@@ -274,6 +274,14 @@ class AudioChoiceApi(private val json: Json) {
      * the narration tier store adds none of its own: a failure here is answered by the grace
      * period, not by asking again immediately.
      */
+    /**
+     * The served help content.
+     *
+     * Unauthenticated, because the help screen has to work before a listener can sign in as much as
+     * after, and it contains nothing about anyone.
+     */
+    suspend fun faq(): FaqResponse = request("GET", "/v1/faq", null, null)
+
     suspend fun accountAccess(accessToken: String): AccountAccessResponse =
         request("GET", "/v1/account/access", null, accessToken)
 

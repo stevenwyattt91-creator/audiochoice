@@ -12,6 +12,30 @@ import kotlinx.serialization.Serializable
  * stale receipt cannot mint premium synthesis for itself.
  */
 @Serializable
+/**
+ * Plan names the server sends in [AccountAccessResponse.plan].
+ *
+ * Kept beside the contract so both apps read the same spelling. Compared case-insensitively, because
+ * a plan name travels through JSON and a database column and is too important to hinge on casing
+ * surviving that.
+ */
+object AccountPlans {
+    const val FREE = "free"
+
+    /**
+     * A beta tester, given full access at no charge permanently.
+     *
+     * Free rather than discounted on purpose. A reduced price would need a second subscription
+     * product in both stores, logic choosing which to offer, and a server check that a cheap receipt
+     * belongs to a real founder -- the product exists in the store whether or not the app shows it,
+     * so without that check anyone could buy it. That is a permanent cost for a handful of accounts.
+     */
+    const val FOUNDER = "founder"
+
+    /** Whether this plan means the account is never charged. */
+    fun isComplimentary(plan: String?): Boolean = plan?.trim()?.equals(FOUNDER, ignoreCase = true) == true
+}
+
 data class AccountAccessResponse(
     val isActive: Boolean = false,
     val plan: String = "",
