@@ -617,6 +617,12 @@ struct PlayerScreen: View {
 
 struct NowPlayingScreen: View {
     @ObservedObject private var playback = AudioPlaybackManager.shared
+    /// Whether reopening the last book has already been tried in this process.
+    ///
+    /// One attempt, not one per appearance: a book whose file has since gone cannot be
+    /// loaded, and retrying on every visit to the tab would re-read the library each time to
+    /// reach the same answer.
+    @State private var hasTriedRestore = false
 
     var body: some View {
         Group {
@@ -628,6 +634,20 @@ struct NowPlayingScreen: View {
             }
         }
         .navigationBarHidden(true)
+        .task { restoreLastBookIfNeeded() }
+    }
+
+    /// Puts the last book back after the app was terminated in the background.
+    ///
+    /// The Library's Continue card already knew which book it was, but it only acts when
+    /// tapped, so a listener who went straight to the Player tab was told nothing was
+    /// playing while the position sat on disk. `load` restores that position itself and does
+    /// not begin playing, which is right here: the book comes back paused, where it was.
+    private func restoreLastBookIfNeeded() {
+        guard playback.currentRecord == nil, !hasTriedRestore else { return }
+        hasTriedRestore = true
+        guard let record = AudioPlaybackManager.lastPlayedRecord() else { return }
+        playback.load(record)
     }
 }
 

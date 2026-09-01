@@ -178,6 +178,25 @@ class PlayerViewModel(
     fun lastOpenBookID(): String? = localProgress.getString(LAST_BOOK_ID_KEY, null)
 
     /**
+     * Work that must happen once per process. Lives here so it inherits this object's
+     * lifetime: kept across a configuration change, gone when the process is recreated.
+     */
+    private val oncePerProcess = ProcessOnceClaims()
+
+    /** True the first time this process reconciles [userID]'s stored progress. */
+    fun beginAccountProgressHydration(userID: String): Boolean =
+        oncePerProcess.claim("hydrate", userID)
+
+    /**
+     * True the first time this process reopens [userID]'s last book.
+     *
+     * Claimed rather than inferred from `book == null` so a listener who closed their book
+     * does not have it reopened underneath them on the next recomposition.
+     */
+    fun beginLastOpenBookRestore(userID: String): Boolean =
+        oncePerProcess.claim("restore", userID)
+
+    /**
      * Current playback position. Falls back to the last value the polling loop
      * observed so a momentarily disconnected controller cannot report 0 and
      * cause a progress checkpoint to overwrite a real position with the start

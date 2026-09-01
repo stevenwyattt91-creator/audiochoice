@@ -504,7 +504,6 @@ private fun LibraryShell(
     var showOnboarding by rememberSaveable(user.id) {
         mutableStateOf(!onboardingPreferences.getBoolean(onboardingKey, false))
     }
-    var progressHydrated by rememberSaveable(user.id) { mutableStateOf(false) }
     // The playback notification and lock-screen controls need POST_NOTIFICATIONS
     // on API 33+. Playback still works if the listener declines, so a denial is
     // deliberately not treated as an error.
@@ -528,26 +527,32 @@ private fun LibraryShell(
         // publishes before the network call finishes; those books carry stale
         // playback positions. Waiting for `loading` to clear means hydration
         // reconciles against real server values, not against a cached 0.
-        if (!libraryState.loaded || libraryState.loading || progressHydrated) return@LaunchedEffect
-        progressHydrated = true
+        if (!libraryState.loaded || libraryState.loading) return@LaunchedEffect
+        if (!player.beginAccountProgressHydration(user.id)) return@LaunchedEffect
         player.hydrateAccountProgress(
             books = libraryState.books,
             accessToken = accessToken,
             onPositionAvailable = library::updatePlaybackPosition,
             onSynced = { library.load(accessToken, user.id, force = true) },
         )
-        // Restore the last-open book into the player so the Player tab is not
-        // empty after a process restart. The position is recovered by open()
-        // through resumePositionMs, which reads the local SharedPreferences
-        // checkpoint written with commit() in saveProgressSync().
-        if (player.state.value.book == null) {
-            val lastBookID = player.lastOpenBookID()
-            if (lastBookID != null) {
-                libraryState.books.firstOrNull { it.id == lastBookID }?.let { book ->
-                    player.open(book, accessToken)
-                }
-            }
-        }
+    }
+    // Reopens the book that was open when the app was last alive, so coming back to a
+    // player Android killed in the background finds the book still there.
+    //
+    // Separate from the reconciliation above, and deliberately not waiting for `loading`
+    // to clear. This needs only the book's identity, which the cached snapshot already
+    // carries, and the position comes from the local checkpoint: resumePositionMs takes
+    // maxOf(local, server), so a cached row's stale 0 cannot rewind anyone. Waiting for
+    // the network would leave a restored Player tab reading "Nothing is playing" for as
+    // long as the request took, which is the very thing being fixed.
+    LaunchedEffect(accessToken, libraryState.books) {
+        if (player.state.value.book != null) return@LaunchedEffect
+        val lastBookID = player.lastOpenBookID() ?: return@LaunchedEffect
+        val book = libraryState.books.firstOrNull { it.id == lastBookID } ?: return@LaunchedEffect
+        // Claimed only once there is really a book to open, so an early pass over an empty
+        // list does not spend the one attempt.
+        if (!player.beginLastOpenBookRestore(user.id)) return@LaunchedEffect
+        player.open(book, accessToken)
     }
     LaunchedEffect(accessToken) {
         importer.resumeActiveScan(context.contentResolver, accessToken)

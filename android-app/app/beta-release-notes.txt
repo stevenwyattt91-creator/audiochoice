@@ -1,3 +1,9 @@
+Your book is still there when you come back to the app
+- Pause a book, switch to another app, come back later, and the player kept the book and your place. Before this it could come back to the Player tab with nothing loaded
+- Android reclaims memory from apps left in the background, so the app can be shut down without you closing it. It looks the same when you return, which is why this read as the app losing your book
+- Your listening position was never lost, even before this fix. It is written to the device the moment you pause or leave the app. What went missing was only the app reopening the book for you
+- The book comes back paused, exactly where you left it, not playing
+
 The chapter you are on now shows in the player
 - It sits between the cover and the scrub bar, the same place it has always been on iOS
 - Books with no chapter marks in the file simply read "Audiobook", which is most loose MP3s
@@ -16,6 +22,6 @@ A short walkthrough on first sign-in
 - Four steps covering importing a book, the transfer tool site, filters, and attaching an ebook to read
 - It appears once. Everything it points at is reachable later from Profile
 
-Please re-import nothing for this build. It changes what the player shows, not how books are read.
+Nothing needs re-importing for this build.
 
 Report anything odd in Discord.
