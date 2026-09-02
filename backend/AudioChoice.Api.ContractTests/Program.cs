@@ -2203,6 +2203,98 @@ Assert(ExploreCatalog.IsAudibleProductIdentifier("B0BW2CCVQ2"), "A valid ASIN wa
         $"The narration migration must sort after {lastExisting}.");
 }
 
+
+// Bedrock takes a tool's input schema, and hands back the tool's arguments, as the SDK's
+// Document type rather than as JSON. The scanner's schema therefore survives a round trip
+// through another representation, and this is where it could quietly change shape without
+// failing: an enum flattened to a plain string, a bound dropped, an integer arriving as text.
+// The model would then answer in a shape slightly off from what the taxonomy accepts, the
+// unknown labels would be discarded, and the book would scan successfully having filtered
+// less than it should. So the real taxonomy goes through it, not a toy schema.
+var taxonomySchema = new System.Text.Json.Nodes.JsonObject
+{
+    ["type"] = "object",
+    ["additionalProperties"] = false,
+    ["required"] = new System.Text.Json.Nodes.JsonArray("events"),
+    ["properties"] = new System.Text.Json.Nodes.JsonObject
+    {
+        ["events"] = new System.Text.Json.Nodes.JsonObject
+        {
+            ["type"] = "array",
+            ["items"] = new System.Text.Json.Nodes.JsonObject
+            {
+                ["type"] = "object",
+                ["properties"] = new System.Text.Json.Nodes.JsonObject
+                {
+                    ["label"] = new System.Text.Json.Nodes.JsonObject
+                    {
+                        ["type"] = "string",
+                        ["enum"] = new System.Text.Json.Nodes.JsonArray(
+                            ContentTaxonomy.EnforcedLabels
+                                .Select(label => (System.Text.Json.Nodes.JsonNode)
+                                    System.Text.Json.Nodes.JsonValue.Create(label)!)
+                                .ToArray())
+                    },
+                    ["confidence"] = new System.Text.Json.Nodes.JsonObject
+                    {
+                        ["type"] = "number",
+                        ["minimum"] = 0,
+                        ["maximum"] = 1
+                    },
+                    ["startTime"] = new System.Text.Json.Nodes.JsonObject { ["type"] = "number" },
+                    ["safeDescription"] = new System.Text.Json.Nodes.JsonObject
+                    {
+                        ["type"] = "string",
+                        ["maxLength"] = 80
+                    },
+                    ["profanityWord"] = new System.Text.Json.Nodes.JsonObject
+                    {
+                        ["type"] = new System.Text.Json.Nodes.JsonArray("string", "null"),
+                        ["maxLength"] = 80
+                    },
+                    ["accepted"] = new System.Text.Json.Nodes.JsonObject { ["type"] = "boolean" }
+                }
+            }
+        }
+    }
+};
+var roundTripped = BedrockDocuments.ToJsonNode(BedrockDocuments.ToDocument(taxonomySchema));
+Assert(
+    roundTripped is not null &&
+        roundTripped.ToJsonString() == taxonomySchema.ToJsonString(),
+    "A scan schema did not survive conversion to the Bedrock Document type unchanged.");
+
+// Every label the taxonomy enforces has to still be offered to the model. One missing label
+// is one kind of content that can never be reported, for every book scanned on Bedrock.
+var roundTrippedLabels = roundTripped!["properties"]!["events"]!["items"]!["properties"]!
+    ["label"]!["enum"]!.AsArray().Select(node => node!.GetValue<string>()).ToArray();
+Assert(
+    roundTrippedLabels.SequenceEqual(ContentTaxonomy.EnforcedLabels),
+    "The taxonomy label enum was altered by the Bedrock Document conversion.");
+
+// The arguments a model sends back, in the shape the scanner deserializes.
+var reply = BedrockDocuments.ToDocument(
+    System.Text.Json.Nodes.JsonNode.Parse(
+        """
+        {"events":[{"label":"profanity_strong","startTime":12.5,"endTime":13,
+        "confidence":0.92,"safeDescription":"Profanity detected","profanityWord":"damn"}]}
+        """));
+var replyJson = BedrockDocuments.ToJsonNode(reply);
+Assert(
+    replyJson?["events"]?.AsArray().Count == 1 &&
+        replyJson["events"]![0]!["confidence"]!.GetValue<double>() == 0.92 &&
+        replyJson["events"]![0]!["label"]!.GetValue<string>() == "profanity_strong",
+    "A model reply did not survive conversion from the Bedrock Document type.");
+
+// A null must come back as a JSON null rather than as the string "null", which would reach
+// the taxonomy as a profanity word nobody said.
+var withNull = BedrockDocuments.ToJsonNode(BedrockDocuments.ToDocument(
+    System.Text.Json.Nodes.JsonNode.Parse("""{"profanityWord":null}""")));
+Assert(
+    withNull?["profanityWord"] is null,
+    "A null tool argument did not survive the Bedrock Document conversion as null.");
+
+
 Console.WriteLine("AudioChoice backend contract tests passed.");
 
 static string FindMigrationsDirectory()

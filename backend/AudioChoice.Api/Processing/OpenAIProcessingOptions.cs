@@ -45,6 +45,12 @@ public sealed class OpenAIProcessingOptions
     /// </remarks>
     public string AnalysisProvider { get; init; } = "openai";
 
+    /// <summary>
+    /// Which AWS region Bedrock is called in. Empty means the SDK resolves it as Polly's
+    /// client already does, from the environment or the instance's own configuration.
+    /// </summary>
+    public string BedrockRegion { get; init; } = string.Empty;
+
     public string AnalysisModel { get; init; } = "gpt-5.6-luna";
     public string SceneVerificationModel { get; init; } = "gpt-5.6-terra";
     public string SceneEscalationModel { get; init; } = "gpt-5.6-sol";

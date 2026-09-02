@@ -46,6 +46,21 @@ services:
       # scanner refuses to start otherwise rather than writing somewhere temporary.
       AudioChoice__TemporaryAudioStorage__BlobTranscriptEnabled: "true"
       AudioChoice__OpenAI__TranscriptionProvider: faster-whisper
+      # Classification transport. Left on OpenAI until Nova has been compared against saved
+      # results on books whose correct answer is already known. Switching is these four lines
+      # plus AWS credentials in lambda-worker.env; nothing else changes, because the scanner's
+      # judgement does not live in the transport.
+      #
+      # Bump ScannerVersion at the same time. Results are stored per edition and scanner
+      # version, so a new version writes new rows instead of overwriting the OpenAI ones,
+      # which is what makes the two comparable rather than one destroying the other.
+      #
+      # AudioChoice__OpenAI__AnalysisProvider: bedrock
+      # AudioChoice__OpenAI__BedrockRegion: us-east-1
+      # AudioChoice__OpenAI__AnalysisModel: amazon.nova-lite-v1:0
+      # AudioChoice__OpenAI__SceneVerificationModel: amazon.nova-pro-v1:0
+      # AudioChoice__OpenAI__SceneEscalationModel: amazon.nova-pro-v1:0
+      # AudioChoice__OpenAI__ScannerVersion: "4.0-nova"
       AudioChoice__OpenAI__FasterWhisperEndpoint: http://127.0.0.1:8001/
       # A single GPU chunk may take several minutes under load. The scanner now
       # applies this explicitly and no longer uses HttpClient's 100-second default.
