@@ -83,11 +83,19 @@ public sealed class BedrockConverseModelClient(
             }
             catch (Exception error) when (
                 (error is ThrottlingException or ModelTimeoutException or
-                     Amazon.BedrockRuntime.Model.InternalServerException) &&
+                     Amazon.BedrockRuntime.Model.InternalServerException or
+                     // "Model produced invalid sequence as part of ToolUse". The model, not the
+                     // request, produced something unusable, and it is sampled rather than
+                     // deterministic -- so asking again is the correct response and usually
+                     // works. Left out at first because it reads like a client error, which
+                     // cost a twelve-hour book at 91% analysed: every batch before it had
+                     // succeeded and the job failed on one malformed reply.
+                     ModelErrorException) &&
                 attempt < options.MaximumRetries)
             {
-                // Same rule as the OpenAI transport: repeat a rate limit or a server fault,
-                // never a rejected request. A malformed request repeated is rejected again.
+                // Same rule as the OpenAI transport: repeat a rate limit, a server fault, or a
+                // reply the model itself mangled. Never repeat a rejected request -- a
+                // malformed request repeated is rejected again.
                 var delay = TimeSpan.FromSeconds(Math.Pow(2, attempt));
                 logger.LogWarning(
                     "{SchemaName} retry {Attempt} on {Model} after {Delay} ({Error}).",
