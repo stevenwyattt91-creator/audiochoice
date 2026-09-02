@@ -16,15 +16,13 @@ How to use it
 -------------
 1. Snapshot what the current models produce, before changing anything:
 
-     scripts/compare-scanner-models.py snapshot --out before.json \\
-       --admin-token "$ADMIN" --email you@example.com --password '...'
+     scripts/compare-scanner-models.py snapshot --out before.json --admin-token "$ADMIN"
 
 2. Switch the scanner to the new models and restart it.
 
 3. Reanalyse the same editions and compare:
 
-     scripts/compare-scanner-models.py compare --baseline before.json \\
-       --admin-token "$ADMIN" --email you@example.com --password '...'
+     scripts/compare-scanner-models.py compare --baseline before.json --admin-token "$ADMIN"
 
 Read the result as: "missed" is content the previous models flagged and the new ones did not,
 which is the column that matters. "added" may be a genuine improvement or a false positive,
@@ -63,15 +61,26 @@ def call(api, path, token=None, body=None, method=None, lane_header=False):
         return json.loads(payload) if payload else None
 
 
-def sign_in(api, email, password):
-    return call(api, "/v1/auth/login", body={"email": email, "password": password})["accessToken"]
+def stored_result(api, admin_token, fingerprint):
+    """The stored result for this edition, read without causing any work.
 
-
-def stored_result(api, user_token, fingerprint):
-    """The result a listener would receive for this edition right now."""
-    response = call(api, "/v1/scans/requests", token=user_token,
-                    body={"fingerprint": fingerprint, "currentScannerVersion": None})
-    return (response or {}).get("result")
+    Deliberately not /v1/scans/requests. That route returns a result when one exists, but for
+    an edition holding a transcript and no result it queues a reanalysis and charges for it --
+    and it does not check that the caller owns the edition. Surveying nineteen editions
+    through it would have started paid jobs on every one that had not been analysed yet.
+    """
+    from urllib.parse import urlencode
+    query = urlencode({
+        "sha256": fingerprint["sha256"],
+        "fingerprintVersion": fingerprint["version"],
+        "fileSize": fingerprint["fileSize"],
+    })
+    try:
+        return call(api, f"/v1/admin/editions/result?{query}", token=admin_token)
+    except urllib.error.HTTPError as error:
+        if error.code == 404:
+            return None
+        raise
 
 
 def editions_with_transcripts(api, admin_token, limit):
@@ -136,13 +145,13 @@ def diff(before, after):
     return agreed, missed, unmatched_new
 
 
-def command_snapshot(args, api, user_token):
+def command_snapshot(args, api):
     editions = editions_with_transcripts(api, args.admin_token, args.limit)
     print(f"{len(editions)} edition(s) with a saved transcript\n")
     snapshot = {}
     for edition in editions:
         fingerprint = edition["fingerprint"]
-        result = stored_result(api, user_token, fingerprint)
+        result = stored_result(api, args.admin_token, fingerprint)
         if not result:
             print(f"  {describe(fingerprint)}: no stored result, skipped")
             continue
@@ -157,7 +166,7 @@ def command_snapshot(args, api, user_token):
     return 0
 
 
-def command_compare(args, api, user_token):
+def command_compare(args, api):
     with open(args.baseline) as handle:
         baseline = json.load(handle)
     print(f"{len(baseline)} edition(s) in the baseline\n")
@@ -207,7 +216,7 @@ def command_compare(args, api, user_token):
     print("\n" + "=" * 72)
     totals = {"agreed": 0, "missed": 0, "added": 0}
     for sha, before in baseline.items():
-        after = summarise(stored_result(api, user_token, before["fingerprint"]))
+        after = summarise(stored_result(api, args.admin_token, before["fingerprint"]))
         agreed, missed, added = diff(before, after)
         totals["agreed"] += len(agreed)
         totals["missed"] += len(missed)
@@ -244,9 +253,6 @@ def main():
     parser.add_argument("--api", default=os.environ.get("AUDIOCHOICE_API", DEFAULT_API))
     parser.add_argument("--admin-token", default=os.environ.get("AUDIOCHOICE_ADMIN_TOKEN"),
                         required=False, help="The configured AudioChoice:ApiToken.")
-    parser.add_argument("--email")
-    parser.add_argument("--password")
-    parser.add_argument("--user-token", default=os.environ.get("AUDIOCHOICE_TOKEN"))
     parser.add_argument("--owner-user-id", help="Account the reanalysis is attributed to.")
     parser.add_argument("--out", default="scanner-baseline.json")
     parser.add_argument("--baseline", default="scanner-baseline.json")
@@ -257,15 +263,12 @@ def main():
 
     if not args.admin_token:
         parser.error("Supply --admin-token, or set AUDIOCHOICE_ADMIN_TOKEN.")
-    user_token = args.user_token
-    if not user_token:
-        if not (args.email and args.password):
-            parser.error("Supply --user-token, or --email and --password.")
-        user_token = sign_in(args.api, args.email, args.password)
-
+    # Only the admin token is needed. Everything here reads results through the admin
+    # endpoint and queues reanalysis through the admin endpoint, so there is no reason to ask
+    # for an account password as well.
     if args.command == "snapshot":
-        return command_snapshot(args, args.api, user_token)
-    return command_compare(args, args.api, user_token)
+        return command_snapshot(args, args.api)
+    return command_compare(args, args.api)
 
 
 if __name__ == "__main__":
