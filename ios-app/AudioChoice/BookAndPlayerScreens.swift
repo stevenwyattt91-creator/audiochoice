@@ -254,7 +254,9 @@ private struct LegacyPlayerScreen: View {
                 HStack {
                     Text(time(playback.position))
                     Spacer()
-                    Text("-\(time(max(playback.duration - playback.position, 0)))")
+                    // Real time left, not the book's remaining length: at 1.5x this answers when the
+                    // listener will finish rather than counting the same figure down faster.
+                    Text("-\(time(ListeningTime.remainingRealSeconds(remainingBookSeconds: playback.duration - playback.position, rate: playback.playbackRate)))")
                 }
                 .font(.caption)
                 .foregroundStyle(ACTheme.secondaryText)
@@ -488,7 +490,9 @@ struct PlayerScreen: View {
                     HStack {
                         Text(time(playback.position))
                         Spacer()
-                        Text("-\(time(max(playback.duration - playback.position, 0)))")
+                        // Real time left, not the book's remaining length: at 1.5x this answers when the
+                        // listener will finish rather than counting the same figure down faster.
+                        Text("-\(time(ListeningTime.remainingRealSeconds(remainingBookSeconds: playback.duration - playback.position, rate: playback.playbackRate)))")
                     }
                     .font(.caption)
                     .foregroundStyle(ACTheme.secondaryText)

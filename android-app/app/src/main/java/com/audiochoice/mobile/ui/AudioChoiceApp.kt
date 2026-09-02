@@ -95,6 +95,7 @@ import com.audiochoice.mobile.library.LibraryShelves
 import com.audiochoice.mobile.library.LibraryViewModel
 import com.audiochoice.mobile.player.PlayerViewModel
 import com.audiochoice.mobile.player.FilterAvailability
+import com.audiochoice.mobile.player.ListeningTime
 import com.audiochoice.mobile.player.PlayerUiState
 import com.audiochoice.mobile.player.enabledScanEvents
 import com.audiochoice.mobile.reader.ReaderMask
@@ -2588,7 +2589,18 @@ private fun PlayerScreen(
             }
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                 Text(formatTime(displayedPositionMs.coerceIn(0L, durationMs)), color = ChoiceMuted, fontSize = 12.sp)
-                Text("-${formatTime((durationMs - displayedPositionMs).coerceAtLeast(0))}", color = ChoiceMuted, fontSize = 12.sp)
+                // Real time left, not the book's remaining length: at 1.5x this answers when the
+                // listener will finish rather than counting the same figure down faster.
+                Text(
+                    "-${formatTime(
+                        ListeningTime.remainingRealMs(
+                            remainingBookMs = (durationMs - displayedPositionMs).coerceAtLeast(0),
+                            speed = state.speed,
+                        ),
+                    )}",
+                    color = ChoiceMuted,
+                    fontSize = 12.sp,
+                )
             }
             Spacer(Modifier.height(24.dp))
             Row(

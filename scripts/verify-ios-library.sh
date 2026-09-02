@@ -18,6 +18,7 @@ swiftc -O -o "$workspace/librarychecks" \
   "$sources/CloudScanModels.swift" \
   "$sources/ReaderSync.swift" \
   "$sources/BookCompletion.swift" \
+  "$sources/ListeningTime.swift" \
   "$sources/MobileModels.swift"
 
 # UserDefaults needs somewhere to write, and each run should start clean so a stored

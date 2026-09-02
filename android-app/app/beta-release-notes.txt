@@ -1,3 +1,8 @@
+The time left now means real time, not book time
+- Pick 1.25x and the remaining figure becomes how long the rest of the book will actually take you. Change to 1.5x and it updates again
+- Before this it was the book's own remaining length, so it counted down faster at a higher speed but never told you when you would finish
+- The elapsed figure on the left is unchanged. That is your place in the book, not time spent
+
 Your book is still there when you come back to the app
 - Pause a book, switch to another app, come back later, and the player kept the book and your place. Before this it could come back to the Player tab with nothing loaded
 - Android reclaims memory from apps left in the background, so the app can be shut down without you closing it. It looks the same when you return, which is why this read as the app losing your book
