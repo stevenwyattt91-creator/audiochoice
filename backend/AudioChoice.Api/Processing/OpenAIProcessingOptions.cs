@@ -34,6 +34,23 @@ public sealed class OpenAIProcessingOptions
     public string ApiKey { get; init; } = string.Empty;
     public string BaseURL { get; init; } = "https://api.openai.com/v1/";
     public string TranscriptionModel { get; init; } = "whisper-1";
+    /// <summary>
+    /// Which service the three analysis models are reached through: "openai" or "bedrock".
+    /// </summary>
+    /// <remarks>
+    /// Separate from the model names on purpose. The tier names below say which model does
+    /// which job; this says who is asked. That split is what lets a tier move to a different
+    /// vendor by configuration, and it is why the checkpoint cache keys on the model name --
+    /// answers from one model are never reused for another.
+    /// </remarks>
+    public string AnalysisProvider { get; init; } = "openai";
+
+    /// <summary>
+    /// Which AWS region Bedrock is called in. Empty means the SDK resolves it as Polly's
+    /// client already does, from the environment or the instance's own configuration.
+    /// </summary>
+    public string BedrockRegion { get; init; } = string.Empty;
+
     public string AnalysisModel { get; init; } = "gpt-5.6-luna";
     public string SceneVerificationModel { get; init; } = "gpt-5.6-terra";
     public string SceneEscalationModel { get; init; } = "gpt-5.6-sol";

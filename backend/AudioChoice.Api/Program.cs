@@ -1,3 +1,4 @@
+using Amazon.BedrockRuntime;
 using System.Security.Cryptography;
 using System.Globalization;
 using System.Text.Json;
@@ -333,10 +334,19 @@ builder.Services.AddSingleton(openAIOptions);
 
 if (openAIOptions.WorkerEnabled)
 {
-    if (string.IsNullOrWhiteSpace(openAIOptions.ApiKey))
+    var usesBedrockAnalysis = string.Equals(
+        openAIOptions.AnalysisProvider, "bedrock", StringComparison.OrdinalIgnoreCase);
+    var usesOpenAITranscription = !string.Equals(
+        openAIOptions.TranscriptionProvider, "faster-whisper", StringComparison.OrdinalIgnoreCase);
+    // Required only by whatever actually calls OpenAI. A worker transcribing on the local GPU
+    // and classifying on Bedrock needs no OpenAI account, and demanding a key it will never
+    // use would refuse to start over a setting that does not apply.
+    if (string.IsNullOrWhiteSpace(openAIOptions.ApiKey) &&
+        (!usesBedrockAnalysis || usesOpenAITranscription))
     {
         throw new InvalidOperationException(
-            "AudioChoice:OpenAI:ApiKey is required when the scan worker is enabled.");
+            "AudioChoice:OpenAI:ApiKey is required when the scan worker uses OpenAI for " +
+            "transcription or content analysis.");
     }
 
     if (openAIOptions.MaximumRetries < 0 ||
@@ -374,10 +384,35 @@ if (openAIOptions.WorkerEnabled)
                 services.GetRequiredService<ILogger<OpenAITranscriptionProvider>>()));
     builder.Services.AddSingleton<ConcurrentChunkTranscriber>();
 
+    // How the models are reached. The scanner's judgement does not live here: every policy
+    // that decides what a listener has removed stays in OpenAIContentAnalysisProvider, and
+    // only the transport is selected. That is what makes a vendor change configuration.
+    if (usesBedrockAnalysis)
+    {
+        builder.Services.AddSingleton<IAmazonBedrockRuntime>(_ =>
+            string.IsNullOrWhiteSpace(openAIOptions.BedrockRegion)
+                ? new AmazonBedrockRuntimeClient()
+                : new AmazonBedrockRuntimeClient(
+                    Amazon.RegionEndpoint.GetBySystemName(openAIOptions.BedrockRegion)));
+        builder.Services.AddSingleton<IAnalysisModelClient>(services =>
+            new BedrockConverseModelClient(
+                services.GetRequiredService<IAmazonBedrockRuntime>(),
+                openAIOptions,
+                services.GetRequiredService<ILogger<BedrockConverseModelClient>>()));
+    }
+    else
+    {
+        builder.Services.AddSingleton<IAnalysisModelClient>(services =>
+            new OpenAIResponsesModelClient(
+                services.GetRequiredService<IHttpClientFactory>()
+                    .CreateClient("OpenAIProcessing"),
+                openAIOptions,
+                services.GetRequiredService<ILogger<OpenAIResponsesModelClient>>()));
+    }
+
     builder.Services.AddSingleton<IContentAnalysisProvider>(services =>
         new OpenAIContentAnalysisProvider(
-            services.GetRequiredService<IHttpClientFactory>()
-                .CreateClient("OpenAIProcessing"),
+            services.GetRequiredService<IAnalysisModelClient>(),
             openAIOptions,
             services.GetRequiredService<AudioChoiceDataPaths>(),
             services.GetRequiredService<ILogger<OpenAIContentAnalysisProvider>>()));
@@ -422,6 +457,17 @@ app.Logger.LogInformation(
     openAIOptions.FasterWhisperEndpoint,
     openAIOptions.FasterWhisperTimeoutSeconds,
     openAIOptions.ProcessingLane);
+app.Logger.LogInformation(
+    "Analysis provider {AnalysisProvider}{Region}; first pass {AnalysisModel}; " +
+    "verification {VerificationModel}; escalation {EscalationModel}; scanner {ScannerVersion}",
+    openAIOptions.AnalysisProvider,
+    string.IsNullOrWhiteSpace(openAIOptions.BedrockRegion)
+        ? string.Empty
+        : $" in {openAIOptions.BedrockRegion}",
+    openAIOptions.AnalysisModel,
+    openAIOptions.SceneVerificationModel,
+    openAIOptions.SceneEscalationModel,
+    openAIOptions.ScannerVersion);
 
 static string ScanLane(HttpContext context) =>
     string.Equals(

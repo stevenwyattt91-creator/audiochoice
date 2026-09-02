@@ -220,6 +220,28 @@ check("its evidence falls back to the displayed title",
       decoded?.first?.evidenceTitle == "Legacy")
 
 print("")
+print("Time remaining at a chosen speed")
+// The same expectations Android's ListeningTimeTest pins, so a change to one platform's
+// arithmetic that is not made to the other is caught here rather than by a listener
+// comparing two devices.
+check("normal speed leaves the book's remaining length untouched",
+      ListeningTime.remainingRealSeconds(remainingBookSeconds: 3600, rate: 1) == 3600)
+check("an hour takes forty eight minutes at 1.25x",
+      ListeningTime.remainingRealSeconds(remainingBookSeconds: 3600, rate: 1.25) == 2880)
+check("an hour takes forty minutes at 1.5x",
+      ListeningTime.remainingRealSeconds(remainingBookSeconds: 3600, rate: 1.5) == 2400)
+check("an hour takes half an hour at 2x",
+      ListeningTime.remainingRealSeconds(remainingBookSeconds: 3600, rate: 2) == 1800)
+check("slowing a narrator down leaves longer to listen",
+      ListeningTime.remainingRealSeconds(remainingBookSeconds: 3600, rate: 0.75) == 4800)
+check("a finished book has nothing left at any speed",
+      ListeningTime.remainingRealSeconds(remainingBookSeconds: 0, rate: 2) == 0)
+check("a rate of zero reads as normal rather than dividing by it",
+      ListeningTime.remainingRealSeconds(remainingBookSeconds: 3600, rate: 0) == 3600)
+check("a duration that is not a number reports nothing left",
+      ListeningTime.remainingRealSeconds(remainingBookSeconds: .nan, rate: 1) == 0)
+
+print("")
 if failures == 0 {
     print("All library checks passed.")
 } else {

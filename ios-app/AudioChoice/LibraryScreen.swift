@@ -83,7 +83,7 @@ struct LibraryScreen: View {
 
     private var continueRecord: LibraryBookRecord? {
         guard !records.isEmpty else { return nil }
-        if let lastID = UserDefaults.standard.string(forKey: "lastPlayedBookID"),
+        if let lastID = UserDefaults.standard.string(forKey: AudioPlaybackManager.lastPlayedBookIDKey),
            let match = records.first(where: { $0.id.uuidString == lastID }) { return match }
         return records.max { AudioPlaybackManager.savedPosition(for: $0.id) < AudioPlaybackManager.savedPosition(for: $1.id) }
     }

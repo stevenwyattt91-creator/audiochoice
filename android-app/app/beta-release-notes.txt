@@ -1,15 +1,32 @@
-Runtime and cover art now come from the audiobook file itself
-- Fixes books importing with a title, author, narrator and chapters but no runtime and no cover
-- Those two groups were read by different code. The title and chapters are parsed from the file directly; the runtime and cover came from an Android helper that needs a seekable file and silently gave nothing when it could not open one
-- Runtime now comes from the file's own movie header, which every M4B has
-- Cover art now comes from the same part of the file the title and narrator already came from, so artwork arrives wherever those do
-- This also fixes missing covers in Explore. The upload only ran when a cover had been read, so a cover that failed to read was never sent anywhere
-- Please re-import any book showing no runtime or cover. It is quick and does not re-run the scan: editions are matched on the file's hash and size, so the existing scan is reused
-Also fixed
-- A book with a very large embedded cover could lose all of its metadata, not just the artwork, because the title, author, narrator and retail identifiers share the same part of the file
-Reporting and finished books, from the previous build
-- Tap the flag in the player the moment you hear something that should have been filtered. One tap, no form, works with no signal
-- Each control in a book's Playback Filters has a flag to report that it removed something it should not have
-- A report records where you were, never what you heard. No audio and no text leaves your phone
-- Books are marked finished at the end, or by hand from their details, and covers show a green tick
-Please report anything odd in Discord.
+The time left now means real time, not book time
+- Pick 1.25x and the remaining figure becomes how long the rest of the book will actually take you. Change to 1.5x and it updates again
+- Before this it was the book's own remaining length, so it counted down faster at a higher speed but never told you when you would finish
+- The elapsed figure on the left is unchanged. That is your place in the book, not time spent
+
+Your book is still there when you come back to the app
+- Pause a book, switch to another app, come back later, and the player kept the book and your place. Before this it could come back to the Player tab with nothing loaded
+- Android reclaims memory from apps left in the background, so the app can be shut down without you closing it. It looks the same when you return, which is why this read as the app losing your book
+- Your listening position was never lost, even before this fix. It is written to the device the moment you pause or leave the app. What went missing was only the app reopening the book for you
+- The book comes back paused, exactly where you left it, not playing
+
+The chapter you are on now shows in the player
+- It sits between the cover and the scrub bar, the same place it has always been on iOS
+- Books with no chapter marks in the file simply read "Audiobook", which is most loose MP3s
+- A long chapter name is shortened with an ellipsis rather than wrapping, so it can never push the play button off the screen
+
+An audiobook with no filters can now be scanned from the player
+- The warning that filters are not active now carries a "Scan this audiobook" button
+- Use it for a book that imported but shows no filter data. Two people importing the same book no longer have to wait for whoever scanned it first
+- It is worded as a scan rather than a retry because for an edition nobody has scanned before, this is the first attempt
+
+Signing up is shorter
+- Email, password, confirm password, create. Nothing else is asked for
+- No email verification step to get through before you can use the app
+
+A short walkthrough on first sign-in
+- Four steps covering importing a book, the transfer tool site, filters, and attaching an ebook to read
+- It appears once. Everything it points at is reachable later from Profile
+
+Nothing needs re-importing for this build.
+
+Report anything odd in Discord.

@@ -149,6 +149,24 @@ final class AudioPlaybackManager: ObservableObject {
         updateNowPlaying()
     }
 
+    /// Where the identity of the last opened book is kept, so the reader and the writer
+    /// cannot drift apart on a spelling.
+    static let lastPlayedBookIDKey = "lastPlayedBookID"
+
+    /// The book that was open when the app was last alive, if it is still in the library.
+    ///
+    /// iOS keeps this manager for as long as the process lives, so an app merely sent to the
+    /// background never loses its book. Being terminated while backgrounded does lose it, and
+    /// `UIBackgroundModes: audio` does not help there: it keeps the process alive only while
+    /// audio is actually playing, so a listener who pauses and switches away is exactly the
+    /// case that gets reaped.
+    static func lastPlayedRecord() -> LibraryBookRecord? {
+        guard let stored = UserDefaults.standard.string(forKey: lastPlayedBookIDKey),
+              let id = UUID(uuidString: stored)
+        else { return nil }
+        return AudiobookLibraryStore.load().first { $0.id == id }
+    }
+
     static func savedPosition(for bookID: UUID) -> Double {
         UserDefaults.standard.double(forKey: "playbackPosition.\(bookID.uuidString)")
     }
@@ -206,7 +224,7 @@ final class AudioPlaybackManager: ObservableObject {
         removeTimeObserver()
         self.record = record
         self.currentRecord = record
-        UserDefaults.standard.set(record.id.uuidString, forKey: "lastPlayedBookID")
+        UserDefaults.standard.set(record.id.uuidString, forKey: Self.lastPlayedBookIDKey)
         self.lastHandledEventID = nil
         self.activeFilterEvent = nil
         self.skippedEventCount = 0
