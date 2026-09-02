@@ -1018,6 +1018,42 @@ app.MapGet("/v1/admin/scans/jobs/{scanID:guid}", (
 // Lists every known edition, including those with no timing data. /v1/admin/transcripts
 // only reports editions that already have one, so a missing transcript is invisible
 // there -- which is exactly the case that needs finding.
+// Reads an edition's stored filter result without causing any work.
+//
+// Every other route that returns a result can also start one. /v1/scans/requests, given an
+// edition that has a transcript but no result, queues a reanalysis and charges for it -- and it
+// does not check that the caller owns the edition, so any signed-in account can trigger that
+// for any edition whose fingerprint it can compute, which is any account holding the same file.
+// That is fine for a listener opening a book, whose intent is to get filters. It is not fine
+// for reading what a scanner produced, which is what comparing two scanners requires: a
+// nineteen-edition survey would have quietly started paid jobs.
+//
+// So this exists to be the harmless one. It looks up and returns, and can do nothing else.
+app.MapGet("/v1/admin/editions/result", (
+    HttpContext context,
+    IScanCatalog catalog,
+    string? sha256,
+    int? fingerprintVersion,
+    long? fileSize) =>
+{
+    if (!IsConfiguredApiToken(context, app.Configuration)) return Results.Unauthorized();
+
+    // All three parts identify an edition. A partial one is refused rather than guessed at,
+    // because a wrong fingerprint here would report another recording's result as this one's.
+    if (string.IsNullOrWhiteSpace(sha256) || fingerprintVersion is null || fileSize is null)
+    {
+        return Results.BadRequest(new
+        {
+            error = "sha256, fingerprintVersion and fileSize are all required to identify an edition."
+        });
+    }
+
+    var result = catalog.FindResult(new BookFingerprint(
+        fingerprintVersion.Value, sha256, fileSize.Value,
+        null, string.Empty, null, null, null, null, null, null, null));
+    return result is null ? Results.NotFound() : Results.Ok(result);
+});
+
 app.MapGet("/v1/admin/editions", async (
     HttpContext context,
     IScanCatalog catalog,
