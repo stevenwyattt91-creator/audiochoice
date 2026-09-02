@@ -71,6 +71,7 @@ public sealed class BedrockConverseModelClient(
             }
         };
 
+        var throttles = 0;
         for (var attempt = 0; ; attempt += 1)
         {
             try
@@ -81,21 +82,37 @@ public sealed class BedrockConverseModelClient(
                     response.Usage?.InputTokens,
                     response.Usage?.OutputTokens);
             }
+            catch (ThrottlingException) when (throttles < ThrottleRetryBudget)
+            {
+                // Throttling is not a fault, it is the account's rate limit doing its job, and
+                // it deserves a different response from a fault. It gets its own budget so a
+                // busy minute cannot consume the allowance meant for real errors, and a longer,
+                // jittered wait so concurrent workers stop marching in step and re-colliding.
+                //
+                // This is what a twelve-hour book failed on twice. Scene verification made 110
+                // Nova Pro calls in quick succession, the general three-retry allowance ran out
+                // at window 103, and the whole analysis was discarded seven windows from done.
+                throttles += 1;
+                var wait = TimeSpan.FromSeconds(
+                    Math.Min(Math.Pow(2, throttles), MaximumThrottleWaitSeconds))
+                    + TimeSpan.FromMilliseconds(Random.Shared.Next(0, 1000));
+                logger.LogWarning(
+                    "{SchemaName} throttled on {Model}; waiting {Wait} (throttle {Count} of {Budget}).",
+                    schemaName, model, wait, throttles, ThrottleRetryBudget);
+                await Task.Delay(wait, cancellationToken);
+            }
             catch (Exception error) when (
-                (error is ThrottlingException or ModelTimeoutException or
+                (error is ModelTimeoutException or
                      Amazon.BedrockRuntime.Model.InternalServerException or
-                     // "Model produced invalid sequence as part of ToolUse". The model, not the
-                     // request, produced something unusable, and it is sampled rather than
-                     // deterministic -- so asking again is the correct response and usually
-                     // works. Left out at first because it reads like a client error, which
-                     // cost a twelve-hour book at 91% analysed: every batch before it had
-                     // succeeded and the job failed on one malformed reply.
+                     // "Model produced invalid sequence as part of ToolUse". The request was
+                     // accepted; the model produced something unusable while sampling. Asking
+                     // again is the correct response and normally works. Left out at first
+                     // because it reads like a client error, which cost a book at 91% analysed.
                      ModelErrorException) &&
                 attempt < options.MaximumRetries)
             {
-                // Same rule as the OpenAI transport: repeat a rate limit, a server fault, or a
-                // reply the model itself mangled. Never repeat a rejected request -- a
-                // malformed request repeated is rejected again.
+                // Never repeat a rejected request: a malformed request repeated is rejected
+                // again, and paying three times only delays the error.
                 var delay = TimeSpan.FromSeconds(Math.Pow(2, attempt));
                 logger.LogWarning(
                     "{SchemaName} retry {Attempt} on {Model} after {Delay} ({Error}).",
@@ -104,6 +121,15 @@ public sealed class BedrockConverseModelClient(
             }
         }
     }
+
+    /// <summary>
+    /// How many times one call may be throttled before giving up, separate from the retry
+    /// allowance for faults. Generous because being throttled says nothing is wrong.
+    /// </summary>
+    private const int ThrottleRetryBudget = 10;
+
+    /// <summary>Longest single wait after being throttled, so a stall stays observable.</summary>
+    private const double MaximumThrottleWaitSeconds = 30;
 
     /// <summary>
     /// Pulls the tool arguments out of the reply, as the JSON the scanner deserializes.
