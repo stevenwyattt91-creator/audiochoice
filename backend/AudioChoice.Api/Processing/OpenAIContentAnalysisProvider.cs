@@ -18,7 +18,7 @@ public sealed class OpenAIContentAnalysisProvider(
 {
     // Bump this whenever the baseline classification policy changes so cached batch
     // answers cannot silently reintroduce events produced under an older policy.
-    private const string BaseAnalysisPromptVersion = "2.7-narrow-violence";
+    private const string BaseAnalysisPromptVersion = "2.8-narrow-violence-torture";
     private const string SceneVerificationVersion = "3.4-discreet-descriptions";
     private const string SceneEscalationVersion = "3.3-discreet-descriptions";
     private readonly string _checkpointFolder = dataPaths.AnalysisCheckpoints;
@@ -1030,9 +1030,15 @@ description is detailed enough, it is not: omit it.
 Return violence_graphic for perhaps a handful of moments in an entire book, and none at all in
 most books. A count in the dozens means the test above is being applied too loosely.
 
-Other violence a listener may want removed: torture, violence involving children, violence
-involving animals, and self-harm or suicide. Judge those on what happens, not on how gory the
-description is.
+violence_torture holds to the same physical-detail test as violence_graphic. Deliberate,
+sustained cruelty whose injuries the narration describes closely: wounds opened, flesh burned or
+cut, bones broken, blood. Captivity and beating on their own are not torture for this purpose --
+a character tied to a chair and punched is not filtered, however unpleasant the scene is. If the
+narration does not dwell on the physical damage, omit it.
+
+violence_children and violence_animals are judged on what happens rather than how it is
+described, because who it happens to is the point of those two. Self-harm and suicide are their
+own category and are unchanged.
 
 For isolated events, return the narrowest supported timestamps. A short reference is a short
 event: if three words carry it, the range should cover those three words and not the sentence
