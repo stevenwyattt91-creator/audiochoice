@@ -374,10 +374,19 @@ if (openAIOptions.WorkerEnabled)
                 services.GetRequiredService<ILogger<OpenAITranscriptionProvider>>()));
     builder.Services.AddSingleton<ConcurrentChunkTranscriber>();
 
-    builder.Services.AddSingleton<IContentAnalysisProvider>(services =>
-        new OpenAIContentAnalysisProvider(
+    // How the models are reached. The scanner's judgement does not live here: every policy
+    // that decides what a listener has removed stays in OpenAIContentAnalysisProvider, and
+    // only the transport is selected. That is what makes a vendor change configuration.
+    builder.Services.AddSingleton<IAnalysisModelClient>(services =>
+        new OpenAIResponsesModelClient(
             services.GetRequiredService<IHttpClientFactory>()
                 .CreateClient("OpenAIProcessing"),
+            openAIOptions,
+            services.GetRequiredService<ILogger<OpenAIResponsesModelClient>>()));
+
+    builder.Services.AddSingleton<IContentAnalysisProvider>(services =>
+        new OpenAIContentAnalysisProvider(
+            services.GetRequiredService<IAnalysisModelClient>(),
             openAIOptions,
             services.GetRequiredService<AudioChoiceDataPaths>(),
             services.GetRequiredService<ILogger<OpenAIContentAnalysisProvider>>()));

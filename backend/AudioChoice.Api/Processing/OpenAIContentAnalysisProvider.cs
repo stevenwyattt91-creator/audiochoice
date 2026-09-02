@@ -10,7 +10,7 @@ using AudioChoice.Api.Contracts;
 namespace AudioChoice.Api.Processing;
 
 public sealed class OpenAIContentAnalysisProvider(
-    HttpClient client,
+    IAnalysisModelClient modelClient,
     OpenAIProcessingOptions options,
     AudioChoice.Api.Services.AudioChoiceDataPaths dataPaths,
     ILogger<OpenAIContentAnalysisProvider> logger)
@@ -535,53 +535,17 @@ public sealed class OpenAIContentAnalysisProvider(
         CancellationToken cancellationToken)
     {
         var input = BuildInput(segments);
-        var body = BuildRequestBody(input);
+        var response = await modelClient.CompleteJson(
+            options.AnalysisModel,
+            input,
+            "audiochoice_scan_events",
+            AnalysisResponseSchema(),
+            cancellationToken);
+        RecordUsage(options.AnalysisModel, response);
 
-        for (var attempt = 0; ; attempt += 1)
-        {
-            using var request = new HttpRequestMessage(HttpMethod.Post, "responses");
-            request.Headers.Authorization = new AuthenticationHeaderValue(
-                "Bearer",
-                options.ApiKey);
-            request.Content = new StringContent(
-                body.ToJsonString(),
-                Encoding.UTF8,
-                "application/json");
-
-            using var response = await client.SendAsync(
-                request,
-                cancellationToken);
-
-            if (response.IsSuccessStatusCode)
-            {
-                var responseJson = await response.Content.ReadAsStringAsync(
-                    cancellationToken);
-                var outputText = ExtractOutputText(responseJson);
-
-                return JsonSerializer.Deserialize<AnalysisPayload>(outputText)
-                    ?? throw new InvalidOperationException(
-                        "Content analysis returned no structured result.");
-            }
-
-            if (attempt >= options.MaximumRetries ||
-                (response.StatusCode != HttpStatusCode.TooManyRequests &&
-                 (int)response.StatusCode < 500))
-            {
-                var error = await response.Content.ReadAsStringAsync(cancellationToken);
-                throw new HttpRequestException(
-                    $"Content analysis failed with HTTP {(int)response.StatusCode}: {error}");
-            }
-
-            var delay = response.Headers.RetryAfter?.Delta
-                ?? TimeSpan.FromSeconds(Math.Pow(2, attempt));
-
-            logger.LogWarning(
-                "Content analysis retry {Attempt} after {Delay}.",
-                attempt + 1,
-                delay);
-
-            await Task.Delay(delay, cancellationToken);
-        }
+        return JsonSerializer.Deserialize<AnalysisPayload>(response.Json)
+            ?? throw new InvalidOperationException(
+                "Content analysis returned no structured result.");
     }
 
     private async Task<IReadOnlyList<ScanEvent>> VerifyCompleteSexualScenes(
@@ -975,30 +939,35 @@ or similar physical details. Return one decision for every candidateKey.
 
 Candidates:
 """ + JsonSerializer.Serialize(candidates);
-        var body = BuildSceneVerificationRequestBody(input, model);
+        var response = await modelClient.CompleteJson(
+            model,
+            input,
+            "audiochoice_scene_verification",
+            SceneVerificationResponseSchema(),
+            cancellationToken);
+        RecordUsage(model, response);
 
-        for (var attempt = 0; ; attempt += 1)
-        {
-            using var request = new HttpRequestMessage(HttpMethod.Post, "responses");
-            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", options.ApiKey);
-            request.Content = new StringContent(body.ToJsonString(), Encoding.UTF8, "application/json");
-            using var response = await client.SendAsync(request, cancellationToken);
-            if (response.IsSuccessStatusCode)
-            {
-                var responseJson = await response.Content.ReadAsStringAsync(cancellationToken);
-                return JsonSerializer.Deserialize<SceneVerificationPayload>(ExtractOutputText(responseJson))
-                    ?? throw new InvalidOperationException("Scene verification returned no structured result.");
-            }
-            if (attempt >= options.MaximumRetries ||
-                (response.StatusCode != HttpStatusCode.TooManyRequests && (int)response.StatusCode < 500))
-            {
-                var error = await response.Content.ReadAsStringAsync(cancellationToken);
-                throw new HttpRequestException(
-                    $"Scene verification failed with HTTP {(int)response.StatusCode}: {error}");
-            }
-            var delay = response.Headers.RetryAfter?.Delta ?? TimeSpan.FromSeconds(Math.Pow(2, attempt));
-            await Task.Delay(delay, cancellationToken);
-        }
+        return JsonSerializer.Deserialize<SceneVerificationPayload>(response.Json)
+            ?? throw new InvalidOperationException("Scene verification returned no structured result.");
+    }
+
+    /// <summary>
+    /// Records what one model call cost, per model, so a scan's spend is attributable.
+    /// </summary>
+    /// <remarks>
+    /// Logged rather than stored, for now. It answers "which tier is the expensive one" from
+    /// a job's own output, which is the question that decides whether moving the high-volume
+    /// first pass to a cheaper model is worth anything. A usage count a vendor did not return
+    /// is reported as unknown rather than as zero.
+    /// </remarks>
+    private void RecordUsage(string model, AnalysisModelResponse response)
+    {
+        logger.LogInformation(
+            "Model usage: {Provider} {Model} in={InputTokens} out={OutputTokens}.",
+            modelClient.ProviderName,
+            model,
+            response.InputTokens?.ToString() ?? "unknown",
+            response.OutputTokens?.ToString() ?? "unknown");
     }
 
     /// <summary>
@@ -1092,61 +1061,51 @@ Transcript segments:
 """ + transcript;
     }
 
-    private JsonObject BuildRequestBody(string input) => new()
+    /// <summary>
+    /// The shape a first-pass answer must take. Vendor-neutral JSON Schema: the transport
+    /// decides how to impose it, whether as a response format or as a tool definition.
+    /// </summary>
+    private static JsonObject AnalysisResponseSchema() => new()
     {
-        ["model"] = options.AnalysisModel,
-        ["input"] = input,
-        ["text"] = new JsonObject
+        ["type"] = "object",
+        ["additionalProperties"] = false,
+        ["required"] = new JsonArray("events"),
+        ["properties"] = new JsonObject
         {
-            ["format"] = new JsonObject
+            ["events"] = new JsonObject
             {
-                ["type"] = "json_schema",
-                ["name"] = "audiochoice_scan_events",
-                ["strict"] = true,
-                ["schema"] = new JsonObject
+                ["type"] = "array",
+                ["items"] = new JsonObject
                 {
                     ["type"] = "object",
                     ["additionalProperties"] = false,
-                    ["required"] = new JsonArray("events"),
+                    ["required"] = new JsonArray(
+                        "label", "startTime", "endTime", "confidence",
+                        "safeDescription", "profanityWord"),
                     ["properties"] = new JsonObject
                     {
-                        ["events"] = new JsonObject
+                        ["label"] = new JsonObject
                         {
-                            ["type"] = "array",
-                            ["items"] = new JsonObject
-                            {
-                                ["type"] = "object",
-                                ["additionalProperties"] = false,
-                                ["required"] = new JsonArray(
-                                    "label", "startTime", "endTime", "confidence",
-                                    "safeDescription", "profanityWord"),
-                                ["properties"] = new JsonObject
-                                {
-                                    ["label"] = new JsonObject
-                                    {
-                                        ["type"] = "string",
-                                        // Derived from the taxonomy so the schema cannot
-                                        // permit a label the taxonomy would then discard.
-                                        ["enum"] = new JsonArray(ContentTaxonomy.EnforcedLabels
-                                            .Select(label => (JsonNode)JsonValue.Create(label)!)
-                                            .ToArray())
-                                    },
-                                    ["startTime"] = new JsonObject { ["type"] = "number" },
-                                    ["endTime"] = new JsonObject { ["type"] = "number" },
-                                    ["confidence"] = new JsonObject
-                                    {
-                                        ["type"] = "number",
-                                        ["minimum"] = 0,
-                                        ["maximum"] = 1
-                                    },
-                                    ["safeDescription"] = new JsonObject { ["type"] = "string", ["maxLength"] = 80 },
-                                    ["profanityWord"] = new JsonObject
-                                    {
-                                        ["type"] = new JsonArray("string", "null"),
-                                        ["maxLength"] = 80
-                                    }
-                                }
-                            }
+                            ["type"] = "string",
+                            // Derived from the taxonomy so the schema cannot
+                            // permit a label the taxonomy would then discard.
+                            ["enum"] = new JsonArray(ContentTaxonomy.EnforcedLabels
+                                .Select(label => (JsonNode)JsonValue.Create(label)!)
+                                .ToArray())
+                        },
+                        ["startTime"] = new JsonObject { ["type"] = "number" },
+                        ["endTime"] = new JsonObject { ["type"] = "number" },
+                        ["confidence"] = new JsonObject
+                        {
+                            ["type"] = "number",
+                            ["minimum"] = 0,
+                            ["maximum"] = 1
+                        },
+                        ["safeDescription"] = new JsonObject { ["type"] = "string", ["maxLength"] = 80 },
+                        ["profanityWord"] = new JsonObject
+                        {
+                            ["type"] = new JsonArray("string", "null"),
+                            ["maxLength"] = 80
                         }
                     }
                 }
@@ -1154,85 +1113,50 @@ Transcript segments:
         }
     };
 
-    private static JsonObject BuildSceneVerificationRequestBody(string input, string model) => new()
+    /// <summary>The shape a verification or escalation answer must take.</summary>
+    private static JsonObject SceneVerificationResponseSchema() => new()
     {
-        ["model"] = model,
-        ["input"] = input,
-        ["text"] = new JsonObject
+        ["type"] = "object",
+        ["additionalProperties"] = false,
+        ["required"] = new JsonArray("candidates"),
+        ["properties"] = new JsonObject
         {
-            ["format"] = new JsonObject
+            ["candidates"] = new JsonObject
             {
-                ["type"] = "json_schema",
-                ["name"] = "audiochoice_scene_verification",
-                ["strict"] = true,
-                ["schema"] = new JsonObject
+                ["type"] = "array",
+                ["items"] = new JsonObject
                 {
                     ["type"] = "object",
                     ["additionalProperties"] = false,
-                    ["required"] = new JsonArray("candidates"),
+                    ["required"] = new JsonArray(
+                        "candidateKey", "accepted", "needsEscalation", "directSexualActEvidence",
+                        "sustainedBeyondKissing", "startTime", "endTime",
+                        "confidence", "safeDescription"),
                     ["properties"] = new JsonObject
                     {
-                        ["candidates"] = new JsonObject
+                        ["candidateKey"] = new JsonObject { ["type"] = "string" },
+                        ["accepted"] = new JsonObject { ["type"] = "boolean" },
+                        ["needsEscalation"] = new JsonObject { ["type"] = "boolean" },
+                        ["directSexualActEvidence"] = new JsonObject { ["type"] = "boolean" },
+                        ["sustainedBeyondKissing"] = new JsonObject { ["type"] = "boolean" },
+                        ["startTime"] = new JsonObject { ["type"] = "number" },
+                        ["endTime"] = new JsonObject { ["type"] = "number" },
+                        ["confidence"] = new JsonObject
                         {
-                            ["type"] = "array",
-                            ["items"] = new JsonObject
-                            {
-                                ["type"] = "object",
-                                ["additionalProperties"] = false,
-                                ["required"] = new JsonArray(
-                                    "candidateKey", "accepted", "needsEscalation", "directSexualActEvidence",
-                                    "sustainedBeyondKissing", "startTime", "endTime",
-                                    "confidence", "safeDescription"),
-                                ["properties"] = new JsonObject
-                                {
-                                    ["candidateKey"] = new JsonObject { ["type"] = "string" },
-                                    ["accepted"] = new JsonObject { ["type"] = "boolean" },
-                                    ["needsEscalation"] = new JsonObject { ["type"] = "boolean" },
-                                    ["directSexualActEvidence"] = new JsonObject { ["type"] = "boolean" },
-                                    ["sustainedBeyondKissing"] = new JsonObject { ["type"] = "boolean" },
-                                    ["startTime"] = new JsonObject { ["type"] = "number" },
-                                    ["endTime"] = new JsonObject { ["type"] = "number" },
-                                    ["confidence"] = new JsonObject
-                                    {
-                                        ["type"] = "number",
-                                        ["minimum"] = 0,
-                                        ["maximum"] = 1
-                                    },
-                                    ["safeDescription"] = new JsonObject
-                                    {
-                                        ["type"] = "string",
-                                        ["maxLength"] = 80
-                                    }
-                                }
-                            }
+                            ["type"] = "number",
+                            ["minimum"] = 0,
+                            ["maximum"] = 1
+                        },
+                        ["safeDescription"] = new JsonObject
+                        {
+                            ["type"] = "string",
+                            ["maxLength"] = 80
                         }
                     }
                 }
             }
         }
     };
-
-    private static string ExtractOutputText(string responseJson)
-    {
-        var root = JsonNode.Parse(responseJson)
-            ?? throw new InvalidOperationException("Content analysis returned invalid JSON.");
-
-        foreach (var output in root["output"]?.AsArray() ?? new JsonArray())
-        {
-            foreach (var content in
-                output?["content"]?.AsArray() ?? new JsonArray())
-            {
-                if (content?["type"]?.GetValue<string>() == "output_text" &&
-                    content["text"]?.GetValue<string>() is string text)
-                {
-                    return text;
-                }
-            }
-        }
-
-        throw new InvalidOperationException(
-            "Content analysis response did not contain output text.");
-    }
 
     private sealed record AnalysisPayload(
         [property: JsonPropertyName("events")]
