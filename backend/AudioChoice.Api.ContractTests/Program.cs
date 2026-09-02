@@ -335,8 +335,10 @@ var joinedSceneEvents = SceneEventPostProcessor.Process(
     ],
     [new TranscriptSegment(0, 600, "Test transcript")]);
 Assert(joinedSceneEvents.Count == 1, "Overlapping sexual scene ranges were not joined.");
-Assert(joinedSceneEvents[0].StartTime == 92 && joinedSceneEvents[0].EndTime == 268,
-    "Sexual scene safety padding was not applied.");
+Assert(joinedSceneEvents[0].StartTime == 100 - 3 && joinedSceneEvents[0].EndTime == 260 + 3,
+    "A joined sexual scene did not get exactly three seconds of padding either side. " +
+    "Padding was reduced from eight seconds because sixteen seconds a scene was, across a " +
+    "book, one of the largest contributors to how much audio disappeared.");
 Assert(joinedSceneEvents[0].SafeDescription == "Sustained sexual activity",
     "Sexual scene safe description fallback was not applied.");
 

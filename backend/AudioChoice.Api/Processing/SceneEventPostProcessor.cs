@@ -12,7 +12,19 @@ namespace AudioChoice.Api.Processing;
 public static class SceneEventPostProcessor
 {
     private const double MergeGapSeconds = 45;
-    private const double SafetyPaddingSeconds = 8;
+    /// <summary>
+    /// Seconds added either side of a merged scene, so a skip does not clip its own edges.
+    ///
+    /// Reduced from eight to three. Eight was chosen to be safe and cost sixteen seconds on
+    /// every scene, which on a book with forty of them is more than ten minutes of audio
+    /// removed for margin alone. Three still covers the case this exists for -- a transcript
+    /// boundary landing a word or two early -- without turning caution into the largest single
+    /// contributor to how much of a book disappears.
+    ///
+    /// Applies only to complete scenes. A short event keeps the narrowest bounds the model
+    /// supported, because padding a three-word phrase is how a phrase becomes a passage.
+    /// </summary>
+    private const double SafetyPaddingSeconds = 3;
 
     /// <summary>
     /// The shortest merged range still worth a scene-level skip.

@@ -18,7 +18,7 @@ public sealed class OpenAIContentAnalysisProvider(
 {
     // Bump this whenever the baseline classification policy changes so cached batch
     // answers cannot silently reintroduce events produced under an older policy.
-    private const string BaseAnalysisPromptVersion = "2.6-clean-descriptions";
+    private const string BaseAnalysisPromptVersion = "2.7-narrow-violence";
     private const string SceneVerificationVersion = "3.4-discreet-descriptions";
     private const string SceneEscalationVersion = "3.3-discreet-descriptions";
     private readonly string _checkpointFolder = dataPaths.AnalysisCheckpoints;
@@ -1012,12 +1012,32 @@ Candidates:
 
         return """
 Act as an audiobook content-preference classifier. Identify only events that are explicitly
-supported by the supplied transcript. Be conservative for violence: a listener who enables
-Violence wants only graphic/gory injury, torture, violence involving children or animals, or
-self-harm/suicide. Do not flag ordinary conflict, threats, combat without graphic detail,
-non-graphic injuries, scars, medical discussion, pain, injury aftermath, death references, or
-fantasy danger. When the evidence is not clearly within the narrow categories below, omit it.
-For isolated events, return the narrowest supported timestamps. Sexual activity is different:
+supported by the supplied transcript.
+
+violence_graphic has one test, and it is a high one: the narration must dwell on the physical
+detail of a body being damaged. Flesh being cut, torn or opened; blood flowing or pooling;
+bones breaking; organs, entrails or brain matter; a limb or head being severed; a wound
+described closely enough that a listener pictures the injury rather than the act. It is the
+lingering physical description that qualifies, not the violence itself.
+
+An act of violence stated without that physical detail is NOT violence_graphic. Do not flag: a
+punch, a slap, a shove, a slammed door, a stabbing or shooting reported without describing the
+wound, a battle or duel, a threat, a character being hurt or killed, a body being found,
+bruises, scars, a mention of blood in passing, medical treatment, pain, an injury's aftermath,
+grief, or fantasy peril. Most fight scenes are not graphic. If you are weighing whether the
+description is detailed enough, it is not: omit it.
+
+Return violence_graphic for perhaps a handful of moments in an entire book, and none at all in
+most books. A count in the dozens means the test above is being applied too loosely.
+
+Other violence a listener may want removed: torture, violence involving children, violence
+involving animals, and self-harm or suicide. Judge those on what happens, not on how gory the
+description is.
+
+For isolated events, return the narrowest supported timestamps. A short reference is a short
+event: if three words carry it, the range should cover those three words and not the sentence
+or paragraph around them. Never widen a brief event to be safe -- a wide range on a passing
+reference removes narration the listener wanted to hear. Sexual activity is different:
 identify the complete narrative scene, including its clear lead-in and the point where sexual
 activity ends and the story returns to non-sexual action or conversation. Whenever explicit
 sexual activity occurs, ALWAYS also emit one sexual_complete_scene event spanning that whole
