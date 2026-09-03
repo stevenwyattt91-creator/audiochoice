@@ -18,7 +18,7 @@ public sealed class OpenAIContentAnalysisProvider(
 {
     // Bump this whenever the baseline classification policy changes so cached batch
     // answers cannot silently reintroduce events produced under an older policy.
-    private const string BaseAnalysisPromptVersion = "3.0-sexual-ladder";
+    private const string BaseAnalysisPromptVersion = "3.1-context-not-words";
     private const string SceneVerificationVersion = "3.4-discreet-descriptions";
     private const string SceneEscalationVersion = "3.3-discreet-descriptions";
     private readonly string _checkpointFolder = dataPaths.AnalysisCheckpoints;
@@ -1340,6 +1340,12 @@ that a sexual act is taking place.
 
 sexual_complete_scene -- the whole span of a scene containing implied or explicit activity, from
 its clear lead-in to the point where the story returns to non-sexual action or conversation.
+
+No word is sexual content by itself. A body part named in passing is anatomy, not a sexual
+reference: a hand on a chest during first aid, a breast wound in battle, a character washing, a
+mother nursing, a medical examination. Judge the passage by what is happening in it, never by the
+presence of a word. The same applies to violence and every other category -- a word is evidence
+only in the sense the passage actually uses it.
 
 ALWAYS emit sexual_complete_scene alongside sexual_implied_activity or sexual_explicit_activity,
 every time, including a brief encounter and one whose description is euphemistic. A listener who
