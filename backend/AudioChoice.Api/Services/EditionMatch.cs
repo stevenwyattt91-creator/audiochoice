@@ -109,6 +109,37 @@ public static class EditionMatch
     /// either side is not evidence: conversion tools routinely drop chapter marks, and
     /// treating that as a contradiction would lose a legitimate match.
     /// </summary>
+    /// <summary>
+    /// Whether two editions share a chapter structure detailed enough to identify one recording.
+    /// </summary>
+    /// <remarks>
+    /// Chapter marks are already gathered and were only ever used to reject a match. As positive
+    /// evidence they are the strongest thing available short of a retail identifier: a dozen marks
+    /// agreeing to the second is a pattern a different reading of the same book does not share, and
+    /// unlike a title or an ASIN it is not something a tagger types. Re-wrapping a container or
+    /// converting a format does not move them, which is exactly the case that was failing -- the
+    /// same recording, re-encoded, treated as a stranger.
+    ///
+    /// Eight marks is the floor. Below that the pattern is too small to be distinctive: two books
+    /// of the same length with three evenly spaced parts would match each other.
+    /// </remarks>
+    public static bool ChapterStructureIdentifies(EditionSignature? left, EditionSignature? right)
+    {
+        var leftChapters = left?.ChapterOffsetSeconds;
+        var rightChapters = right?.ChapterOffsetSeconds;
+        if (leftChapters is not { } first || rightChapters is not { } second) return false;
+        if (first.Count < MinimumIdentifyingChapters) return false;
+        if (first.Count != second.Count) return false;
+        return !first
+            .Zip(second, (a, b) => Math.Abs(a - b))
+            .Any(drift => drift > MaximumChapterDriftSeconds);
+    }
+
+    /// <summary>
+    /// How many chapter marks a structure needs before it can identify a recording on its own.
+    /// </summary>
+    private const int MinimumIdentifyingChapters = 8;
+
     private static bool ChaptersContradict(EditionSignature? left, EditionSignature? right)
     {
         var leftChapters = left?.ChapterOffsetSeconds;
@@ -126,7 +157,7 @@ public static class EditionMatch
     /// an unknown duration on either side means there is nothing to corroborate a
     /// title with, and a title alone is not evidence.
     /// </summary>
-    private static bool SameRuntime(BookFingerprint left, BookFingerprint right)
+    public static bool SameRuntime(BookFingerprint left, BookFingerprint right)
     {
         if (left.Duration is not > 0 || right.Duration is not > 0) return false;
         return Math.Abs(left.Duration.Value - right.Duration.Value) <= MaximumRuntimeDriftSeconds;

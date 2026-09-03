@@ -2379,6 +2379,49 @@ Assert(
         Math.Abs(repeated[1].StartTime - 201.5) < 0.001,
     "A repeated word reused the first occurrence's timing for both.");
 
+// Chapter structure as identity. This decides whether a converted copy of an already scanned
+// recording finds its filters, and equally whether two unrelated books are handed each other's
+// timings, so both directions are pinned.
+var twelveMarks = Enumerable.Range(0, 12).Select(i => i * 1800).ToArray();
+Assert(
+    EditionMatch.ChapterStructureIdentifies(
+        new EditionSignature(ChapterOffsetSeconds: twelveMarks),
+        new EditionSignature(ChapterOffsetSeconds: twelveMarks)),
+    "Twelve identical chapter marks were not accepted as the same recording.");
+
+// A second's drift is re-encoding, not a different book.
+var driftedMarks = twelveMarks.Select((value, index) => index == 5 ? value + 1 : value).ToArray();
+Assert(
+    EditionMatch.ChapterStructureIdentifies(
+        new EditionSignature(ChapterOffsetSeconds: twelveMarks),
+        new EditionSignature(ChapterOffsetSeconds: driftedMarks)),
+    "A one-second difference in one chapter mark was treated as a different recording.");
+
+// Too few marks cannot identify anything: two books of similar length with three evenly spaced
+// parts would otherwise be handed each other's filters.
+var threeMarks = new[] { 0, 1800, 3600 };
+Assert(
+    !EditionMatch.ChapterStructureIdentifies(
+        new EditionSignature(ChapterOffsetSeconds: threeMarks),
+        new EditionSignature(ChapterOffsetSeconds: threeMarks)),
+    "Three chapter marks were accepted as identifying a recording. Eight is the floor.");
+
+Assert(
+    !EditionMatch.ChapterStructureIdentifies(
+        new EditionSignature(ChapterOffsetSeconds: twelveMarks),
+        new EditionSignature(ChapterOffsetSeconds: twelveMarks.Take(11).ToArray())),
+    "Structures of different lengths were accepted as the same recording.");
+
+Assert(
+    !EditionMatch.ChapterStructureIdentifies(
+        new EditionSignature(ChapterOffsetSeconds: twelveMarks),
+        new EditionSignature(ChapterOffsetSeconds: twelveMarks.Select(v => v + 600).ToArray())),
+    "Marks ten minutes apart were accepted as the same recording.");
+
+Assert(
+    !EditionMatch.ChapterStructureIdentifies(new EditionSignature(), new EditionSignature()),
+    "Two signatures with no chapter marks at all were accepted as the same recording.");
+
 Console.WriteLine("AudioChoice backend contract tests passed.");
 
 static string FindMigrationsDirectory()
