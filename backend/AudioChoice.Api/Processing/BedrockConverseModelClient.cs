@@ -147,18 +147,53 @@ public sealed class BedrockConverseModelClient(
     /// left to fail loudly: quietly coercing a reply into the expected type is how a wrong
     /// answer gets accepted as a right one, and this pipeline decides what a listener hears.
     /// </remarks>
-    private static void Conform(JsonNode answer, JsonObject schema)
+    private static void Conform(JsonNode answer, JsonObject? schema)
     {
-        if (answer is not JsonObject obj) return;
-        if (schema["properties"] is not JsonObject properties) return;
+        if (answer is not JsonObject obj || schema?["properties"] is not JsonObject properties)
+        {
+            return;
+        }
+
         foreach (var property in properties)
         {
-            if (property.Value?["type"]?.GetValue<string>() != "array") continue;
-            if (obj[property.Key] is null or JsonArray) continue;
-            var single = obj[property.Key]!.DeepClone();
-            obj[property.Key] = new JsonArray(single);
+            var declared = property.Value as JsonObject;
+            var type = declared?["type"]?.GetValue<string>();
+            var value = obj[property.Key];
+            if (value is null) continue;
+
+            if (type == "array")
+            {
+                // A lone object where an array of one was asked for.
+                if (value is not JsonArray)
+                {
+                    obj[property.Key] = new JsonArray(value.DeepClone());
+                }
+                foreach (var item in obj[property.Key]!.AsArray())
+                {
+                    if (item is not null) Conform(item, declared?["items"] as JsonObject);
+                }
+                continue;
+            }
+
+            if (type == "object") { Conform(value, declared); continue; }
+
+            // A scalar sent as a quoted string. Only converted when the text is unambiguously
+            // the declared type -- "true" for a boolean, a parseable number for a number.
+            // Anything else is left alone to fail, because guessing at a value here decides
+            // what a listener hears.
+            if (value is not JsonValue scalar || !scalar.TryGetValue(out string? text)) continue;
+            if (type == "boolean" && bool.TryParse(text, out var flag))
+            {
+                obj[property.Key] = JsonValue.Create(flag);
+            }
+            else if ((type == "number" || type == "integer") &&
+                double.TryParse(text, System.Globalization.CultureInfo.InvariantCulture, out var number))
+            {
+                obj[property.Key] = JsonValue.Create(number);
+            }
         }
     }
+
 
     private static string ExtractToolInput(
         ConverseResponse response, string schemaName, JsonObject schema)
