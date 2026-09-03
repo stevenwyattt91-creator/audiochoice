@@ -341,8 +341,17 @@ if (openAIOptions.WorkerEnabled)
     // Required only by whatever actually calls OpenAI. A worker transcribing on the local GPU
     // and classifying on Bedrock needs no OpenAI account, and demanding a key it will never
     // use would refuse to start over a setting that does not apply.
+    // A tier may name an OpenAI model even when the pipeline is otherwise on Bedrock, so the
+    // key is required by what the tiers actually name rather than by the provider setting.
+    var anyTierUsesOpenAI = new[]
+        {
+            openAIOptions.AnalysisModel,
+            openAIOptions.SceneVerificationModel,
+            openAIOptions.SceneEscalationModel
+        }
+        .Any(RoutingAnalysisModelClient.IsOpenAIModel);
     if (string.IsNullOrWhiteSpace(openAIOptions.ApiKey) &&
-        (!usesBedrockAnalysis || usesOpenAITranscription))
+        (!usesBedrockAnalysis || usesOpenAITranscription || anyTierUsesOpenAI))
     {
         throw new InvalidOperationException(
             "AudioChoice:OpenAI:ApiKey is required when the scan worker uses OpenAI for " +
@@ -394,11 +403,23 @@ if (openAIOptions.WorkerEnabled)
                 ? new AmazonBedrockRuntimeClient()
                 : new AmazonBedrockRuntimeClient(
                     Amazon.RegionEndpoint.GetBySystemName(openAIOptions.BedrockRegion)));
+
+        // Routed rather than chosen once. The tiers are not equally well served: Nova does the
+        // bulk of the work well and cheaply, while the sexual-scene stages stay on OpenAI until
+        // a frontier model is reachable on Bedrock. Which service a tier uses is decided by the
+        // model it names, so moving one later is a configuration change.
         builder.Services.AddSingleton<IAnalysisModelClient>(services =>
-            new BedrockConverseModelClient(
-                services.GetRequiredService<IAmazonBedrockRuntime>(),
-                openAIOptions,
-                services.GetRequiredService<ILogger<BedrockConverseModelClient>>()));
+            new RoutingAnalysisModelClient(
+                bedrock: new BedrockConverseModelClient(
+                    services.GetRequiredService<IAmazonBedrockRuntime>(),
+                    openAIOptions,
+                    services.GetRequiredService<ILogger<BedrockConverseModelClient>>()),
+                openAI: new OpenAIResponsesModelClient(
+                    services.GetRequiredService<IHttpClientFactory>()
+                        .CreateClient("OpenAIProcessing"),
+                    openAIOptions,
+                    services.GetRequiredService<ILogger<OpenAIResponsesModelClient>>()),
+                services.GetRequiredService<ILogger<RoutingAnalysisModelClient>>()));
     }
     else
     {

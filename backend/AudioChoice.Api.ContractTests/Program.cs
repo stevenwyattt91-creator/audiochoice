@@ -2297,6 +2297,21 @@ Assert(
     "A null tool argument did not survive the Bedrock Document conversion as null.");
 
 
+// Which service a tier reaches is decided by the model it names, so a name that matches
+// neither vendor must stop the job rather than fall through to one of them. A book classified
+// against the wrong provider would look entirely ordinary.
+Assert(RoutingAnalysisModelClient.IsOpenAIModel("gpt-5.6-sol"), "An OpenAI model was not recognised.");
+Assert(RoutingAnalysisModelClient.IsOpenAIModel("gpt-5.6-terra"), "An OpenAI model was not recognised.");
+Assert(!RoutingAnalysisModelClient.IsOpenAIModel("amazon.nova-lite-v1:0"), "A Nova model was read as OpenAI.");
+Assert(!RoutingAnalysisModelClient.IsOpenAIModel("us.amazon.nova-2-lite-v1:0"), "A Nova model was read as OpenAI.");
+Assert(RoutingAnalysisModelClient.IsBedrockModel("amazon.nova-lite-v1:0"), "A Nova model was not recognised.");
+Assert(RoutingAnalysisModelClient.IsBedrockModel("us.amazon.nova-2-lite-v1:0"), "A cross-region Nova profile was not recognised.");
+Assert(!RoutingAnalysisModelClient.IsBedrockModel("gpt-5.6-sol"), "An OpenAI model was read as Bedrock.");
+Assert(
+    !RoutingAnalysisModelClient.IsOpenAIModel("nova-lite") &&
+        !RoutingAnalysisModelClient.IsBedrockModel("nova-lite"),
+    "A model name missing its provider prefix was claimed by a vendor rather than refused.");
+
 Console.WriteLine("AudioChoice backend contract tests passed.");
 
 static string FindMigrationsDirectory()
