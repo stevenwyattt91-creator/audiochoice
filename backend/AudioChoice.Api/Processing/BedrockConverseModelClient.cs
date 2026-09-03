@@ -157,7 +157,10 @@ public sealed class BedrockConverseModelClient(
         foreach (var property in properties)
         {
             var declared = property.Value as JsonObject;
-            var type = declared?["type"]?.GetValue<string>();
+            // A schema type may be a union, as profanityWord's ["string","null"] is, so this
+            // cannot assume a plain string. Reading it as one threw and failed the whole job.
+            var type = declared?["type"] is JsonValue declaredType &&
+                declaredType.TryGetValue(out string? single) ? single : null;
             var value = obj[property.Key];
             if (value is null) continue;
 
