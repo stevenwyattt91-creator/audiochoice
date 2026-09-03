@@ -344,13 +344,30 @@ Assert(joinedSceneEvents[0].SafeDescription == "Sustained sexual activity",
 
 var narrowSceneEvents = SceneEventPostProcessor.Process(
     [
-        new ScanEvent(Guid.NewGuid(), 300, 325, completeSceneMapping.CategoryID,
+        new ScanEvent(Guid.NewGuid(), 300, 308, completeSceneMapping.CategoryID,
             completeSceneMapping.GroupID, completeSceneMapping.EventID, .94, "narrow-scene",
             "Brief explicit activity")
     ],
     [new TranscriptSegment(0, 600, "Test transcript")]);
 Assert(narrowSceneEvents.Count == 0,
-    "A short detection was incorrectly promoted to a complete-scene skip.");
+    "An eight-second detection was promoted to a complete-scene skip. A floor still has to "
+    + "stop one explicit sentence and its padding from becoming a scene-sized skip.");
+
+// The floor has come down twice: 60 to 30 once Terra and Sol verified every scene, then 30 to 15
+// after a tester heard two brief scenes play with Complete sex scenes enabled. So a
+// twenty-five-second verified encounter, which the thirty-second floor discarded, has to keep its
+// skip. Both sides are pinned, because asserting only that short scenes are dropped would be
+// satisfied by dropping every scene.
+var briefButRealScene = SceneEventPostProcessor.Process(
+    [
+        new ScanEvent(Guid.NewGuid(), 300, 325, completeSceneMapping.CategoryID,
+            completeSceneMapping.GroupID, completeSceneMapping.EventID, .94, "brief-real-scene",
+            "Brief intimate encounter")
+    ],
+    [new TranscriptSegment(0, 600, "Test transcript")]);
+Assert(briefButRealScene.Count == 1,
+    "A twenty-five-second verified scene was discarded for being short. That is the fault a "
+    + "listener reported: brief scenes detected, verified, dropped, and then heard.");
 
 // Both sides of the minimum are pinned, because only asserting that short scenes are dropped
 // would be satisfied by dropping every scene. The threshold was lowered from 60 seconds once

@@ -19,7 +19,7 @@ public static class FaqContent
     /// Lets a client tell a served copy from its own bundled fallback and prefer the newer one, so an
     /// app that has not been updated in a while still shows the better answers.
     /// </remarks>
-    public const int Version = 2;
+    public const int Version = 3;
 
     public static FaqResponse Current { get; } = new(Version, new[]
     {
@@ -52,6 +52,25 @@ public static class FaqContent
 
         new FaqSection("Filters", new[]
         {
+            new FaqEntry(
+                "What is the difference between the six sexual content filters?",
+                "They are a ladder, and each one means a different amount. Suggestive dialogue is " +
+                "flirtation, tension and kissing, however charged. Sexual references are sex spoken " +
+                "about rather than happening: a past encounter, a crude joke. Nudity is a body " +
+                "described unclothed, or clothing coming off, with nothing further in that passage. " +
+                "Implied sexual activity is sex that happens where the narration fades out or cuts " +
+                "away. Explicit sexual activity is a sexual act described as it happens. Complete " +
+                "sex scenes is the whole scene, from its lead-in to where the story returns to " +
+                "something else, and it is applied to every scene containing implied or explicit " +
+                "activity, including short ones. Switching on a higher rung does not switch on the " +
+                "ones below it, so if you want kissing removed as well as scenes, turn on both."),
+            new FaqEntry(
+                "Kissing was removed and I only wanted sex scenes filtered. Why?",
+                "That was a fault in how scenes were graded and it has been corrected. Kissing and " +
+                "undressing now sit under Suggestive dialogue and Nudity, not Explicit sexual " +
+                "activity. A book scanned before the correction keeps its old grading until it is " +
+                "scanned again, so re-import it or use Scan this audiobook on the player to pick up " +
+                "the new one."),
             new FaqEntry(
                 "How do filters work?",
                 "An audiobook is scanned once, and the result records where each kind of content " +

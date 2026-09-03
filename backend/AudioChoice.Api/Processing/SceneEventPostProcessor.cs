@@ -36,11 +36,17 @@ public static class SceneEventPostProcessor
     /// the threshold is guarding against far less than it used to while still discarding
     /// genuine short scenes: a verified forty-second encounter kept no scene skip at all.
     ///
-    /// Lowered rather than removed. Half a minute of narration is still more likely one
-    /// explicit sentence and its surroundings than a scene, and the narrower
-    /// explicit-activity events continue to cover those moments regardless.
+    /// Lowered again, to fifteen seconds, because thirty was removing real scenes. A tester
+    /// listening with only Complete sex scenes enabled heard two scenes play in one book: brief
+    /// encounters that were detected, verified, and then dropped for being short. Someone who
+    /// switches that on is asking for sex scenes to be gone, and the short ones are precisely the
+    /// ones a length rule discards.
+    ///
+    /// Kept rather than removed. A floor still stops a single explicit sentence and its padding
+    /// from becoming a scene-sized skip, and every range reaching here has already cleared two
+    /// verification passes at 0.85 confidence.
     /// </remarks>
-    private const double MinimumCompleteSceneSeconds = 30;
+    private const double MinimumCompleteSceneSeconds = 15;
 
     public static IReadOnlyList<ScanEvent> Process(
         IReadOnlyList<ScanEvent> events,
