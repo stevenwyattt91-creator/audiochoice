@@ -49,7 +49,16 @@ public sealed class FasterWhisperTranscriptionProvider(
 
         return payload.Segments
             .Where(item => !string.IsNullOrWhiteSpace(item.Text))
-            .Select(item => new TranscriptSegment(item.Start, item.End, item.Text.Trim()))
+            .Select(item => new TranscriptSegment(
+                item.Start,
+                item.End,
+                item.Text.Trim(),
+                item.Words?
+                    // Whisper prefixes each word with the space that preceded it, so the text has
+                    // to be trimmed before it can be matched against a word list.
+                    .Select(word => new TranscriptWord(word.Word.Trim(), word.Start, word.End))
+                    .Where(word => word.Text.Length > 0)
+                    .ToArray()))
             .ToArray();
     }
 
@@ -59,5 +68,12 @@ public sealed class FasterWhisperTranscriptionProvider(
     private sealed record WhisperSegment(
         [property: JsonPropertyName("start")] double Start,
         [property: JsonPropertyName("end")] double End,
-        [property: JsonPropertyName("text")] string Text);
+        [property: JsonPropertyName("text")] string Text,
+        // Absent from a service that predates word timings, so nullable rather than required.
+        [property: JsonPropertyName("words")] IReadOnlyList<WhisperWord>? Words = null);
+
+    private sealed record WhisperWord(
+        [property: JsonPropertyName("word")] string Word,
+        [property: JsonPropertyName("start")] double Start,
+        [property: JsonPropertyName("end")] double End);
 }

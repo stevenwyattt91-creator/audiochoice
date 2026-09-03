@@ -2342,6 +2342,43 @@ Assert(
         inner.Count == 1 && inner[0]!["candidateKey"]!.GetValue<string>() == "abc",
     "The double-encoded reply shape this repair exists for is no longer what it was.");
 
+// A single word must cost a single word. A segment runs five to ten seconds and one profanity was
+// taking all of it, thousands of times across a library, which is the largest avoidable source of
+// removed narration in the app.
+var spokenSegment = new TranscriptSegment(100, 108, "Damn it, he said, slamming the door.", new[]
+{
+    new TranscriptWord("Damn", 100.2, 100.6),
+    new TranscriptWord("it,", 100.6, 100.8),
+    new TranscriptWord("he", 101.0, 101.2),
+    new TranscriptWord("said,", 101.2, 101.6)
+});
+var wordScoped = DeterministicContentDetector.DetectProfanity([spokenSegment]);
+Assert(wordScoped.Count == 1, "The profanity in a segment with word timings was not detected.");
+Assert(
+    Math.Abs(wordScoped[0].StartTime - 100.2) < 0.001 &&
+        Math.Abs(wordScoped[0].EndTime - 100.6) < 0.001,
+    "Profanity with word timings available still removed the whole segment rather than the word.");
+
+// Every transcript saved before word timings existed has none, and those books must keep working.
+var withoutWords = new TranscriptSegment(100, 108, "Damn it, he said.");
+var segmentScoped = DeterministicContentDetector.DetectProfanity([withoutWords]);
+Assert(
+    segmentScoped.Count == 1 && segmentScoped[0].StartTime == 100 && segmentScoped[0].EndTime == 108,
+    "A transcript without word timings did not fall back to the segment's own range.");
+
+// Two of the same word must get two timings, not both the first one.
+var twice = new TranscriptSegment(200, 210, "Damn, damn.", new[]
+{
+    new TranscriptWord("Damn,", 200.5, 200.9),
+    new TranscriptWord("damn.", 201.5, 201.9)
+});
+var repeated = DeterministicContentDetector.DetectProfanity([twice]);
+Assert(repeated.Count == 2, "Two occurrences of one word were not both detected.");
+Assert(
+    Math.Abs(repeated[0].StartTime - 200.5) < 0.001 &&
+        Math.Abs(repeated[1].StartTime - 201.5) < 0.001,
+    "A repeated word reused the first occurrence's timing for both.");
+
 Console.WriteLine("AudioChoice backend contract tests passed.");
 
 static string FindMigrationsDirectory()

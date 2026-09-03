@@ -83,8 +83,17 @@ async def transcribe(
         print({"event": "transcription_complete", "workerId": worker_id,
                "queueDepth": queue_depth, "elapsedSeconds": elapsed,
                "queueWaitSeconds": started - queued_at, "model": selected_name}, flush=True)
+        # Word timings were already being computed and thrown away here. word_timestamps is
+        # requested above, the GPU does the work, and only the segment was returned -- so a
+        # one-word finding had to be removed as a whole segment. Emitted now so a skip can be as
+        # short as the word that caused it.
         return {"segments": [
-            {"start": segment.start, "end": segment.end, "text": segment.text}
+            {"start": segment.start, "end": segment.end, "text": segment.text,
+             "words": [
+                 {"word": word.word, "start": word.start, "end": word.end}
+                 for word in (segment.words or [])
+                 if word.start is not None and word.end is not None
+             ]}
             for segment in segments
         ], "model": selected_name, "elapsedSeconds": elapsed}
     except Exception as error:

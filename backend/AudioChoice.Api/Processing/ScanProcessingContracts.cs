@@ -12,10 +12,29 @@ public sealed record AudioChunk(
     public void DisposeFile() => Cleanup?.Invoke();
 }
 
+/// <summary>One word, with its own timing.</summary>
+/// <remarks>
+/// Whisper produces these already. The transcription service asked for them, received them, and
+/// serialized only the segment -- so they were computed on the GPU and discarded, and every
+/// single-word finding had to be removed as a whole segment instead. One "damn" cost the five to
+/// ten seconds of narration around it, several thousand times over a library.
+/// </remarks>
+public sealed record TranscriptWord(
+    string Text,
+    double StartTime,
+    double EndTime);
+
 public sealed record TranscriptSegment(
     double StartTime,
     double EndTime,
-    string Text);
+    string Text,
+    /// <summary>
+    /// The segment's words, when the transcriber reported them. Empty otherwise.
+    ///
+    /// Defaulted last so every existing positional construction keeps compiling, and optional
+    /// because a stored transcript written before this existed has none and must stay readable.
+    /// </summary>
+    IReadOnlyList<TranscriptWord>? Words = null);
 
 public sealed record PrivateTranscript(
     string Version,
