@@ -360,6 +360,11 @@ private struct LegacyPlayerScreen: View {
 struct PlayerScreen: View {
     var book: MobileBook
     var initialPosition: Double? = nil
+    /// Begins playing on arrival, for a route whose whole purpose was to resume.
+    ///
+    /// Off everywhere else. Opening a book's player from a chapter or a bookmark is a listener
+    /// looking at where they are, not asking for sound to start.
+    var autoPlay: Bool = false
     /// True only where this screen is the Player tab's own content.
     ///
     /// Everywhere else it is pushed -- from a book's page, a chapter, a bookmark -- and there the tab
@@ -573,6 +578,9 @@ struct PlayerScreen: View {
             if let record {
                 playback.load(record)
                 if let initialPosition { playback.seek(to: initialPosition) }
+                // Guarded on isPlaying because load returns early for the book already open, so
+                // arriving here while it plays must not toggle it off.
+                if autoPlay, !playback.isPlaying { playback.togglePlayback() }
             }
         }
         .sheet(isPresented: $showingBookmarks) {
