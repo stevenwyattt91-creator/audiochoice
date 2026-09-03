@@ -43,6 +43,21 @@ public sealed class OpenAIProcessingOptions
     /// vendor by configuration, and it is why the checkpoint cache keys on the model name --
     /// answers from one model are never reused for another.
     /// </remarks>
+    /// <summary>
+    /// The lane a scan is queued on when the request does not ask for one.
+    /// </summary>
+    /// <remarks>
+    /// Was hardcoded to the Azure lane, which transcribes through OpenAI. That lane also
+    /// cannot finish an audiobook: its deployment still carries a paid-test ceiling of 300
+    /// seconds and one chunk, so anything longer than five minutes throws. Pointing the
+    /// default at the GPU lane removes the last use of OpenAI from scanning and moves every
+    /// scan onto a worker that can actually complete one.
+    ///
+    /// Configuration rather than a code change, so a lane can be redirected while a host is
+    /// down without a deploy.
+    /// </remarks>
+    public string DefaultProcessingLane { get; init; } = ScanProcessingLanes.IOSBetaLambda;
+
     public string AnalysisProvider { get; init; } = "openai";
 
     /// <summary>

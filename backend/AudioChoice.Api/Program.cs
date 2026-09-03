@@ -469,13 +469,17 @@ app.Logger.LogInformation(
     openAIOptions.SceneEscalationModel,
     openAIOptions.ScannerVersion);
 
-static string ScanLane(HttpContext context) =>
+// A request may still name the GPU lane explicitly, which beta clients do. Everything else
+// takes the configured default, which is now that same lane: the Azure worker transcribes
+// through OpenAI and, with the paid-test ceiling its deployment still carries, cannot finish an
+// audiobook anyway. Nothing in scanning reaches OpenAI once this is the default.
+string ScanLane(HttpContext context) =>
     string.Equals(
         context.Request.Headers["X-AudioChoice-Scan-Channel"].ToString(),
         "ios-beta",
         StringComparison.OrdinalIgnoreCase)
         ? ScanProcessingLanes.IOSBetaLambda
-        : ScanProcessingLanes.AzureOpenAI;
+        : openAIOptions.DefaultProcessingLane;
 
 app.UseCors("AdminPortal");
 app.UseRateLimiter();
