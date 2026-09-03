@@ -491,6 +491,9 @@ private fun LibraryShell(
     val scope = rememberCoroutineScope()
     val tabs = listOf("Library", "Player", "Import", "Profile")
     val tabIcons = listOf(Icons.Outlined.LibraryBooks, Icons.Outlined.GraphicEq, Icons.Outlined.FileDownload, Icons.Outlined.PersonOutline)
+    // Read once, not on every recomposition: it is a disk read, and the live player state is
+    // authoritative the moment a book is open. This only has to cover the gap before that.
+    val rememberedLastBookID = remember { player.lastOpenBookID() }
     val libraryState by library.state.collectAsStateWithLifecycle()
     val importState by importer.state.collectAsStateWithLifecycle()
     val playerState by player.state.collectAsStateWithLifecycle()
@@ -742,6 +745,7 @@ private fun LibraryShell(
             if (selected == 0) {
                 if (librarySection == LibrarySection.MY_LIBRARY) {
                     LibraryHome(
+                        lastPlayedBookID = playerState.book?.id ?: rememberedLastBookID,
                         books = libraryState.books,
                         coverPaths = libraryState.coverPaths,
                         ebooksWithoutFilterResults = libraryState.ebooksWithoutFilterResults,
@@ -945,6 +949,14 @@ private fun LibraryHome(
     onOpenBook: (LibraryBook) -> Unit,
     /** Resumes straight into the player. Only the green Continue button does this. */
     onPlayNow: (LibraryBook) -> Unit,
+    /**
+     * The book most recently opened in the player, or null if none has been.
+     *
+     * Continue Listening needs "most recent", and the library rows carry no listened-at time --
+     * only a position and an added-at. So this comes from the player, which records the book it
+     * opened, and is the same value iOS has always used for its own Continue card.
+     */
+    lastPlayedBookID: String?,
 ) {
     var sort by rememberSaveable { mutableStateOf(LibrarySort.RECENT) }
     var sortMenu by remember { mutableStateOf(false) }
@@ -973,7 +985,14 @@ private fun LibraryHome(
     // Scoped to the shelf on view. A shelf offering to resume a book that is not on it -- and
     // that opens a different surface when tapped -- would be actively misleading.
     val shelfBooks = if (ebooksAvailable) LibraryShelves.booksOn(books, shelf) else books
-    val featured = shelfBooks.firstOrNull { it.playbackPositionSeconds > 0 && !it.isFinished }
+    // The book last listened to, then any book with progress, then anything at all.
+    //
+    // This used to take the first book on the shelf with a position, which is list order and has
+    // nothing to do with recency: whichever book sorted first kept the card forever, so starting
+    // a second book changed nothing and Continue Listening pointed at the wrong one permanently.
+    val featured = shelfBooks.firstOrNull {
+        it.id == lastPlayedBookID && !it.isFinished
+    } ?: shelfBooks.firstOrNull { it.playbackPositionSeconds > 0 && !it.isFinished }
         ?: shelfBooks.firstOrNull()
     val visibleBooks = shelfBooks.filter { book ->
         query.isBlank() || book.title.contains(query, ignoreCase = true) ||
