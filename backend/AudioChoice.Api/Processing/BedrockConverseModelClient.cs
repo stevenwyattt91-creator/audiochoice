@@ -78,7 +78,7 @@ public sealed class BedrockConverseModelClient(
             {
                 var response = await bedrock.ConverseAsync(request, cancellationToken);
                 return new AnalysisModelResponse(
-                    ExtractToolInput(response, schemaName),
+                    ExtractToolInput(response, schemaName, schema),
                     response.Usage?.InputTokens,
                     response.Usage?.OutputTokens);
             }
@@ -134,16 +134,45 @@ public sealed class BedrockConverseModelClient(
     /// <summary>
     /// Pulls the tool arguments out of the reply, as the JSON the scanner deserializes.
     /// </summary>
-    private static string ExtractToolInput(ConverseResponse response, string schemaName)
+    /// <summary>
+    /// Nudges a reply into the shape its schema declared, where a model bends it.
+    /// </summary>
+    /// <remarks>
+    /// A tool schema is enforced loosely enough that Nova will sometimes return a single object
+    /// where an array of one was asked for. Deserialization then fails on the whole batch --
+    /// which cost a book at 94%, after every model call had already been paid for, on a reply
+    /// that carried the right content in a marginally wrong wrapper.
+    ///
+    /// Only that one shape is corrected, and only where the schema says array. Anything else is
+    /// left to fail loudly: quietly coercing a reply into the expected type is how a wrong
+    /// answer gets accepted as a right one, and this pipeline decides what a listener hears.
+    /// </remarks>
+    private static void Conform(JsonNode answer, JsonObject schema)
+    {
+        if (answer is not JsonObject obj) return;
+        if (schema["properties"] is not JsonObject properties) return;
+        foreach (var property in properties)
+        {
+            if (property.Value?["type"]?.GetValue<string>() != "array") continue;
+            if (obj[property.Key] is null or JsonArray) continue;
+            var single = obj[property.Key]!.DeepClone();
+            obj[property.Key] = new JsonArray(single);
+        }
+    }
+
+    private static string ExtractToolInput(
+        ConverseResponse response, string schemaName, JsonObject schema)
     {
         var content = response.Output?.Message?.Content ?? [];
         foreach (var block in content)
         {
             if (block.ToolUse is { } use && use.Input is { } arguments)
             {
-                return BedrockDocuments.ToJsonNode(arguments)?.ToJsonString()
+                var answer = BedrockDocuments.ToJsonNode(arguments)
                     ?? throw new InvalidOperationException(
                         $"{schemaName} returned tool arguments that were not an object.");
+                Conform(answer, schema);
+                return answer.ToJsonString();
             }
         }
 
