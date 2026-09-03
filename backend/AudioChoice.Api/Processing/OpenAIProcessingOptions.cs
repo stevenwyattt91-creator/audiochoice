@@ -69,6 +69,26 @@ public sealed class OpenAIProcessingOptions
     public string AnalysisModel { get; init; } = "gpt-5.6-luna";
     public string SceneVerificationModel { get; init; } = "gpt-5.6-terra";
     public string SceneEscalationModel { get; init; } = "gpt-5.6-sol";
+
+    /// <summary>
+    /// The model that confirms whether proposed violence actually describes injury.
+    /// </summary>
+    /// <remarks>
+    /// Its own setting rather than the scene verifier's. Reusing that one coupled two unrelated
+    /// judgements: moving the sexual-scene stages to OpenAI silently moved violence with them,
+    /// and violence verification went from rejecting 61% of proposals to confirming 237 of 237.
+    /// The two tiers answer different questions and the best model for each is not the same one.
+    ///
+    /// Empty means fall back to the scene verifier, so a configuration that predates this setting
+    /// keeps working.
+    /// </remarks>
+    public string ViolenceVerificationModel { get; init; } = string.Empty;
+
+    /// <summary>The violence verifier, or the scene verifier when none is set.</summary>
+    public string EffectiveViolenceVerificationModel =>
+        string.IsNullOrWhiteSpace(ViolenceVerificationModel)
+            ? SceneVerificationModel
+            : ViolenceVerificationModel;
     public string ScannerVersion { get; init; } = "3.6";
     /// <summary>Only jobs in this lane may be claimed by this worker instance.</summary>
     public string ProcessingLane { get; init; } = ScanProcessingLanes.AzureOpenAI;

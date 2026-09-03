@@ -349,6 +349,7 @@ if (openAIOptions.WorkerEnabled)
             openAIOptions.SceneVerificationModel,
             openAIOptions.SceneEscalationModel
         }
+            .Append(openAIOptions.EffectiveViolenceVerificationModel)
         .Any(RoutingAnalysisModelClient.IsOpenAIModel);
     if (string.IsNullOrWhiteSpace(openAIOptions.ApiKey) &&
         (!usesBedrockAnalysis || usesOpenAITranscription || anyTierUsesOpenAI))
@@ -480,7 +481,8 @@ app.Logger.LogInformation(
     openAIOptions.ProcessingLane);
 app.Logger.LogInformation(
     "Analysis provider {AnalysisProvider}{Region}; first pass {AnalysisModel}; " +
-    "verification {VerificationModel}; escalation {EscalationModel}; scanner {ScannerVersion}",
+    "scene verification {VerificationModel}; escalation {EscalationModel}; " +
+    "violence verification {ViolenceModel}; scanner {ScannerVersion}",
     openAIOptions.AnalysisProvider,
     string.IsNullOrWhiteSpace(openAIOptions.BedrockRegion)
         ? string.Empty
@@ -488,6 +490,7 @@ app.Logger.LogInformation(
     openAIOptions.AnalysisModel,
     openAIOptions.SceneVerificationModel,
     openAIOptions.SceneEscalationModel,
+    openAIOptions.EffectiveViolenceVerificationModel,
     openAIOptions.ScannerVersion);
 
 // A request may still name the GPU lane explicitly, which beta clients do. Everything else

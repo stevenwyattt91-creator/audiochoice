@@ -730,9 +730,9 @@ Candidates:
         try
         {
             var response = await modelClient.CompleteJson(
-                options.SceneVerificationModel, input,
+                options.EffectiveViolenceVerificationModel, input,
                 "audiochoice_violence_verification", schema, cancellationToken);
-            RecordUsage(options.SceneVerificationModel, response);
+            RecordUsage(options.EffectiveViolenceVerificationModel, response);
             var payload = ReadPayload<ViolenceVerificationPayload>(response.Json, "Violence verification");
             return payload?.Candidates
                 .Where(item => item.DwellsOnPhysicalDamage &&
