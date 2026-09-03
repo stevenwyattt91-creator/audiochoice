@@ -1,3 +1,4 @@
+using System.Text.Json;
 using System.Text.Json.Nodes;
 using Amazon.BedrockRuntime;
 using Amazon.BedrockRuntime.Model;
@@ -135,6 +136,28 @@ public sealed class BedrockConverseModelClient(
     /// Pulls the tool arguments out of the reply, as the JSON the scanner deserializes.
     /// </summary>
     /// <summary>
+    /// Returns the array a model encoded as a JSON string, or null if it did not.
+    /// </summary>
+    /// <remarks>
+    /// Only accepted when the text parses cleanly as an array. Anything less certain is left
+    /// alone: reinterpreting a reply we cannot read confidently would be inventing an answer,
+    /// and these replies decide what is removed from somebody's audiobook.
+    /// </remarks>
+    private static JsonArray? Unwrap(JsonNode value)
+    {
+        var text = value switch
+        {
+            JsonValue single when single.TryGetValue(out string? direct) => direct,
+            JsonArray array when array.Count == 1 && array[0] is JsonValue inner &&
+                inner.TryGetValue(out string? nested) => nested,
+            _ => null
+        };
+        if (string.IsNullOrWhiteSpace(text)) return null;
+        try { return JsonNode.Parse(text) as JsonArray; }
+        catch (JsonException) { return null; }
+    }
+
+    /// <summary>
     /// Nudges a reply into the shape its schema declared, where a model bends it.
     /// </summary>
     /// <remarks>
@@ -166,8 +189,17 @@ public sealed class BedrockConverseModelClient(
 
             if (type == "array")
             {
+                // An array whose only element is a string that is itself the JSON array. Nova
+                // does this: {"candidates":["[{\"candidateKey\":...}]"]}. Every field lookup
+                // then fails, and the error names a byte offset inside text that looks like the
+                // right answer -- which is why this took three rebuilds to see rather than guess.
+                if (Unwrap(value) is JsonArray unwrapped)
+                {
+                    obj[property.Key] = unwrapped;
+                    value = unwrapped;
+                }
                 // A lone object where an array of one was asked for.
-                if (value is not JsonArray)
+                else if (value is not JsonArray)
                 {
                     obj[property.Key] = new JsonArray(value.DeepClone());
                 }
