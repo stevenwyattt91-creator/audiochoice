@@ -104,6 +104,7 @@ import com.audiochoice.mobile.reader.ReaderSettings
 import com.audiochoice.mobile.reader.ReaderTheme
 import com.audiochoice.mobile.reader.indexOfCharacter
 import com.audiochoice.mobile.reader.merged
+import com.audiochoice.mobile.reader.approximateReaderCharacter
 import com.audiochoice.mobile.reader.readerCharacterForTime
 import com.audiochoice.mobile.reader.readerDisplayParagraphs
 import com.audiochoice.mobile.reader.readerTimeForCharacter
@@ -2846,8 +2847,23 @@ private fun ReaderScreen(
     // rather than snapping the highlight back to the start of the book.
     var narratedIndex by remember(state.book?.id) { mutableIntStateOf(-1) }
     if (settings.followAudio) {
-        val narratedCharacter = remember(state.positionMs, state.readerTimingRanges) {
-            readerCharacterForTime(state.readerTimingRanges, state.positionMs / 1000.0)
+        // Alignment first. Without it, a proportion of the way through the text, which is wrong by
+        // pages and still far better than the title page ten hours into a book. Alignment is a
+        // separate request from the filter scan and can fail on its own, so a book with working
+        // filters and no read-along timings is an ordinary state rather than a broken one.
+        val narratedCharacter = remember(
+            state.positionMs,
+            state.readerTimingRanges,
+            state.durationMs,
+            displayParagraphs,
+        ) {
+            val seconds = state.positionMs / 1000.0
+            readerCharacterForTime(state.readerTimingRanges, seconds)
+                ?: approximateReaderCharacter(
+                    seconds = seconds,
+                    durationSeconds = state.durationMs / 1000.0,
+                    characterCount = displayParagraphs.lastOrNull()?.paragraph?.endCharacter ?: 0,
+                )
         }
         // Hoisted so the lookup list is not rebuilt on every position tick.
         val sourceParagraphs = remember(displayParagraphs) {

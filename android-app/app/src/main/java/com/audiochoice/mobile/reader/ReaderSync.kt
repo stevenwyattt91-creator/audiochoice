@@ -16,6 +16,24 @@ import com.audiochoice.mobile.data.ReaderTimingRange
  */
 
 /** Character offset currently being narrated, or null if no range covers [seconds]. */
+/**
+ * Roughly where the listening has reached, for a book with no alignment.
+ *
+ * A straight proportion of the text: two hours into a ten-hour book lands a fifth of the way in.
+ * Wrong by pages, and deliberately offered anyway. A book whose EPUB was never aligned -- and
+ * plenty were not, because alignment is a separate request that can fail while the filter scan
+ * succeeds -- otherwise opens at the title page ten hours in, with nothing to search for. Being
+ * approximately right is the difference between a starting point and no way back at all.
+ *
+ * Null when the numbers cannot support even that: nothing played, no runtime, or no text.
+ */
+fun approximateReaderCharacter(seconds: Double, durationSeconds: Double, characterCount: Int): Int? {
+    if (seconds <= 0 || durationSeconds <= 0 || characterCount <= 0) return null
+    if (!seconds.isFinite() || !durationSeconds.isFinite()) return null
+    val fraction = (seconds / durationSeconds).coerceIn(0.0, 1.0)
+    return (fraction * characterCount).toInt()
+}
+
 fun readerCharacterForTime(timings: List<ReaderTimingRange>, seconds: Double): Int? {
     val timing = timingContainingTime(timings, seconds) ?: return null
     val duration = (timing.endTime - timing.startTime).coerceAtLeast(MINIMUM_DURATION)
