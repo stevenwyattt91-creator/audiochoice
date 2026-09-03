@@ -294,10 +294,20 @@ private struct LegacyPlayerScreen: View {
                     }
                 }
                 Menu {
+                    // Offered only for a file that carries chapter marks. A book without them cannot
+                    // answer "the end of this chapter", and a silent fall back to a duration would be
+                    // answering a different question from the one asked.
+                    if record?.chapterMarkers?.isEmpty == false {
+                        Button("End of chapter") { sleepAtEndOfChapter() }
+                        Divider()
+                    }
                     Button("15 minutes") { setSleepTimer(minutes: 15) }
                     Button("30 minutes") { setSleepTimer(minutes: 30) }
                     Button("60 minutes") { setSleepTimer(minutes: 60) }
-                    Button("Cancel Timer", role: .destructive) { sleepTask?.cancel() }
+                    Button("Cancel Timer", role: .destructive) {
+                        sleepTask?.cancel()
+                        playback.cancelSleepAtPosition()
+                    }
                 } label: {
                     playerTool("moon", "Sleep Timer")
                 }
@@ -345,8 +355,15 @@ private struct LegacyPlayerScreen: View {
             : String(format: "%d:%02d", minutes, remaining)
     }
 
+    private func sleepAtEndOfChapter() {
+        sleepTask?.cancel()
+        sleepTask = nil
+        _ = playback.sleepAtEndOfChapter()
+    }
+
     private func setSleepTimer(minutes: Int) {
         sleepTask?.cancel()
+        playback.cancelSleepAtPosition()
         sleepTask = Task {
             try? await Task.sleep(for: .seconds(minutes * 60))
             guard !Task.isCancelled, playback.isPlaying else { return }
@@ -360,6 +377,11 @@ private struct LegacyPlayerScreen: View {
 struct PlayerScreen: View {
     var book: MobileBook
     var initialPosition: Double? = nil
+    /// Begins playing on arrival, for a route whose whole purpose was to resume.
+    ///
+    /// Off everywhere else. Opening a book's player from a chapter or a bookmark is a listener
+    /// looking at where they are, not asking for sound to start.
+    var autoPlay: Bool = false
     /// True only where this screen is the Player tab's own content.
     ///
     /// Everywhere else it is pushed -- from a book's page, a chapter, a bookmark -- and there the tab
@@ -419,10 +441,20 @@ struct PlayerScreen: View {
                     HStack {
                         Spacer()
                         Menu {
+                            // Offered only for a file that carries chapter marks. A book without them cannot
+                            // answer "the end of this chapter", and a silent fall back to a duration would be
+                            // answering a different question from the one asked.
+                            if record?.chapterMarkers?.isEmpty == false {
+                                Button("End of chapter") { sleepAtEndOfChapter() }
+                                Divider()
+                            }
                             Button("15 minutes") { setSleepTimer(minutes: 15) }
                             Button("30 minutes") { setSleepTimer(minutes: 30) }
                             Button("60 minutes") { setSleepTimer(minutes: 60) }
-                            Button("Turn off", role: .destructive) { sleepTask?.cancel() }
+                            Button("Turn off", role: .destructive) {
+                                sleepTask?.cancel()
+                                playback.cancelSleepAtPosition()
+                            }
                         } label: { Image(systemName: "timer").font(.title2) }
                         .accessibilityLabel("Sleep timer")
                     }
@@ -573,6 +605,9 @@ struct PlayerScreen: View {
             if let record {
                 playback.load(record)
                 if let initialPosition { playback.seek(to: initialPosition) }
+                // Guarded on isPlaying because load returns early for the book already open, so
+                // arriving here while it plays must not toggle it off.
+                if autoPlay, !playback.isPlaying { playback.togglePlayback() }
             }
         }
         .sheet(isPresented: $showingBookmarks) {
@@ -609,8 +644,15 @@ struct PlayerScreen: View {
         return total >= 3600 ? String(format: "%d:%02d:%02d", total / 3600, (total % 3600) / 60, total % 60) : String(format: "%d:%02d", total / 60, total % 60)
     }
 
+    private func sleepAtEndOfChapter() {
+        sleepTask?.cancel()
+        sleepTask = nil
+        _ = playback.sleepAtEndOfChapter()
+    }
+
     private func setSleepTimer(minutes: Int) {
         sleepTask?.cancel()
+        playback.cancelSleepAtPosition()
         sleepTask = Task {
             try? await Task.sleep(for: .seconds(minutes * 60))
             guard !Task.isCancelled, playback.isPlaying else { return }

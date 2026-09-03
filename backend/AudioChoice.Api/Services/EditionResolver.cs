@@ -102,26 +102,43 @@ public sealed class EditionResolver(
             return linked;
         }
 
-        // Deliberately narrower than the transcript path: a shared product
-        // identifier is proof of the same published edition, so filter timings
-        // transfer safely. Metadata similarity is not proof and is not used here.
-        if (string.IsNullOrWhiteSpace(signature?.ProductIdentifier)) return null;
+        // Deliberately narrower than the transcript path. Filter timings decide what a listener
+        // hears, so only evidence that identifies one recording is accepted here, never metadata
+        // similarity: a shared title and author describe two different readings of one book just
+        // as well as they describe the same recording twice.
+        //
+        // Two kinds qualify. A retail identifier names one published edition. Failing that, a
+        // chapter structure of eight or more marks agreeing to the second is a pattern a
+        // different reading does not share, and one a tagger does not type. The second kind is
+        // new, and it is what lets a converted or re-tagged copy of an already scanned recording
+        // find its filters instead of paying to scan the same audio again.
+        var hasIdentifier = !string.IsNullOrWhiteSpace(signature?.ProductIdentifier);
+        var hasStructure = signature?.ChapterOffsetSeconds is { Count: >= 8 };
+        if (!hasIdentifier && !hasStructure) return null;
 
         foreach (var candidate in catalog.ListFingerprints())
         {
             if (SameKey(candidate, fingerprint)) continue;
 
             var candidateSignature = signatures.Find(candidate);
-            if (string.IsNullOrWhiteSpace(candidateSignature?.ProductIdentifier)) continue;
-            if (!EditionMatch.SameRecording(fingerprint, candidate, signature, candidateSignature)) continue;
+            var identifiersAgree = hasIdentifier &&
+                !string.IsNullOrWhiteSpace(candidateSignature?.ProductIdentifier) &&
+                EditionMatch.SameRecording(fingerprint, candidate, signature, candidateSignature);
+            // Runtime stays required, as it is for every match, because it is the one claim a
+            // re-tag cannot forge.
+            var structureAgrees =
+                EditionMatch.ChapterStructureIdentifies(signature, candidateSignature) &&
+                EditionMatch.SameRuntime(fingerprint, candidate);
+            if (!identifiersAgree && !structureAgrees) continue;
 
             var matched = catalog.FindResult(candidate);
             if (matched is null) continue;
 
             aliases.Link(fingerprint, candidate);
             logger.LogInformation(
-                "Reused filter results for {Title} after matching retail product identifiers.",
-                fingerprint.WorkTitle);
+                "Reused filter results for {Title} after matching {Evidence}.",
+                fingerprint.WorkTitle,
+                identifiersAgree ? "retail product identifiers" : "chapter structure and runtime");
             return matched;
         }
 

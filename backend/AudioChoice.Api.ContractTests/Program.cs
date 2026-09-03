@@ -335,20 +335,39 @@ var joinedSceneEvents = SceneEventPostProcessor.Process(
     ],
     [new TranscriptSegment(0, 600, "Test transcript")]);
 Assert(joinedSceneEvents.Count == 1, "Overlapping sexual scene ranges were not joined.");
-Assert(joinedSceneEvents[0].StartTime == 92 && joinedSceneEvents[0].EndTime == 268,
-    "Sexual scene safety padding was not applied.");
+Assert(joinedSceneEvents[0].StartTime == 100 - 3 && joinedSceneEvents[0].EndTime == 260 + 3,
+    "A joined sexual scene did not get exactly three seconds of padding either side. " +
+    "Padding was reduced from eight seconds because sixteen seconds a scene was, across a " +
+    "book, one of the largest contributors to how much audio disappeared.");
 Assert(joinedSceneEvents[0].SafeDescription == "Sustained sexual activity",
     "Sexual scene safe description fallback was not applied.");
 
 var narrowSceneEvents = SceneEventPostProcessor.Process(
     [
-        new ScanEvent(Guid.NewGuid(), 300, 325, completeSceneMapping.CategoryID,
+        new ScanEvent(Guid.NewGuid(), 300, 308, completeSceneMapping.CategoryID,
             completeSceneMapping.GroupID, completeSceneMapping.EventID, .94, "narrow-scene",
             "Brief explicit activity")
     ],
     [new TranscriptSegment(0, 600, "Test transcript")]);
 Assert(narrowSceneEvents.Count == 0,
-    "A short detection was incorrectly promoted to a complete-scene skip.");
+    "An eight-second detection was promoted to a complete-scene skip. A floor still has to "
+    + "stop one explicit sentence and its padding from becoming a scene-sized skip.");
+
+// The floor has come down twice: 60 to 30 once Terra and Sol verified every scene, then 30 to 15
+// after a tester heard two brief scenes play with Complete sex scenes enabled. So a
+// twenty-five-second verified encounter, which the thirty-second floor discarded, has to keep its
+// skip. Both sides are pinned, because asserting only that short scenes are dropped would be
+// satisfied by dropping every scene.
+var briefButRealScene = SceneEventPostProcessor.Process(
+    [
+        new ScanEvent(Guid.NewGuid(), 300, 325, completeSceneMapping.CategoryID,
+            completeSceneMapping.GroupID, completeSceneMapping.EventID, .94, "brief-real-scene",
+            "Brief intimate encounter")
+    ],
+    [new TranscriptSegment(0, 600, "Test transcript")]);
+Assert(briefButRealScene.Count == 1,
+    "A twenty-five-second verified scene was discarded for being short. That is the fault a "
+    + "listener reported: brief scenes detected, verified, dropped, and then heard.");
 
 // Both sides of the minimum are pinned, because only asserting that short scenes are dropped
 // would be satisfied by dropping every scene. The threshold was lowered from 60 seconds once
@@ -2294,6 +2313,114 @@ Assert(
     withNull?["profanityWord"] is null,
     "A null tool argument did not survive the Bedrock Document conversion as null.");
 
+
+// Which service a tier reaches is decided by the model it names, so a name that matches
+// neither vendor must stop the job rather than fall through to one of them. A book classified
+// against the wrong provider would look entirely ordinary.
+Assert(RoutingAnalysisModelClient.IsOpenAIModel("gpt-5.6-sol"), "An OpenAI model was not recognised.");
+Assert(RoutingAnalysisModelClient.IsOpenAIModel("gpt-5.6-terra"), "An OpenAI model was not recognised.");
+Assert(!RoutingAnalysisModelClient.IsOpenAIModel("amazon.nova-lite-v1:0"), "A Nova model was read as OpenAI.");
+Assert(!RoutingAnalysisModelClient.IsOpenAIModel("us.amazon.nova-2-lite-v1:0"), "A Nova model was read as OpenAI.");
+Assert(RoutingAnalysisModelClient.IsBedrockModel("amazon.nova-lite-v1:0"), "A Nova model was not recognised.");
+Assert(RoutingAnalysisModelClient.IsBedrockModel("us.amazon.nova-2-lite-v1:0"), "A cross-region Nova profile was not recognised.");
+Assert(!RoutingAnalysisModelClient.IsBedrockModel("gpt-5.6-sol"), "An OpenAI model was read as Bedrock.");
+Assert(
+    !RoutingAnalysisModelClient.IsOpenAIModel("nova-lite") &&
+        !RoutingAnalysisModelClient.IsBedrockModel("nova-lite"),
+    "A model name missing its provider prefix was claimed by a vendor rather than refused.");
+
+// The exact shape Nova returned that discarded four books' analysis: the list encoded as a
+// string inside a one-element list. Pinned because the repair is invisible when it works and
+// the failure is a byte offset inside text that reads like a correct answer.
+var doubled = """
+    {"candidates":["[{\u0022candidateKey\u0022: \u0022abc\u0022, \u0022accepted\u0022: true}]"]}
+    """;
+var flattenedNode = System.Text.Json.Nodes.JsonNode.Parse(doubled)!;
+var innerText = flattenedNode["candidates"]![0]!.GetValue<string>();
+Assert(
+    System.Text.Json.Nodes.JsonNode.Parse(innerText) is System.Text.Json.Nodes.JsonArray inner &&
+        inner.Count == 1 && inner[0]!["candidateKey"]!.GetValue<string>() == "abc",
+    "The double-encoded reply shape this repair exists for is no longer what it was.");
+
+// A single word must cost a single word. A segment runs five to ten seconds and one profanity was
+// taking all of it, thousands of times across a library, which is the largest avoidable source of
+// removed narration in the app.
+var spokenSegment = new TranscriptSegment(100, 108, "Damn it, he said, slamming the door.", new[]
+{
+    new TranscriptWord("Damn", 100.2, 100.6),
+    new TranscriptWord("it,", 100.6, 100.8),
+    new TranscriptWord("he", 101.0, 101.2),
+    new TranscriptWord("said,", 101.2, 101.6)
+});
+var wordScoped = DeterministicContentDetector.DetectProfanity([spokenSegment]);
+Assert(wordScoped.Count == 1, "The profanity in a segment with word timings was not detected.");
+Assert(
+    Math.Abs(wordScoped[0].StartTime - 100.2) < 0.001 &&
+        Math.Abs(wordScoped[0].EndTime - 100.6) < 0.001,
+    "Profanity with word timings available still removed the whole segment rather than the word.");
+
+// Every transcript saved before word timings existed has none, and those books must keep working.
+var withoutWords = new TranscriptSegment(100, 108, "Damn it, he said.");
+var segmentScoped = DeterministicContentDetector.DetectProfanity([withoutWords]);
+Assert(
+    segmentScoped.Count == 1 && segmentScoped[0].StartTime == 100 && segmentScoped[0].EndTime == 108,
+    "A transcript without word timings did not fall back to the segment's own range.");
+
+// Two of the same word must get two timings, not both the first one.
+var twice = new TranscriptSegment(200, 210, "Damn, damn.", new[]
+{
+    new TranscriptWord("Damn,", 200.5, 200.9),
+    new TranscriptWord("damn.", 201.5, 201.9)
+});
+var repeated = DeterministicContentDetector.DetectProfanity([twice]);
+Assert(repeated.Count == 2, "Two occurrences of one word were not both detected.");
+Assert(
+    Math.Abs(repeated[0].StartTime - 200.5) < 0.001 &&
+        Math.Abs(repeated[1].StartTime - 201.5) < 0.001,
+    "A repeated word reused the first occurrence's timing for both.");
+
+// Chapter structure as identity. This decides whether a converted copy of an already scanned
+// recording finds its filters, and equally whether two unrelated books are handed each other's
+// timings, so both directions are pinned.
+var twelveMarks = Enumerable.Range(0, 12).Select(i => i * 1800).ToArray();
+Assert(
+    EditionMatch.ChapterStructureIdentifies(
+        new EditionSignature(ChapterOffsetSeconds: twelveMarks),
+        new EditionSignature(ChapterOffsetSeconds: twelveMarks)),
+    "Twelve identical chapter marks were not accepted as the same recording.");
+
+// A second's drift is re-encoding, not a different book.
+var driftedMarks = twelveMarks.Select((value, index) => index == 5 ? value + 1 : value).ToArray();
+Assert(
+    EditionMatch.ChapterStructureIdentifies(
+        new EditionSignature(ChapterOffsetSeconds: twelveMarks),
+        new EditionSignature(ChapterOffsetSeconds: driftedMarks)),
+    "A one-second difference in one chapter mark was treated as a different recording.");
+
+// Too few marks cannot identify anything: two books of similar length with three evenly spaced
+// parts would otherwise be handed each other's filters.
+var threeMarks = new[] { 0, 1800, 3600 };
+Assert(
+    !EditionMatch.ChapterStructureIdentifies(
+        new EditionSignature(ChapterOffsetSeconds: threeMarks),
+        new EditionSignature(ChapterOffsetSeconds: threeMarks)),
+    "Three chapter marks were accepted as identifying a recording. Eight is the floor.");
+
+Assert(
+    !EditionMatch.ChapterStructureIdentifies(
+        new EditionSignature(ChapterOffsetSeconds: twelveMarks),
+        new EditionSignature(ChapterOffsetSeconds: twelveMarks.Take(11).ToArray())),
+    "Structures of different lengths were accepted as the same recording.");
+
+Assert(
+    !EditionMatch.ChapterStructureIdentifies(
+        new EditionSignature(ChapterOffsetSeconds: twelveMarks),
+        new EditionSignature(ChapterOffsetSeconds: twelveMarks.Select(v => v + 600).ToArray())),
+    "Marks ten minutes apart were accepted as the same recording.");
+
+Assert(
+    !EditionMatch.ChapterStructureIdentifies(new EditionSignature(), new EditionSignature()),
+    "Two signatures with no chapter marks at all were accepted as the same recording.");
 
 Console.WriteLine("AudioChoice backend contract tests passed.");
 

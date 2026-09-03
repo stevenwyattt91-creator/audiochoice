@@ -18,7 +18,7 @@ public sealed class OpenAIContentAnalysisProvider(
 {
     // Bump this whenever the baseline classification policy changes so cached batch
     // answers cannot silently reintroduce events produced under an older policy.
-    private const string BaseAnalysisPromptVersion = "2.6-clean-descriptions";
+    private const string BaseAnalysisPromptVersion = "3.1-context-not-words";
     private const string SceneVerificationVersion = "3.4-discreet-descriptions";
     private const string SceneEscalationVersion = "3.3-discreet-descriptions";
     private readonly string _checkpointFolder = dataPaths.AnalysisCheckpoints;
@@ -170,6 +170,7 @@ public sealed class OpenAIContentAnalysisProvider(
         // The app's Violence switch is intentionally reserved for graphic material,
         // torture, violence involving children or animals, and suicide/self-harm.
         uniqueEvents = ApplyNarrowViolencePolicy(uniqueEvents);
+        uniqueEvents = await VerifyGraphicViolence(uniqueEvents, segments, cancellationToken);
         var verifiedEvents = await VerifyCompleteSexualScenes(
             uniqueEvents, segments,
             progress => reportProgress?.Invoke(.75 + progress * .25),
@@ -543,10 +544,276 @@ public sealed class OpenAIContentAnalysisProvider(
             cancellationToken);
         RecordUsage(options.AnalysisModel, response);
 
-        return JsonSerializer.Deserialize<AnalysisPayload>(response.Json)
+        return ReadPayload<AnalysisPayload>(response.Json, "Content analysis")
             ?? throw new InvalidOperationException(
                 "Content analysis returned no structured result.");
     }
+
+
+    /// <summary>
+    /// Confirms that each proposed graphic-violence or torture event actually describes injury.
+    /// </summary>
+    /// <remarks>
+    /// Violence was the only high-volume label with no second opinion. Sexual scenes have had
+    /// two review passes for a long time; violence had the first pass's word and nothing else,
+    /// and the first pass is the cheapest model in the pipeline.
+    ///
+    /// That gap was invisible while one model family did the classifying and became obvious with
+    /// another. A six-hour book produced 163 graphic-violence events, roughly 28 an hour, and a
+    /// separate probe had already had the same model call a slammed door graphic violence at
+    /// 0.85 confidence. Two model families over-applying the same label the same way is not a
+    /// model problem, it is an unreviewed label.
+    ///
+    /// Sent to the verification model rather than the first-pass one, deliberately. The whole
+    /// finding here is that the cheap model cannot make this judgement, so asking it again would
+    /// only produce the same answer more expensively.
+    ///
+    /// Anything the verifier does not confirm is dropped rather than downgraded. A listener
+    /// asking not to hear injury described is not helped by a quieter version of the same skip,
+    /// and the narrower violence labels were already removed by policy.
+    /// </remarks>
+
+    /// <summary>
+    /// Reads a model's JSON leniently, and says what it received when it cannot.
+    /// </summary>
+    /// <remarks>
+    /// Models send numbers as quoted strings, and a strict read of one field discards a whole
+    /// book's analysis after every model call in it has been paid for. AllowReadingFromString
+    /// covers that case generally, rather than one field at a time as each is discovered.
+    ///
+    /// The payload is logged on failure, truncated. A deserialization error naming a byte offset
+    /// and nothing else is not diagnosable, and the alternative was guessing at which field
+    /// moved -- once per rebuild, per book, at twenty minutes a guess.
+    /// </remarks>
+    private T? ReadPayload<T>(string json, string what)
+    {
+        try
+        {
+            return JsonSerializer.Deserialize<T>(json, LenientJson);
+        }
+        catch (JsonException) when (Flatten(json) is string flattened)
+        {
+            // Nova returns a list as a string containing the list:
+            //   {"candidates":["[{\"candidateKey\": ...}]"]}
+            // Every field lookup then fails at a byte offset inside text that reads like the
+            // right answer. Repaired here rather than against the schema, because the schema
+            // walk that was supposed to catch it did not and the shape is recognisable without
+            // one: a value that is a JSON array encoded as a string.
+            logger.LogInformation(
+                "{What} returned a list encoded as a string; unwrapped it.", what);
+            return JsonSerializer.Deserialize<T>(flattened, LenientJson);
+        }
+        catch (JsonException error)
+        {
+            logger.LogError(
+                "{What} returned JSON that could not be read: {Message}. Payload: {Payload}",
+                what, error.Message, json.Length > 900 ? json[..900] : json);
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// Rewrites values that are JSON arrays encoded as strings, or returns null if there are none.
+    /// </summary>
+    /// <remarks>
+    /// Only a string that parses cleanly as an array is unwrapped, and only when doing so changes
+    /// something. Anything less certain is left alone: reinterpreting a reply that cannot be read
+    /// confidently would be inventing an answer, and these replies decide what is removed from
+    /// somebody's audiobook.
+    /// </remarks>
+    private static string? Flatten(string json)
+    {
+        JsonNode? root;
+        try { root = JsonNode.Parse(json); }
+        catch (JsonException) { return null; }
+        if (root is not JsonObject obj) return null;
+
+        var changed = false;
+        foreach (var property in obj.ToArray())
+        {
+            var candidate = property.Value switch
+            {
+                JsonValue single when single.TryGetValue(out string? text) => text,
+                JsonArray array when array.Count == 1 && array[0] is JsonValue inner &&
+                    inner.TryGetValue(out string? nested) => nested,
+                _ => null
+            };
+            if (string.IsNullOrWhiteSpace(candidate)) continue;
+            JsonNode? parsed;
+            try { parsed = JsonNode.Parse(candidate); }
+            catch (JsonException) { continue; }
+            if (parsed is not JsonArray) continue;
+            obj[property.Key] = parsed;
+            changed = true;
+        }
+        return changed ? obj.ToJsonString() : null;
+    }
+
+    private static readonly JsonSerializerOptions LenientJson = new()
+    {
+        NumberHandling = JsonNumberHandling.AllowReadingFromString,
+        PropertyNameCaseInsensitive = true
+    };
+
+    private async Task<ScanEvent[]> VerifyGraphicViolence(
+        IReadOnlyList<ScanEvent> events,
+        IReadOnlyList<TranscriptSegment> segments,
+        CancellationToken cancellationToken)
+    {
+        var graphic = ContentTaxonomy.Mappings["violence_graphic"].EventID;
+        var torture = ContentTaxonomy.Mappings["violence_torture"].EventID;
+        var subject = events
+            .Where(item => item.EventID == graphic || item.EventID == torture)
+            .OrderBy(item => item.StartTime)
+            .ToArray();
+        if (subject.Length == 0) return events.ToArray();
+
+        var kept = events
+            .Where(item => item.EventID != graphic && item.EventID != torture)
+            .ToList();
+
+        // Several candidates per request. One each would multiply a busy book's request count by
+        // the very thing being measured, and Bedrock's rate limit is already the tightest
+        // constraint on a long book.
+        var batches = subject.Chunk(ViolenceVerificationBatchSize).ToArray();
+        if (batches.Length > options.MaximumSceneVerificationRequestsPerJob)
+        {
+            logger.LogWarning(
+                "Graphic-violence verification would need {BatchCount} requests, above the " +
+                "{Limit} limit. Proposed violence is kept unverified for this job.",
+                batches.Length, options.MaximumSceneVerificationRequestsPerJob);
+            return events.ToArray();
+        }
+
+        var confirmed = new HashSet<string>(StringComparer.Ordinal);
+        using var gate = new SemaphoreSlim(Math.Max(1, options.SceneVerificationConcurrency));
+        var decisions = await Task.WhenAll(batches.Select(async batch =>
+        {
+            await gate.WaitAsync(cancellationToken);
+            try
+            {
+                return await VerifyViolenceBatch(batch, segments, cancellationToken);
+            }
+            finally { gate.Release(); }
+        }));
+        foreach (var key in decisions.SelectMany(item => item)) confirmed.Add(key);
+
+        var survivors = subject.Where(item => confirmed.Contains(item.StableKey)).ToArray();
+        logger.LogInformation(
+            "Graphic-violence verification kept {Kept} of {Proposed} proposed events across " +
+            "{Requests} requests.",
+            survivors.Length, subject.Length, batches.Length);
+
+        kept.AddRange(survivors);
+        return kept.OrderBy(item => item.StartTime).ToArray();
+    }
+
+    /// <returns>The stable keys the verifier confirmed as describing injury.</returns>
+    private async Task<IReadOnlyList<string>> VerifyViolenceBatch(
+        IReadOnlyList<ScanEvent> batch,
+        IReadOnlyList<TranscriptSegment> segments,
+        CancellationToken cancellationToken)
+    {
+        var candidates = batch.Select(item => new
+        {
+            candidateKey = item.StableKey,
+            startTime = item.StartTime,
+            endTime = item.EndTime,
+            // A little either side, because a description of a wound often begins in the line
+            // before the one that named the act.
+            segments = segments
+                .Where(segment => segment.EndTime >= item.StartTime - 10 &&
+                    segment.StartTime <= item.EndTime + 10)
+                .ToArray()
+        }).ToArray();
+
+        var input = """
+Decide, for each candidate, whether the narration dwells on the physical detail of a body being
+damaged. That is the only question.
+
+Confirm it when the passage describes flesh being cut, torn or opened; blood flowing or pooling;
+bones breaking; organs, entrails or brain matter; a limb or head severed; or a wound described
+closely enough that a listener pictures the injury itself.
+
+Do not confirm an act of violence stated without that detail. A punch, a slap, a shove, a
+slammed door, a stabbing or shooting reported without describing the wound, a battle or duel, a
+threat, someone being hurt or killed, a body discovered, bruises, scars, blood mentioned in
+passing, medical treatment, pain, an injury's aftermath, grief, or fantasy peril are all not
+confirmed. Captivity and beating are not confirmed either, however unpleasant: a character tied
+to a chair and punched does not qualify.
+
+Most fight scenes are not confirmed. If you are weighing whether the description is detailed
+enough, it is not. Answer for every candidateKey.
+
+Candidates:
+""" + JsonSerializer.Serialize(candidates);
+
+        var schema = new JsonObject
+        {
+            ["type"] = "object",
+            ["required"] = new JsonArray("candidates"),
+            ["properties"] = new JsonObject
+            {
+                ["candidates"] = new JsonObject
+                {
+                    ["type"] = "array",
+                    ["items"] = new JsonObject
+                    {
+                        ["type"] = "object",
+                        ["required"] = new JsonArray(
+                            "candidateKey", "dwellsOnPhysicalDamage", "confidence"),
+                        ["properties"] = new JsonObject
+                        {
+                            ["candidateKey"] = new JsonObject { ["type"] = "string" },
+                            ["dwellsOnPhysicalDamage"] = new JsonObject { ["type"] = "boolean" },
+                            ["confidence"] = new JsonObject
+                            {
+                                ["type"] = "number", ["minimum"] = 0, ["maximum"] = 1
+                            }
+                        }
+                    }
+                }
+            }
+        };
+
+        try
+        {
+            var response = await modelClient.CompleteJson(
+                options.EffectiveViolenceVerificationModel, input,
+                "audiochoice_violence_verification", schema, cancellationToken);
+            RecordUsage(options.EffectiveViolenceVerificationModel, response);
+            var payload = ReadPayload<ViolenceVerificationPayload>(response.Json, "Violence verification");
+            return payload?.Candidates
+                .Where(item => item.DwellsOnPhysicalDamage &&
+                    item.Confidence >= options.MinimumEventConfidence)
+                .Select(item => item.CandidateKey)
+                .ToArray() ?? [];
+        }
+        catch (Exception error) when (error is not OperationCanceledException)
+        {
+            // A verifier that cannot answer must not silently delete a listener's protection.
+            // Keeping the batch means over-filtering for this book, which is recoverable by
+            // rescanning; dropping it means content plays that somebody asked to remove.
+            logger.LogError(
+                error,
+                "Graphic-violence verification failed for {Count} candidates; keeping them " +
+                "unverified rather than discarding protection.",
+                batch.Count);
+            return batch.Select(item => item.StableKey).ToArray();
+        }
+    }
+
+    /// <summary>Candidates per verification request, balancing cost against rate limits.</summary>
+    private const int ViolenceVerificationBatchSize = 8;
+
+    private sealed record ViolenceVerificationPayload(
+        [property: JsonPropertyName("candidates")]
+        IReadOnlyList<ViolenceVerificationDecision> Candidates);
+
+    private sealed record ViolenceVerificationDecision(
+        [property: JsonPropertyName("candidateKey")] string CandidateKey,
+        [property: JsonPropertyName("dwellsOnPhysicalDamage")] bool DwellsOnPhysicalDamage,
+        [property: JsonPropertyName("confidence")] double Confidence);
 
     private async Task<IReadOnlyList<ScanEvent>> VerifyCompleteSexualScenes(
         IReadOnlyList<ScanEvent> events,
@@ -908,8 +1175,11 @@ public sealed class OpenAIContentAnalysisProvider(
 Act as a strict final verifier for one audiobook sexual-scene skip range.
 Each candidate was produced by a high-recall detector and may be a false positive.
 Set directSexualActEvidence=true only when this candidate's own transcript directly supports
-an ongoing sexual act. Set sustainedBeyondKissing=true only when that act continues as a
-narrative scene beyond attraction, dialogue, kissing, embracing, or nudity alone. A discussion
+an ongoing sexual act. Set sustainedBeyondKissing=true when the passage goes beyond
+attraction, dialogue, kissing, embracing, or nudity alone into an actual sexual act. It asks how
+far the passage goes, NOT how long it lasts: a brief encounter still qualifies. A listener who
+switched on Complete sex scenes is asking for sex scenes to be gone, and a short one rejected here
+is exactly the scene that then plays. A discussion
 of past sex is a reference, not an ongoing act. Flirting, suggestive language, attraction,
 kissing alone, embraces, nudity alone, sexual jokes or references, profanity, medical
 discussion, violence, combat, pain, breathing, groaning, or the word "thrust" in a non-sexual
@@ -925,10 +1195,10 @@ accepted may be true only when BOTH evidence booleans are true and confidence is
 still a plausible ongoing sexual scene but the evidence, confidence, or exact boundaries are
 uncertain and require a stronger final review. Set needsEscalation=false for clear rejections,
 isolated innuendo, references, attraction, kissing, or nudity alone. Confirmed accepted scenes
-will also receive final review. Confidence must describe the evidence for the sustained act,
-not merely for one suggestive word.
+will also receive final review. Confidence must describe the evidence that a sexual act occurs,
+not merely for one suggestive word, and not for how long it lasts.
 
-For an accepted candidate, refine startTime to the beginning of the sustained sexual activity
+For an accepted candidate, refine startTime to the beginning of the sexual activity
 or its immediate unmistakable lead-in, and endTime where that activity clearly finishes.
 Keep timestamps within the supplied excerpt. Use a neutral, non-graphic but useful description
 that distinguishes the scene from a single explicit phrase. Do not return the generic wording
@@ -947,7 +1217,7 @@ Candidates:
             cancellationToken);
         RecordUsage(model, response);
 
-        return JsonSerializer.Deserialize<SceneVerificationPayload>(response.Json)
+        return ReadPayload<SceneVerificationPayload>(response.Json, "Scene verification")
             ?? throw new InvalidOperationException("Scene verification returned no structured result.");
     }
 
@@ -1012,22 +1282,77 @@ Candidates:
 
         return """
 Act as an audiobook content-preference classifier. Identify only events that are explicitly
-supported by the supplied transcript. Be conservative for violence: a listener who enables
-Violence wants only graphic/gory injury, torture, violence involving children or animals, or
-self-harm/suicide. Do not flag ordinary conflict, threats, combat without graphic detail,
-non-graphic injuries, scars, medical discussion, pain, injury aftermath, death references, or
-fantasy danger. When the evidence is not clearly within the narrow categories below, omit it.
-For isolated events, return the narrowest supported timestamps. Sexual activity is different:
-identify the complete narrative scene, including its clear lead-in and the point where sexual
-activity ends and the story returns to non-sexual action or conversation. Whenever explicit
-sexual activity occurs, ALWAYS also emit one sexual_complete_scene event spanning that whole
-scene, even when only part of the scene uses explicit vocabulary. Do not reduce a scene to the
-single explicit sentence that made it recognizable.
-Physical escalation and intimate positioning are explicit-activity evidence even when euphemistic:
-intimate touching such as a hand moving onto a thigh, opening or spreading legs, removing clothing,
-intimate caressing, or explicit consent/positioning. When these cues occur together in a continuing
-encounter, emit sexual_explicit_activity and sexual_complete_scene across the full supported scene;
-do not require graphic anatomical terms.
+supported by the supplied transcript.
+
+violence_graphic has one test, and it is a high one: the narration must dwell on the physical
+detail of a body being damaged. Flesh being cut, torn or opened; blood flowing or pooling;
+bones breaking; organs, entrails or brain matter; a limb or head being severed; a wound
+described closely enough that a listener pictures the injury rather than the act. It is the
+lingering physical description that qualifies, not the violence itself.
+
+An act of violence stated without that physical detail is NOT violence_graphic. Do not flag: a
+punch, a slap, a shove, a slammed door, a stabbing or shooting reported without describing the
+wound, a battle or duel, a threat, a character being hurt or killed, a body being found,
+bruises, scars, a mention of blood in passing, medical treatment, pain, an injury's aftermath,
+grief, or fantasy peril. Most fight scenes are not graphic. If you are weighing whether the
+description is detailed enough, it is not: omit it.
+
+Return violence_graphic for perhaps a handful of moments in an entire book, and none at all in
+most books. A count in the dozens means the test above is being applied too loosely.
+
+violence_torture holds to the same physical-detail test as violence_graphic. Deliberate,
+sustained cruelty whose injuries the narration describes closely: wounds opened, flesh burned or
+cut, bones broken, blood. Captivity and beating on their own are not torture for this purpose --
+a character tied to a chair and punched is not filtered, however unpleasant the scene is. If the
+narration does not dwell on the physical damage, omit it.
+
+violence_children and violence_animals are judged on what happens rather than how it is
+described, because who it happens to is the point of those two. Self-harm and suicide are their
+own category and are unchanged.
+
+For isolated events, return the narrowest supported timestamps. A short reference is a short
+event: if three words carry it, the range should cover those three words and not the sentence
+or paragraph around them. Never widen a brief event to be safe -- a wide range on a passing
+reference removes narration the listener wanted to hear. 
+The six sexual levels are a ladder, and each rung means one thing. A listener switches on the
+level they are not willing to hear, so a passage placed a rung too high is removed from someone
+who wanted it, and a rung too low is heard by someone who did not. Choose the highest rung the
+passage actually reaches, and only that one, except where a complete scene is also required below.
+
+sexual_suggestive_dialogue -- flirtation, innuendo, wanting, tension. Kissing and embracing belong
+here, however charged, and so does a passage that is only anticipation. Kissing is NOT explicit
+activity at any intensity.
+
+sexual_references -- sex spoken about rather than happening: a past encounter recalled, a crude
+joke, a comment on someone's history, an offer not taken up.
+
+sexual_nudity -- a body described unclothed, or clothing being removed, with no sexual act
+following in this passage. Undressing on its own is this rung, not explicit activity.
+
+sexual_implied_activity -- sex happens and the narration does not describe it. It fades out, cuts
+away, or resumes afterwards: "later, tangled in the sheets". The act is certain, the description
+is absent.
+
+sexual_explicit_activity -- a sexual act described as it happens. Intercourse, oral sex, or
+equivalent, narrated in the moment. Euphemism still counts when the act is unmistakable. Kissing,
+undressing, or a hand on a thigh do not reach this rung on their own; the passage has to convey
+that a sexual act is taking place.
+
+sexual_complete_scene -- the whole span of a scene containing implied or explicit activity, from
+its clear lead-in to the point where the story returns to non-sexual action or conversation.
+
+No word is sexual content by itself. A body part named in passing is anatomy, not a sexual
+reference: a hand on a chest during first aid, a breast wound in battle, a character washing, a
+mother nursing, a medical examination. Judge the passage by what is happening in it, never by the
+presence of a word. The same applies to violence and every other category -- a word is evidence
+only in the sense the passage actually uses it.
+
+ALWAYS emit sexual_complete_scene alongside sexual_implied_activity or sexual_explicit_activity,
+every time, including a brief encounter and one whose description is euphemistic. A listener who
+switches on Complete sex scenes is asking for sex scenes to be gone; a scene that was too short or
+too discreet to qualify is exactly the one that then plays and is heard. Do not reduce a scene to
+the single explicit sentence that made it recognisable, and do not withhold the scene event
+because the scene was small.
 
 If a sexual scene was already underway at the first supplied segment, set the scene start to
 that first segment's startTime. If it is still underway at the last supplied segment, set its

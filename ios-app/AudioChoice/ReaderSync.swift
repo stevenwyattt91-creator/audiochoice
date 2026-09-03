@@ -21,6 +21,26 @@ enum ReaderSync {
     private static let minimumDuration = 0.001
 
     /// Character offset currently being narrated, or nil if no range covers `seconds`.
+    /// Roughly where the listening has reached, for a book with no alignment.
+    ///
+    /// A straight proportion of the text: two hours into a ten-hour book lands a fifth of the way
+    /// in. Wrong by pages, and deliberately offered anyway. A book whose EPUB was never aligned --
+    /// and plenty were not, because alignment is a separate request that can fail while filters
+    /// succeed -- otherwise opens at the title page ten hours in, with nothing to search for. Being
+    /// approximately right is the difference between a starting point and no way back at all.
+    ///
+    /// Nil when the numbers cannot support even that: no duration, no text, or nothing played.
+    static func approximateCharacter(
+        atSeconds seconds: Double,
+        duration: Double,
+        characterCount: Int
+    ) -> Int? {
+        guard seconds > 0, duration > 0, characterCount > 0, seconds.isFinite, duration.isFinite
+        else { return nil }
+        let fraction = min(max(seconds / duration, 0), 1)
+        return Int(fraction * Double(characterCount))
+    }
+
     static func character(at seconds: Double, in timings: [ReaderTimingRange]) -> Int? {
         guard let timing = timingContaining(seconds, in: timings) else { return nil }
         let duration = Swift.max(timing.endTime - timing.startTime, minimumDuration)

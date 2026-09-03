@@ -12,7 +12,19 @@ namespace AudioChoice.Api.Processing;
 public static class SceneEventPostProcessor
 {
     private const double MergeGapSeconds = 45;
-    private const double SafetyPaddingSeconds = 8;
+    /// <summary>
+    /// Seconds added either side of a merged scene, so a skip does not clip its own edges.
+    ///
+    /// Reduced from eight to three. Eight was chosen to be safe and cost sixteen seconds on
+    /// every scene, which on a book with forty of them is more than ten minutes of audio
+    /// removed for margin alone. Three still covers the case this exists for -- a transcript
+    /// boundary landing a word or two early -- without turning caution into the largest single
+    /// contributor to how much of a book disappears.
+    ///
+    /// Applies only to complete scenes. A short event keeps the narrowest bounds the model
+    /// supported, because padding a three-word phrase is how a phrase becomes a passage.
+    /// </summary>
+    private const double SafetyPaddingSeconds = 3;
 
     /// <summary>
     /// The shortest merged range still worth a scene-level skip.
@@ -24,11 +36,17 @@ public static class SceneEventPostProcessor
     /// the threshold is guarding against far less than it used to while still discarding
     /// genuine short scenes: a verified forty-second encounter kept no scene skip at all.
     ///
-    /// Lowered rather than removed. Half a minute of narration is still more likely one
-    /// explicit sentence and its surroundings than a scene, and the narrower
-    /// explicit-activity events continue to cover those moments regardless.
+    /// Lowered again, to fifteen seconds, because thirty was removing real scenes. A tester
+    /// listening with only Complete sex scenes enabled heard two scenes play in one book: brief
+    /// encounters that were detected, verified, and then dropped for being short. Someone who
+    /// switches that on is asking for sex scenes to be gone, and the short ones are precisely the
+    /// ones a length rule discards.
+    ///
+    /// Kept rather than removed. A floor still stops a single explicit sentence and its padding
+    /// from becoming a scene-sized skip, and every range reaching here has already cleared two
+    /// verification passes at 0.85 confidence.
     /// </remarks>
-    private const double MinimumCompleteSceneSeconds = 30;
+    private const double MinimumCompleteSceneSeconds = 15;
 
     public static IReadOnlyList<ScanEvent> Process(
         IReadOnlyList<ScanEvent> events,

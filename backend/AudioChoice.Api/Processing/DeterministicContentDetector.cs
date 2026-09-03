@@ -70,20 +70,61 @@ public static partial class DeterministicContentDetector
         var detections = new List<DeterministicDetection>();
         foreach (var segment in segments)
         {
+            // Each spoken word is consumed at most once, so two of the same word in a segment
+            // get two timings rather than both pointing at the first.
+            var claimed = new HashSet<int>();
             foreach (Match match in WordRegex().Matches(segment.Text))
             {
                 var word = match.Value.ToLowerInvariant();
                 if (!ProfanityLabels.TryGetValue(word, out var label)) continue;
+
+                // The word's own timing when the transcriber gave one, otherwise the segment.
+                //
+                // This is the difference between removing a word and removing the sentence around
+                // it. A segment runs five to ten seconds; one "damn" was taking all of it, several
+                // thousand times across a library. Falls back to the segment for a transcript
+                // stored before word timings existed, which is every transcript already saved.
+                var spoken = FindWord(segment.Words, word, claimed);
                 detections.Add(new(
                     label,
-                    segment.StartTime,
-                    segment.EndTime,
+                    spoken?.StartTime ?? segment.StartTime,
+                    spoken?.EndTime ?? segment.EndTime,
                     1,
                     "Profanity detected",
                     word));
             }
         }
         return detections;
+    }
+
+    /// <summary>
+    /// The spoken word matching <paramref name="word"/> that has not been used yet.
+    /// </summary>
+    /// <remarks>
+    /// Matched on the word list rather than on position, because the transcriber's word list and a
+    /// regex over the segment text do not always split identically -- punctuation, hyphenation and
+    /// contractions differ -- so the nth regex match is not reliably the nth reported word.
+    ///
+    /// Returns null when there is no confident match, and the caller then keeps the segment's own
+    /// range. A wrong word's timing would remove the wrong moment and leave the profanity audible,
+    /// which is worse than removing too much.
+    /// </remarks>
+    private static TranscriptWord? FindWord(
+        IReadOnlyList<TranscriptWord>? words,
+        string word,
+        ISet<int> claimed)
+    {
+        if (words is null) return null;
+        for (var index = 0; index < words.Count; index += 1)
+        {
+            if (claimed.Contains(index)) continue;
+            // The reported word carries its punctuation, so "damn," has to match "damn".
+            var candidate = words[index].Text.Trim([',', '.', '!', '?', ';', ':', '"', '\'', '-']);
+            if (!string.Equals(candidate, word, StringComparison.OrdinalIgnoreCase)) continue;
+            claimed.Add(index);
+            return words[index];
+        }
+        return null;
     }
 
     /// <summary>

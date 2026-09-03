@@ -341,8 +341,18 @@ if (openAIOptions.WorkerEnabled)
     // Required only by whatever actually calls OpenAI. A worker transcribing on the local GPU
     // and classifying on Bedrock needs no OpenAI account, and demanding a key it will never
     // use would refuse to start over a setting that does not apply.
+    // A tier may name an OpenAI model even when the pipeline is otherwise on Bedrock, so the
+    // key is required by what the tiers actually name rather than by the provider setting.
+    var anyTierUsesOpenAI = new[]
+        {
+            openAIOptions.AnalysisModel,
+            openAIOptions.SceneVerificationModel,
+            openAIOptions.SceneEscalationModel
+        }
+            .Append(openAIOptions.EffectiveViolenceVerificationModel)
+        .Any(RoutingAnalysisModelClient.IsOpenAIModel);
     if (string.IsNullOrWhiteSpace(openAIOptions.ApiKey) &&
-        (!usesBedrockAnalysis || usesOpenAITranscription))
+        (!usesBedrockAnalysis || usesOpenAITranscription || anyTierUsesOpenAI))
     {
         throw new InvalidOperationException(
             "AudioChoice:OpenAI:ApiKey is required when the scan worker uses OpenAI for " +
@@ -394,11 +404,23 @@ if (openAIOptions.WorkerEnabled)
                 ? new AmazonBedrockRuntimeClient()
                 : new AmazonBedrockRuntimeClient(
                     Amazon.RegionEndpoint.GetBySystemName(openAIOptions.BedrockRegion)));
+
+        // Routed rather than chosen once. The tiers are not equally well served: Nova does the
+        // bulk of the work well and cheaply, while the sexual-scene stages stay on OpenAI until
+        // a frontier model is reachable on Bedrock. Which service a tier uses is decided by the
+        // model it names, so moving one later is a configuration change.
         builder.Services.AddSingleton<IAnalysisModelClient>(services =>
-            new BedrockConverseModelClient(
-                services.GetRequiredService<IAmazonBedrockRuntime>(),
-                openAIOptions,
-                services.GetRequiredService<ILogger<BedrockConverseModelClient>>()));
+            new RoutingAnalysisModelClient(
+                bedrock: new BedrockConverseModelClient(
+                    services.GetRequiredService<IAmazonBedrockRuntime>(),
+                    openAIOptions,
+                    services.GetRequiredService<ILogger<BedrockConverseModelClient>>()),
+                openAI: new OpenAIResponsesModelClient(
+                    services.GetRequiredService<IHttpClientFactory>()
+                        .CreateClient("OpenAIProcessing"),
+                    openAIOptions,
+                    services.GetRequiredService<ILogger<OpenAIResponsesModelClient>>()),
+                services.GetRequiredService<ILogger<RoutingAnalysisModelClient>>()));
     }
     else
     {
@@ -459,7 +481,8 @@ app.Logger.LogInformation(
     openAIOptions.ProcessingLane);
 app.Logger.LogInformation(
     "Analysis provider {AnalysisProvider}{Region}; first pass {AnalysisModel}; " +
-    "verification {VerificationModel}; escalation {EscalationModel}; scanner {ScannerVersion}",
+    "scene verification {VerificationModel}; escalation {EscalationModel}; " +
+    "violence verification {ViolenceModel}; scanner {ScannerVersion}",
     openAIOptions.AnalysisProvider,
     string.IsNullOrWhiteSpace(openAIOptions.BedrockRegion)
         ? string.Empty
@@ -467,15 +490,20 @@ app.Logger.LogInformation(
     openAIOptions.AnalysisModel,
     openAIOptions.SceneVerificationModel,
     openAIOptions.SceneEscalationModel,
+    openAIOptions.EffectiveViolenceVerificationModel,
     openAIOptions.ScannerVersion);
 
-static string ScanLane(HttpContext context) =>
+// A request may still name the GPU lane explicitly, which beta clients do. Everything else
+// takes the configured default, which is now that same lane: the Azure worker transcribes
+// through OpenAI and, with the paid-test ceiling its deployment still carries, cannot finish an
+// audiobook anyway. Nothing in scanning reaches OpenAI once this is the default.
+string ScanLane(HttpContext context) =>
     string.Equals(
         context.Request.Headers["X-AudioChoice-Scan-Channel"].ToString(),
         "ios-beta",
         StringComparison.OrdinalIgnoreCase)
         ? ScanProcessingLanes.IOSBetaLambda
-        : ScanProcessingLanes.AzureOpenAI;
+        : openAIOptions.DefaultProcessingLane;
 
 app.UseCors("AdminPortal");
 app.UseRateLimiter();
@@ -1029,6 +1057,140 @@ app.MapGet("/v1/admin/scans/jobs/{scanID:guid}", (
 // nineteen-edition survey would have quietly started paid jobs.
 //
 // So this exists to be the harmless one. It looks up and returns, and can do nothing else.
+// Editions that are the same recording arriving as separate entries.
+//
+// The Scanned Books list grew a second row whenever a listener imported a converted or re-tagged
+// copy of a book already held: identity was byte-exact, so the same audio was scanned twice and
+// listed twice with different filter counts. Chapter structure can now identify a recording, which
+// means those pairs are findable -- this reports them so they can be looked at before anything is
+// merged, because a wrong merge hands one book's filter timings to another.
+//
+// Read-only. It groups and explains, and changes nothing.
+app.MapGet("/v1/admin/editions/duplicates", (
+    HttpContext context,
+    IScanCatalog catalog,
+    IEditionSignatureStore signatures) =>
+{
+    if (!IsConfiguredApiToken(context, app.Configuration)) return Results.Unauthorized();
+
+    var editions = catalog.ListFingerprints().ToArray();
+    // Groups are built by union rather than by pairing, so three copies of one recording report as
+    // one group of three instead of three separate pairs to reconcile by hand.
+    var groupOf = new Dictionary<string, int>(StringComparer.Ordinal);
+    var groups = new List<List<BookFingerprint>>();
+
+    for (var i = 0; i < editions.Length; i += 1)
+    {
+        for (var j = i + 1; j < editions.Length; j += 1)
+        {
+            var left = editions[i];
+            var right = editions[j];
+            var leftSignature = signatures.Find(left);
+            var rightSignature = signatures.Find(right);
+
+            var sameStructure = EditionMatch.ChapterStructureIdentifies(leftSignature, rightSignature) &&
+                EditionMatch.SameRuntime(left, right);
+            var sameIdentifier =
+                !string.IsNullOrWhiteSpace(leftSignature?.ProductIdentifier) &&
+                !string.IsNullOrWhiteSpace(rightSignature?.ProductIdentifier) &&
+                EditionMatch.SameRecording(left, right, leftSignature, rightSignature);
+            if (!sameStructure && !sameIdentifier) continue;
+
+            var leftKey = InMemoryScanCatalog.FingerprintKey(left);
+            var rightKey = InMemoryScanCatalog.FingerprintKey(right);
+            var leftGroup = groupOf.TryGetValue(leftKey, out var l) ? l : -1;
+            var rightGroup = groupOf.TryGetValue(rightKey, out var r) ? r : -1;
+
+            if (leftGroup >= 0 && rightGroup >= 0)
+            {
+                // Both already grouped, separately. Four copies of one recording can pair as A-B
+                // and C-D before B-C is reached, and leaving those apart would report one book as
+                // two groups to reconcile by hand -- the very thing this is meant to end.
+                if (leftGroup == rightGroup) continue;
+                foreach (var moved in groups[rightGroup])
+                {
+                    groups[leftGroup].Add(moved);
+                    groupOf[InMemoryScanCatalog.FingerprintKey(moved)] = leftGroup;
+                }
+                groups[rightGroup].Clear();
+            }
+            else if (leftGroup >= 0)
+            {
+                groups[leftGroup].Add(right);
+                groupOf[rightKey] = leftGroup;
+            }
+            else if (rightGroup >= 0)
+            {
+                groups[rightGroup].Add(left);
+                groupOf[leftKey] = rightGroup;
+            }
+            else
+            {
+                groups.Add([left, right]);
+                groupOf[leftKey] = groups.Count - 1;
+                groupOf[rightKey] = groups.Count - 1;
+            }
+        }
+    }
+
+    return Results.Ok(groups.Where(group => group.Count > 1).Select(group => new
+    {
+        members = group.Select(item => new
+        {
+            item.Sha256,
+            item.FileSize,
+            item.Version,
+            item.WorkTitle,
+            item.Author,
+            item.Duration,
+            item.FileType,
+            chapterMarks = signatures.Find(item)?.ChapterOffsetSeconds?.Count ?? 0,
+            productIdentifier = signatures.Find(item)?.ProductIdentifier,
+            // Which member to keep: the one already carrying a scan.
+            hasResult = catalog.FindResult(item) is not null
+        })
+    }));
+});
+
+// Records that two file identities are the same recording.
+//
+// The resolver discovers this on its own from chapter structure or a retail identifier, and every
+// alias it writes is a cache of that. This exists for the cases it cannot see: a copy whose tags
+// carry no chapter marks, or two entries an operator has listened to and knows are one book.
+//
+// Linking is the whole operation. Nothing is deleted, because a link is reversible by ignoring it
+// and a deletion is not, and because both file identities remain real files on real devices.
+app.MapPost("/v1/admin/editions/alias", (
+    AdminEditionAliasRequest request,
+    HttpContext context,
+    IEditionAliasStore aliases,
+    IScanCatalog catalog) =>
+{
+    if (!IsConfiguredApiToken(context, app.Configuration)) return Results.Unauthorized();
+
+    if (InMemoryScanCatalog.FingerprintKey(request.First) ==
+        InMemoryScanCatalog.FingerprintKey(request.Second))
+    {
+        return Results.BadRequest(new { error = "Both fingerprints identify the same file." });
+    }
+
+    // Refused when neither side has a scan, because an alias between two unscanned editions
+    // records a claim that nothing can act on and nothing can check.
+    if (catalog.FindResult(request.First) is null && catalog.FindResult(request.Second) is null)
+    {
+        return Results.BadRequest(new
+        {
+            error = "Neither edition has a filter result, so linking them would achieve nothing."
+        });
+    }
+
+    aliases.Link(request.First, request.Second);
+    app.Logger.LogInformation(
+        "Linked editions {First} and {Second} by hand.",
+        request.First.Sha256, request.Second.Sha256);
+    return Results.NoContent();
+});
+
 app.MapGet("/v1/admin/editions/result", (
     HttpContext context,
     IScanCatalog catalog,

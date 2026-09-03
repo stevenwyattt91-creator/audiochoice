@@ -43,6 +43,21 @@ public sealed class OpenAIProcessingOptions
     /// vendor by configuration, and it is why the checkpoint cache keys on the model name --
     /// answers from one model are never reused for another.
     /// </remarks>
+    /// <summary>
+    /// The lane a scan is queued on when the request does not ask for one.
+    /// </summary>
+    /// <remarks>
+    /// Was hardcoded to the Azure lane, which transcribes through OpenAI. That lane also
+    /// cannot finish an audiobook: its deployment still carries a paid-test ceiling of 300
+    /// seconds and one chunk, so anything longer than five minutes throws. Pointing the
+    /// default at the GPU lane removes the last use of OpenAI from scanning and moves every
+    /// scan onto a worker that can actually complete one.
+    ///
+    /// Configuration rather than a code change, so a lane can be redirected while a host is
+    /// down without a deploy.
+    /// </remarks>
+    public string DefaultProcessingLane { get; init; } = ScanProcessingLanes.IOSBetaLambda;
+
     public string AnalysisProvider { get; init; } = "openai";
 
     /// <summary>
@@ -54,7 +69,27 @@ public sealed class OpenAIProcessingOptions
     public string AnalysisModel { get; init; } = "gpt-5.6-luna";
     public string SceneVerificationModel { get; init; } = "gpt-5.6-terra";
     public string SceneEscalationModel { get; init; } = "gpt-5.6-sol";
-    public string ScannerVersion { get; init; } = "3.5";
+
+    /// <summary>
+    /// The model that confirms whether proposed violence actually describes injury.
+    /// </summary>
+    /// <remarks>
+    /// Its own setting rather than the scene verifier's. Reusing that one coupled two unrelated
+    /// judgements: moving the sexual-scene stages to OpenAI silently moved violence with them,
+    /// and violence verification went from rejecting 61% of proposals to confirming 237 of 237.
+    /// The two tiers answer different questions and the best model for each is not the same one.
+    ///
+    /// Empty means fall back to the scene verifier, so a configuration that predates this setting
+    /// keeps working.
+    /// </remarks>
+    public string ViolenceVerificationModel { get; init; } = string.Empty;
+
+    /// <summary>The violence verifier, or the scene verifier when none is set.</summary>
+    public string EffectiveViolenceVerificationModel =>
+        string.IsNullOrWhiteSpace(ViolenceVerificationModel)
+            ? SceneVerificationModel
+            : ViolenceVerificationModel;
+    public string ScannerVersion { get; init; } = "3.6";
     /// <summary>Only jobs in this lane may be claimed by this worker instance.</summary>
     public string ProcessingLane { get; init; } = ScanProcessingLanes.AzureOpenAI;
     /// <summary>

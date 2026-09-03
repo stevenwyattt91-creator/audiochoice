@@ -62,6 +62,11 @@ struct LibraryScreen: View {
         .background(ACTheme.background)
         .navigationBarBackButtonHidden()
         .navigationDestination(for: MobileBook.self) { BookDetailScreen(book: $0) }
+        // Its own value type rather than a flag on MobileBook, so resuming and opening a book's
+        // page stay two distinct destinations that cannot be confused for one another.
+        .navigationDestination(for: ResumePlayback.self) {
+            PlayerScreen(book: $0.book, autoPlay: true)
+        }
         .sheet(isPresented: $showingSearch) { LibrarySearchScreen(records: records, accountBooks: accountBooks) }
         .sheet(isPresented: $showingMenu) { LibraryMenuScreen() }
         .task { await refresh() }
@@ -106,7 +111,14 @@ struct LibraryScreen: View {
         let fraction = duration > 0 ? min(position / duration, 1) : 0
         return VStack(alignment: .leading, spacing: 10) {
             Text("Continue Listening").font(.title2.bold())
-            NavigationLink(value: record.book) {
+            // Straight to the player, already playing. This card used to open the book's page,
+            // which then needed its Play tapped, which then needed the player's play tapped --
+            // three taps to resume, on a card headed Continue Listening with a play button drawn
+            // on it. The button was decoration inside a link to somewhere else.
+            //
+            // Details are still reachable: the same book sits in the library list below, and that
+            // row goes to its page as it always has.
+            NavigationLink(value: ResumePlayback(book: record.book)) {
                 ACCard {
                     VStack(alignment: .leading, spacing: 13) {
                         libraryCover(record, compact: false).frame(height: 180)
@@ -362,4 +374,9 @@ private struct LibrarySearchScreen: View {
                 .navigationTitle("Search Library").toolbar { Button("Done") { dismiss() } }
         }.preferredColorScheme(.dark)
     }
+}
+
+/// A request to resume a book, as opposed to opening its page.
+private struct ResumePlayback: Hashable {
+    let book: MobileBook
 }

@@ -85,6 +85,11 @@ public sealed record CloudScanJobSubmissionRequest(
     Guid UploadID,
     BookFingerprint Fingerprint);
 
+/// <summary>Two file identities an operator states are the same recording.</summary>
+public sealed record AdminEditionAliasRequest(
+    BookFingerprint First,
+    BookFingerprint Second);
+
 public sealed record AdminReanalysisRequest(
     Guid OwnerUserID,
     BookFingerprint Fingerprint);

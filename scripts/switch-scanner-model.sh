@@ -82,9 +82,19 @@ case "$mode" in
     region="${AUDIOCHOICE_BEDROCK_REGION:-us-east-1}"
     set_value AudioChoice__OpenAI__AnalysisProvider bedrock
     set_value AudioChoice__OpenAI__BedrockRegion "$region"
+    # Chosen by testing each available model on the question it would actually be asked,
+    # rather than by assuming the price list is a capability ranking. It is not: Nova Pro,
+    # the obvious choice for the judgement tiers, called a plainly sustained encounter "not
+    # sustained" at 0.5 confidence and returned the transcript back as its own summary. That
+    # is what rejected 70 of 70 candidate scenes and left a book with none. Nova 2 Lite, a
+    # newer generation and a cheaper tier, answered the same question correctly at 0.95.
+    #
+    # Nova Premier is not an option: AWS refuses it as a legacy model to any account that was
+    # not already using it. Nova Micro is incoherent here -- it called the scene sustained and
+    # then neither accepted it nor escalated it, which silently drops it.
     set_value AudioChoice__OpenAI__AnalysisModel "amazon.nova-lite-v1:0"
-    set_value AudioChoice__OpenAI__SceneVerificationModel "amazon.nova-pro-v1:0"
-    set_value AudioChoice__OpenAI__SceneEscalationModel "amazon.nova-pro-v1:0"
+    set_value AudioChoice__OpenAI__SceneVerificationModel "us.amazon.nova-2-lite-v1:0"
+    set_value AudioChoice__OpenAI__SceneEscalationModel "us.amazon.nova-2-lite-v1:0"
     # A distinct scanner version so Nova's results are written as new rows beside the OpenAI
     # ones instead of over them. Without this the only record of what the previous models
     # found is destroyed by the first reanalysis, and there is nothing left to compare against.

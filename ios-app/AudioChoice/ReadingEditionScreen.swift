@@ -134,7 +134,30 @@ struct ReadingEditionScreen: View {
             .onChange(of: reader.displayParagraphs.count) { _, count in
                 guard !restoredPosition, count > 0 else { return }
                 restoredPosition = true
-                let target = reader.position.paragraphIndex
+
+                // Where the listening has reached, when the alignment can say. Ten hours into a
+                // book this is the only place worth opening at, and it was not being used: the
+                // reader restored its own saved paragraph, which is zero for a reader never
+                // opened, so it began at the title page with no way to find the story. The
+                // follow-audio scroll below could not rescue it either, because it fires on the
+                // position changing and a paused book's position does not change.
+                // Alignment first. Without it, a proportion of the way through the text, which is
+                // wrong by pages and still far better than the title page ten hours in.
+                let paragraphs = reader.displayParagraphs.map(\.paragraph)
+                let alignedCharacter = ReaderSync.character(at: playback.position, in: reader.timings)
+                let character = alignedCharacter ?? ReaderSync.approximateCharacter(
+                    atSeconds: playback.position,
+                    duration: playback.duration,
+                    characterCount: paragraphs.last?.endCharacter ?? 0
+                )
+                let listening = character.flatMap { paragraphs.indexOfCharacter($0) }
+                if reader.settings.followAudio, let listening { narratedIndex = listening }
+
+                // Follow-audio is a promise about where the reader sits, so it decides this too.
+                // With it off, the reader keeps its own place and the listener moves it themselves.
+                let target = reader.settings.followAudio
+                    ? (listening ?? reader.position.paragraphIndex)
+                    : reader.position.paragraphIndex
                 guard target > 0, target < count else { return }
                 proxy.scrollTo(target, anchor: .top)
             }

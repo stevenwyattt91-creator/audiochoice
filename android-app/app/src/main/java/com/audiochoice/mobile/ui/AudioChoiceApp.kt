@@ -104,6 +104,7 @@ import com.audiochoice.mobile.reader.ReaderSettings
 import com.audiochoice.mobile.reader.ReaderTheme
 import com.audiochoice.mobile.reader.indexOfCharacter
 import com.audiochoice.mobile.reader.merged
+import com.audiochoice.mobile.reader.approximateReaderCharacter
 import com.audiochoice.mobile.reader.readerCharacterForTime
 import com.audiochoice.mobile.reader.readerDisplayParagraphs
 import com.audiochoice.mobile.reader.readerTimeForCharacter
@@ -491,6 +492,9 @@ private fun LibraryShell(
     val scope = rememberCoroutineScope()
     val tabs = listOf("Library", "Player", "Import", "Profile")
     val tabIcons = listOf(Icons.Outlined.LibraryBooks, Icons.Outlined.GraphicEq, Icons.Outlined.FileDownload, Icons.Outlined.PersonOutline)
+    // Read once, not on every recomposition: it is a disk read, and the live player state is
+    // authoritative the moment a book is open. This only has to cover the gap before that.
+    val rememberedLastBookID = remember { player.lastOpenBookID() }
     val libraryState by library.state.collectAsStateWithLifecycle()
     val importState by importer.state.collectAsStateWithLifecycle()
     val playerState by player.state.collectAsStateWithLifecycle()
@@ -742,6 +746,7 @@ private fun LibraryShell(
             if (selected == 0) {
                 if (librarySection == LibrarySection.MY_LIBRARY) {
                     LibraryHome(
+                        lastPlayedBookID = playerState.book?.id ?: rememberedLastBookID,
                         books = libraryState.books,
                         coverPaths = libraryState.coverPaths,
                         ebooksWithoutFilterResults = libraryState.ebooksWithoutFilterResults,
@@ -945,6 +950,14 @@ private fun LibraryHome(
     onOpenBook: (LibraryBook) -> Unit,
     /** Resumes straight into the player. Only the green Continue button does this. */
     onPlayNow: (LibraryBook) -> Unit,
+    /**
+     * The book most recently opened in the player, or null if none has been.
+     *
+     * Continue Listening needs "most recent", and the library rows carry no listened-at time --
+     * only a position and an added-at. So this comes from the player, which records the book it
+     * opened, and is the same value iOS has always used for its own Continue card.
+     */
+    lastPlayedBookID: String?,
 ) {
     var sort by rememberSaveable { mutableStateOf(LibrarySort.RECENT) }
     var sortMenu by remember { mutableStateOf(false) }
@@ -973,7 +986,14 @@ private fun LibraryHome(
     // Scoped to the shelf on view. A shelf offering to resume a book that is not on it -- and
     // that opens a different surface when tapped -- would be actively misleading.
     val shelfBooks = if (ebooksAvailable) LibraryShelves.booksOn(books, shelf) else books
-    val featured = shelfBooks.firstOrNull { it.playbackPositionSeconds > 0 && !it.isFinished }
+    // The book last listened to, then any book with progress, then anything at all.
+    //
+    // This used to take the first book on the shelf with a position, which is list order and has
+    // nothing to do with recency: whichever book sorted first kept the card forever, so starting
+    // a second book changed nothing and Continue Listening pointed at the wrong one permanently.
+    val featured = shelfBooks.firstOrNull {
+        it.id == lastPlayedBookID && !it.isFinished
+    } ?: shelfBooks.firstOrNull { it.playbackPositionSeconds > 0 && !it.isFinished }
         ?: shelfBooks.firstOrNull()
     val visibleBooks = shelfBooks.filter { book ->
         query.isBlank() || book.title.contains(query, ignoreCase = true) ||
@@ -2827,8 +2847,23 @@ private fun ReaderScreen(
     // rather than snapping the highlight back to the start of the book.
     var narratedIndex by remember(state.book?.id) { mutableIntStateOf(-1) }
     if (settings.followAudio) {
-        val narratedCharacter = remember(state.positionMs, state.readerTimingRanges) {
-            readerCharacterForTime(state.readerTimingRanges, state.positionMs / 1000.0)
+        // Alignment first. Without it, a proportion of the way through the text, which is wrong by
+        // pages and still far better than the title page ten hours into a book. Alignment is a
+        // separate request from the filter scan and can fail on its own, so a book with working
+        // filters and no read-along timings is an ordinary state rather than a broken one.
+        val narratedCharacter = remember(
+            state.positionMs,
+            state.readerTimingRanges,
+            state.durationMs,
+            displayParagraphs,
+        ) {
+            val seconds = state.positionMs / 1000.0
+            readerCharacterForTime(state.readerTimingRanges, seconds)
+                ?: approximateReaderCharacter(
+                    seconds = seconds,
+                    durationSeconds = state.durationMs / 1000.0,
+                    characterCount = displayParagraphs.lastOrNull()?.paragraph?.endCharacter ?: 0,
+                )
         }
         // Hoisted so the lookup list is not rebuilt on every position tick.
         val sourceParagraphs = remember(displayParagraphs) {

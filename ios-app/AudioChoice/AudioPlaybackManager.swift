@@ -167,6 +167,44 @@ final class AudioPlaybackManager: ObservableObject {
         return AudiobookLibraryStore.load().first { $0.id == id }
     }
 
+    /// Where playback should stop, when the listener asked to stop somewhere rather than after a
+    /// duration. Nil when no such request is outstanding.
+    ///
+    /// Held here rather than in a view because it has to be compared against the position, and the
+    /// position is only known here. The minutes-based timer is a countdown a view can run on its
+    /// own; "at the end of this chapter" is a place, and a place needs the transport.
+    @Published private(set) var sleepAtPosition: Double?
+
+    /// Stops at the end of the chapter now playing.
+    ///
+    /// Refuses rather than guesses when the file carries no chapter marks, which is most loose
+    /// MP3s. Falling back to a duration would be answering a different question from the one asked.
+    func sleepAtEndOfChapter() -> Bool {
+        guard let markers = currentRecord?.chapterMarkers, !markers.isEmpty else { return false }
+        let here = position
+        guard let chapter = markers.first(where: {
+            here >= $0.startTime && here < $0.startTime + $0.duration
+        }) ?? markers.first(where: { $0.startTime > here }) else { return false }
+        sleepAtPosition = chapter.startTime + chapter.duration
+        return true
+    }
+
+    /// Clears any stop-at-a-position request. The minutes timer is the view's to cancel.
+    func cancelSleepAtPosition() {
+        sleepAtPosition = nil
+    }
+
+    private func pauseIfSleepPositionReached() {
+        guard let target = sleepAtPosition, isPlaying, position >= target else { return }
+        sleepAtPosition = nil
+        player?.pause()
+        isPlaying = false
+        // Same treatment as a deliberate pause: the place is written at once rather than waiting
+        // for the throttled tick, because playback has stopped and nothing else will write it.
+        persistPosition(force: true)
+        Task { await syncCurrentProgressToAccount() }
+    }
+
     static func savedPosition(for bookID: UUID) -> Double {
         UserDefaults.standard.double(forKey: "playbackPosition.\(bookID.uuidString)")
     }
@@ -391,6 +429,7 @@ final class AudioPlaybackManager: ObservableObject {
                 self.updateChapter()
                 self.applyContentFilter()
                 self.markFinishedIfAtEnd()
+                self.pauseIfSleepPositionReached()
                 self.updateNowPlaying()
             }
         }
