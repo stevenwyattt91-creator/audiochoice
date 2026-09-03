@@ -18,7 +18,7 @@ public sealed class OpenAIContentAnalysisProvider(
 {
     // Bump this whenever the baseline classification policy changes so cached batch
     // answers cannot silently reintroduce events produced under an older policy.
-    private const string BaseAnalysisPromptVersion = "2.8-narrow-violence-torture";
+    private const string BaseAnalysisPromptVersion = "2.9-verified-violence";
     private const string SceneVerificationVersion = "3.4-discreet-descriptions";
     private const string SceneEscalationVersion = "3.3-discreet-descriptions";
     private readonly string _checkpointFolder = dataPaths.AnalysisCheckpoints;
@@ -170,6 +170,7 @@ public sealed class OpenAIContentAnalysisProvider(
         // The app's Violence switch is intentionally reserved for graphic material,
         // torture, violence involving children or animals, and suicide/self-harm.
         uniqueEvents = ApplyNarrowViolencePolicy(uniqueEvents);
+        uniqueEvents = await VerifyGraphicViolence(uniqueEvents, segments, cancellationToken);
         var verifiedEvents = await VerifyCompleteSexualScenes(
             uniqueEvents, segments,
             progress => reportProgress?.Invoke(.75 + progress * .25),
@@ -547,6 +548,189 @@ public sealed class OpenAIContentAnalysisProvider(
             ?? throw new InvalidOperationException(
                 "Content analysis returned no structured result.");
     }
+
+
+    /// <summary>
+    /// Confirms that each proposed graphic-violence or torture event actually describes injury.
+    /// </summary>
+    /// <remarks>
+    /// Violence was the only high-volume label with no second opinion. Sexual scenes have had
+    /// two review passes for a long time; violence had the first pass's word and nothing else,
+    /// and the first pass is the cheapest model in the pipeline.
+    ///
+    /// That gap was invisible while one model family did the classifying and became obvious with
+    /// another. A six-hour book produced 163 graphic-violence events, roughly 28 an hour, and a
+    /// separate probe had already had the same model call a slammed door graphic violence at
+    /// 0.85 confidence. Two model families over-applying the same label the same way is not a
+    /// model problem, it is an unreviewed label.
+    ///
+    /// Sent to the verification model rather than the first-pass one, deliberately. The whole
+    /// finding here is that the cheap model cannot make this judgement, so asking it again would
+    /// only produce the same answer more expensively.
+    ///
+    /// Anything the verifier does not confirm is dropped rather than downgraded. A listener
+    /// asking not to hear injury described is not helped by a quieter version of the same skip,
+    /// and the narrower violence labels were already removed by policy.
+    /// </remarks>
+    private async Task<ScanEvent[]> VerifyGraphicViolence(
+        IReadOnlyList<ScanEvent> events,
+        IReadOnlyList<TranscriptSegment> segments,
+        CancellationToken cancellationToken)
+    {
+        var graphic = ContentTaxonomy.Mappings["violence_graphic"].EventID;
+        var torture = ContentTaxonomy.Mappings["violence_torture"].EventID;
+        var subject = events
+            .Where(item => item.EventID == graphic || item.EventID == torture)
+            .OrderBy(item => item.StartTime)
+            .ToArray();
+        if (subject.Length == 0) return events.ToArray();
+
+        var kept = events
+            .Where(item => item.EventID != graphic && item.EventID != torture)
+            .ToList();
+
+        // Several candidates per request. One each would multiply a busy book's request count by
+        // the very thing being measured, and Bedrock's rate limit is already the tightest
+        // constraint on a long book.
+        var batches = subject.Chunk(ViolenceVerificationBatchSize).ToArray();
+        if (batches.Length > options.MaximumSceneVerificationRequestsPerJob)
+        {
+            logger.LogWarning(
+                "Graphic-violence verification would need {BatchCount} requests, above the " +
+                "{Limit} limit. Proposed violence is kept unverified for this job.",
+                batches.Length, options.MaximumSceneVerificationRequestsPerJob);
+            return events.ToArray();
+        }
+
+        var confirmed = new HashSet<string>(StringComparer.Ordinal);
+        using var gate = new SemaphoreSlim(Math.Max(1, options.SceneVerificationConcurrency));
+        var decisions = await Task.WhenAll(batches.Select(async batch =>
+        {
+            await gate.WaitAsync(cancellationToken);
+            try
+            {
+                return await VerifyViolenceBatch(batch, segments, cancellationToken);
+            }
+            finally { gate.Release(); }
+        }));
+        foreach (var key in decisions.SelectMany(item => item)) confirmed.Add(key);
+
+        var survivors = subject.Where(item => confirmed.Contains(item.StableKey)).ToArray();
+        logger.LogInformation(
+            "Graphic-violence verification kept {Kept} of {Proposed} proposed events across " +
+            "{Requests} requests.",
+            survivors.Length, subject.Length, batches.Length);
+
+        kept.AddRange(survivors);
+        return kept.OrderBy(item => item.StartTime).ToArray();
+    }
+
+    /// <returns>The stable keys the verifier confirmed as describing injury.</returns>
+    private async Task<IReadOnlyList<string>> VerifyViolenceBatch(
+        IReadOnlyList<ScanEvent> batch,
+        IReadOnlyList<TranscriptSegment> segments,
+        CancellationToken cancellationToken)
+    {
+        var candidates = batch.Select(item => new
+        {
+            candidateKey = item.StableKey,
+            startTime = item.StartTime,
+            endTime = item.EndTime,
+            // A little either side, because a description of a wound often begins in the line
+            // before the one that named the act.
+            segments = segments
+                .Where(segment => segment.EndTime >= item.StartTime - 10 &&
+                    segment.StartTime <= item.EndTime + 10)
+                .ToArray()
+        }).ToArray();
+
+        var input = """
+Decide, for each candidate, whether the narration dwells on the physical detail of a body being
+damaged. That is the only question.
+
+Confirm it when the passage describes flesh being cut, torn or opened; blood flowing or pooling;
+bones breaking; organs, entrails or brain matter; a limb or head severed; or a wound described
+closely enough that a listener pictures the injury itself.
+
+Do not confirm an act of violence stated without that detail. A punch, a slap, a shove, a
+slammed door, a stabbing or shooting reported without describing the wound, a battle or duel, a
+threat, someone being hurt or killed, a body discovered, bruises, scars, blood mentioned in
+passing, medical treatment, pain, an injury's aftermath, grief, or fantasy peril are all not
+confirmed. Captivity and beating are not confirmed either, however unpleasant: a character tied
+to a chair and punched does not qualify.
+
+Most fight scenes are not confirmed. If you are weighing whether the description is detailed
+enough, it is not. Answer for every candidateKey.
+
+Candidates:
+""" + JsonSerializer.Serialize(candidates);
+
+        var schema = new JsonObject
+        {
+            ["type"] = "object",
+            ["required"] = new JsonArray("candidates"),
+            ["properties"] = new JsonObject
+            {
+                ["candidates"] = new JsonObject
+                {
+                    ["type"] = "array",
+                    ["items"] = new JsonObject
+                    {
+                        ["type"] = "object",
+                        ["required"] = new JsonArray(
+                            "candidateKey", "dwellsOnPhysicalDamage", "confidence"),
+                        ["properties"] = new JsonObject
+                        {
+                            ["candidateKey"] = new JsonObject { ["type"] = "string" },
+                            ["dwellsOnPhysicalDamage"] = new JsonObject { ["type"] = "boolean" },
+                            ["confidence"] = new JsonObject
+                            {
+                                ["type"] = "number", ["minimum"] = 0, ["maximum"] = 1
+                            }
+                        }
+                    }
+                }
+            }
+        };
+
+        try
+        {
+            var response = await modelClient.CompleteJson(
+                options.SceneVerificationModel, input,
+                "audiochoice_violence_verification", schema, cancellationToken);
+            RecordUsage(options.SceneVerificationModel, response);
+            var payload = JsonSerializer.Deserialize<ViolenceVerificationPayload>(response.Json);
+            return payload?.Candidates
+                .Where(item => item.DwellsOnPhysicalDamage &&
+                    item.Confidence >= options.MinimumEventConfidence)
+                .Select(item => item.CandidateKey)
+                .ToArray() ?? [];
+        }
+        catch (Exception error) when (error is not OperationCanceledException)
+        {
+            // A verifier that cannot answer must not silently delete a listener's protection.
+            // Keeping the batch means over-filtering for this book, which is recoverable by
+            // rescanning; dropping it means content plays that somebody asked to remove.
+            logger.LogError(
+                error,
+                "Graphic-violence verification failed for {Count} candidates; keeping them " +
+                "unverified rather than discarding protection.",
+                batch.Count);
+            return batch.Select(item => item.StableKey).ToArray();
+        }
+    }
+
+    /// <summary>Candidates per verification request, balancing cost against rate limits.</summary>
+    private const int ViolenceVerificationBatchSize = 8;
+
+    private sealed record ViolenceVerificationPayload(
+        [property: JsonPropertyName("candidates")]
+        IReadOnlyList<ViolenceVerificationDecision> Candidates);
+
+    private sealed record ViolenceVerificationDecision(
+        [property: JsonPropertyName("candidateKey")] string CandidateKey,
+        [property: JsonPropertyName("dwellsOnPhysicalDamage")] bool DwellsOnPhysicalDamage,
+        [property: JsonPropertyName("confidence")] double Confidence);
 
     private async Task<IReadOnlyList<ScanEvent>> VerifyCompleteSexualScenes(
         IReadOnlyList<ScanEvent> events,
