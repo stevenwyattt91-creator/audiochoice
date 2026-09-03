@@ -544,7 +544,7 @@ public sealed class OpenAIContentAnalysisProvider(
             cancellationToken);
         RecordUsage(options.AnalysisModel, response);
 
-        return JsonSerializer.Deserialize<AnalysisPayload>(response.Json)
+        return ReadPayload<AnalysisPayload>(response.Json, "Content analysis")
             ?? throw new InvalidOperationException(
                 "Content analysis returned no structured result.");
     }
@@ -572,6 +572,40 @@ public sealed class OpenAIContentAnalysisProvider(
     /// asking not to hear injury described is not helped by a quieter version of the same skip,
     /// and the narrower violence labels were already removed by policy.
     /// </remarks>
+
+    /// <summary>
+    /// Reads a model's JSON leniently, and says what it received when it cannot.
+    /// </summary>
+    /// <remarks>
+    /// Models send numbers as quoted strings, and a strict read of one field discards a whole
+    /// book's analysis after every model call in it has been paid for. AllowReadingFromString
+    /// covers that case generally, rather than one field at a time as each is discovered.
+    ///
+    /// The payload is logged on failure, truncated. A deserialization error naming a byte offset
+    /// and nothing else is not diagnosable, and the alternative was guessing at which field
+    /// moved -- once per rebuild, per book, at twenty minutes a guess.
+    /// </remarks>
+    private T? ReadPayload<T>(string json, string what)
+    {
+        try
+        {
+            return JsonSerializer.Deserialize<T>(json, LenientJson);
+        }
+        catch (JsonException error)
+        {
+            logger.LogError(
+                "{What} returned JSON that could not be read: {Message}. Payload: {Payload}",
+                what, error.Message, json.Length > 900 ? json[..900] : json);
+            throw;
+        }
+    }
+
+    private static readonly JsonSerializerOptions LenientJson = new()
+    {
+        NumberHandling = JsonNumberHandling.AllowReadingFromString,
+        PropertyNameCaseInsensitive = true
+    };
+
     private async Task<ScanEvent[]> VerifyGraphicViolence(
         IReadOnlyList<ScanEvent> events,
         IReadOnlyList<TranscriptSegment> segments,
@@ -699,7 +733,7 @@ Candidates:
                 options.SceneVerificationModel, input,
                 "audiochoice_violence_verification", schema, cancellationToken);
             RecordUsage(options.SceneVerificationModel, response);
-            var payload = JsonSerializer.Deserialize<ViolenceVerificationPayload>(response.Json);
+            var payload = ReadPayload<ViolenceVerificationPayload>(response.Json, "Violence verification");
             return payload?.Candidates
                 .Where(item => item.DwellsOnPhysicalDamage &&
                     item.Confidence >= options.MinimumEventConfidence)
@@ -1131,7 +1165,7 @@ Candidates:
             cancellationToken);
         RecordUsage(model, response);
 
-        return JsonSerializer.Deserialize<SceneVerificationPayload>(response.Json)
+        return ReadPayload<SceneVerificationPayload>(response.Json, "Scene verification")
             ?? throw new InvalidOperationException("Scene verification returned no structured result.");
     }
 
