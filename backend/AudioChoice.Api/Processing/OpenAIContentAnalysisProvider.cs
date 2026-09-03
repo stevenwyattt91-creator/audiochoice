@@ -591,6 +591,18 @@ public sealed class OpenAIContentAnalysisProvider(
         {
             return JsonSerializer.Deserialize<T>(json, LenientJson);
         }
+        catch (JsonException) when (Flatten(json) is string flattened)
+        {
+            // Nova returns a list as a string containing the list:
+            //   {"candidates":["[{\"candidateKey\": ...}]"]}
+            // Every field lookup then fails at a byte offset inside text that reads like the
+            // right answer. Repaired here rather than against the schema, because the schema
+            // walk that was supposed to catch it did not and the shape is recognisable without
+            // one: a value that is a JSON array encoded as a string.
+            logger.LogInformation(
+                "{What} returned a list encoded as a string; unwrapped it.", what);
+            return JsonSerializer.Deserialize<T>(flattened, LenientJson);
+        }
         catch (JsonException error)
         {
             logger.LogError(
@@ -598,6 +610,43 @@ public sealed class OpenAIContentAnalysisProvider(
                 what, error.Message, json.Length > 900 ? json[..900] : json);
             throw;
         }
+    }
+
+    /// <summary>
+    /// Rewrites values that are JSON arrays encoded as strings, or returns null if there are none.
+    /// </summary>
+    /// <remarks>
+    /// Only a string that parses cleanly as an array is unwrapped, and only when doing so changes
+    /// something. Anything less certain is left alone: reinterpreting a reply that cannot be read
+    /// confidently would be inventing an answer, and these replies decide what is removed from
+    /// somebody's audiobook.
+    /// </remarks>
+    private static string? Flatten(string json)
+    {
+        JsonNode? root;
+        try { root = JsonNode.Parse(json); }
+        catch (JsonException) { return null; }
+        if (root is not JsonObject obj) return null;
+
+        var changed = false;
+        foreach (var property in obj.ToArray())
+        {
+            var candidate = property.Value switch
+            {
+                JsonValue single when single.TryGetValue(out string? text) => text,
+                JsonArray array when array.Count == 1 && array[0] is JsonValue inner &&
+                    inner.TryGetValue(out string? nested) => nested,
+                _ => null
+            };
+            if (string.IsNullOrWhiteSpace(candidate)) continue;
+            JsonNode? parsed;
+            try { parsed = JsonNode.Parse(candidate); }
+            catch (JsonException) { continue; }
+            if (parsed is not JsonArray) continue;
+            obj[property.Key] = parsed;
+            changed = true;
+        }
+        return changed ? obj.ToJsonString() : null;
     }
 
     private static readonly JsonSerializerOptions LenientJson = new()

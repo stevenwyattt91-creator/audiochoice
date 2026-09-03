@@ -2312,6 +2312,19 @@ Assert(
         !RoutingAnalysisModelClient.IsBedrockModel("nova-lite"),
     "A model name missing its provider prefix was claimed by a vendor rather than refused.");
 
+// The exact shape Nova returned that discarded four books' analysis: the list encoded as a
+// string inside a one-element list. Pinned because the repair is invisible when it works and
+// the failure is a byte offset inside text that reads like a correct answer.
+var doubled = """
+    {"candidates":["[{\u0022candidateKey\u0022: \u0022abc\u0022, \u0022accepted\u0022: true}]"]}
+    """;
+var flattenedNode = System.Text.Json.Nodes.JsonNode.Parse(doubled)!;
+var innerText = flattenedNode["candidates"]![0]!.GetValue<string>();
+Assert(
+    System.Text.Json.Nodes.JsonNode.Parse(innerText) is System.Text.Json.Nodes.JsonArray inner &&
+        inner.Count == 1 && inner[0]!["candidateKey"]!.GetValue<string>() == "abc",
+    "The double-encoded reply shape this repair exists for is no longer what it was.");
+
 Console.WriteLine("AudioChoice backend contract tests passed.");
 
 static string FindMigrationsDirectory()
