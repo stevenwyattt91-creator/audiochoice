@@ -40,6 +40,21 @@ public interface IEditionReferenceStore
     IReadOnlyList<EditionAuditAssignmentSummary>? ListAuditAssignments(BookFingerprint fingerprint);
 
     /// <summary>
+    /// Points every still-unclaimed audit assignment on the edition at its current latest
+    /// scan result, so an auditor who claims one next reviews today's scan rather than
+    /// whatever was current when the assignment was first created.
+    /// </summary>
+    /// <remarks>
+    /// Only ever touches an assignment with <c>status = 'available'</c> and no auditor: one
+    /// already claimed carries decisions already made against specific event ids from the
+    /// result it was created against, and retargeting it would orphan that auditor's work
+    /// mid-review rather than simply hand them a cleaner copy of it. An assignment already
+    /// claimed, completed or under review is left exactly alone; the right move there is to
+    /// let it finish or create a new assignment against the new result once it does.
+    /// </remarks>
+    EditionAuditRetargetResult? RetargetAvailableAuditAssignments(BookFingerprint fingerprint);
+
+    /// <summary>
     /// Permanently removes an edition and everything that exists only to describe it: its
     /// scan uploads, jobs, results and events, and any audit assignment and decision made
     /// against it.
@@ -121,6 +136,7 @@ public sealed class UnavailableEditionReferenceStore : IEditionReferenceStore
     public EditionReferenceCounts? CountReferences(BookFingerprint fingerprint) => null;
     public EditionRepointResult? RepointLibraryBooks(BookFingerprint source, BookFingerprint destination) => null;
     public IReadOnlyList<EditionAuditAssignmentSummary>? ListAuditAssignments(BookFingerprint fingerprint) => null;
+    public EditionAuditRetargetResult? RetargetAvailableAuditAssignments(BookFingerprint fingerprint) => null;
     public EditionDeleteResult DeleteEdition(BookFingerprint fingerprint, bool discardActiveAuditWork = false) =>
         new(EditionDeleteOutcome.NotFound);
 }
@@ -129,6 +145,15 @@ public sealed class UnavailableEditionReferenceStore : IEditionReferenceStore
 /// Every audit assignment on an edition, so an operator can read what compensation or
 /// active claim exists before deciding a duplicate is safe to retire.
 /// </summary>
+/// <param name="Retargeted">
+/// Available, unclaimed assignments moved onto the edition's current latest scan result.
+/// </param>
+/// <param name="SkippedAlreadyClaimedOrDone">
+/// Assignments left untouched because they were already claimed, completed, or awaiting
+/// review -- moving the goalposts on one of those would orphan real decisions already made.
+/// </param>
+public sealed record EditionAuditRetargetResult(int Retargeted, int SkippedAlreadyClaimedOrDone);
+
 public sealed record EditionAuditAssignmentSummary(
     Guid AssignmentID,
     string Status,

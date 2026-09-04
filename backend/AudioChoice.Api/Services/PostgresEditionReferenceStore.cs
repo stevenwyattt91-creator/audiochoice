@@ -123,6 +123,48 @@ public sealed class PostgresEditionReferenceStore(NpgsqlDataSource dataSource) :
         return new EditionRepointResult(repointed, skipped);
     }
 
+    public EditionAuditRetargetResult? RetargetAvailableAuditAssignments(BookFingerprint fingerprint)
+    {
+        using var connection = dataSource.OpenConnection();
+        using var transaction = connection.BeginTransaction();
+
+        var editionID = FindEditionID(connection, transaction, fingerprint);
+        if (editionID is null) return null;
+
+        using var latest = new NpgsqlCommand(
+            "select id from scan_results where edition_id = $1 order by scanned_at desc limit 1;",
+            connection, transaction);
+        latest.Parameters.AddWithValue(editionID.Value);
+        var latestResultID = latest.ExecuteScalar() as Guid?;
+        if (latestResultID is null) return new EditionAuditRetargetResult(0, 0);
+
+        // status = 'available' and auditor_id is null is the same pair Claim() itself checks
+        // before letting an auditor take an assignment, so this only ever moves an assignment
+        // no one has started -- one already claimed, completed or under review is skipped,
+        // not retargeted, because its audit_decisions rows name specific scan_event ids from
+        // the result it was created against and moving the assignment would orphan them.
+        using var retarget = new NpgsqlCommand("""
+            update audit_assignments set scan_result_id = $1, updated_at = now()
+            where edition_id = $2 and status = 'available' and auditor_id is null
+              and scan_result_id != $1;
+            """, connection, transaction);
+        retarget.Parameters.AddWithValue(latestResultID.Value);
+        retarget.Parameters.AddWithValue(editionID.Value);
+        var retargeted = retarget.ExecuteNonQuery();
+
+        using var skipped = new NpgsqlCommand("""
+            select count(*) from audit_assignments
+            where edition_id = $1 and scan_result_id != $2
+              and not (status = 'available' and auditor_id is null);
+            """, connection, transaction);
+        skipped.Parameters.AddWithValue(editionID.Value);
+        skipped.Parameters.AddWithValue(latestResultID.Value);
+        var skippedCount = (int)(long)skipped.ExecuteScalar()!;
+
+        transaction.Commit();
+        return new EditionAuditRetargetResult(retargeted, skippedCount);
+    }
+
     public EditionDeleteResult DeleteEdition(BookFingerprint fingerprint, bool discardActiveAuditWork = false)
     {
         using var connection = dataSource.OpenConnection();

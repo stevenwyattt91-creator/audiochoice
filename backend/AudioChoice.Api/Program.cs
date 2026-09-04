@@ -1387,6 +1387,45 @@ app.MapGet("/v1/admin/editions/audit-assignments", (
     return assignments is null ? Results.NotFound() : Results.Ok(assignments);
 });
 
+// Points every still-unclaimed audit assignment on an edition at its current latest scan
+// result. Exists because scan_result_id is fixed at assignment creation, so an edition
+// rescanned or given a result-copy after an assignment was created leaves that assignment
+// silently reviewing a stale result -- GET .../audit-assignments' PointsAtLatestResult flag
+// is how that gets noticed; this is how it gets fixed. Never touches an assignment already
+// claimed, completed or under review; see RetargetAvailableAuditAssignments for why.
+app.MapPost("/v1/admin/editions/audit-assignments/retarget", (
+    HttpContext context,
+    IEditionReferenceStore references,
+    ILogger<Program> logger,
+    string? sha256,
+    int? fingerprintVersion,
+    long? fileSize) =>
+{
+    if (!IsConfiguredApiToken(context, app.Configuration)) return Results.Unauthorized();
+
+    if (string.IsNullOrWhiteSpace(sha256) || fingerprintVersion is null || fileSize is null)
+    {
+        return Results.BadRequest(new
+        {
+            error = "sha256, fingerprintVersion and fileSize are all required to identify an edition."
+        });
+    }
+
+    var fingerprint = new BookFingerprint(
+        fingerprintVersion.Value, sha256, fileSize.Value,
+        null, string.Empty, null, null, null, null, null, null, null);
+    var result = references.RetargetAvailableAuditAssignments(fingerprint);
+    if (result is null) return Results.NotFound();
+
+    if (result.Retargeted > 0)
+    {
+        logger.LogInformation(
+            "Retargeted {Count} unclaimed audit assignment(s) on {Sha} onto its current " +
+            "latest scan result.", result.Retargeted, sha256[..12]);
+    }
+    return Results.Ok(result);
+});
+
 // Permanently removes a duplicate edition. Never removes a listener's own library row, and
 // refuses outright rather than doing anything if one still exists or if the edition's audit
 // work has been paid or is actively claimed -- both re-checked here, not trusted from an
