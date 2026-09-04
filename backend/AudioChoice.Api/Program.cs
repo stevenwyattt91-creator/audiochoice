@@ -1412,10 +1412,11 @@ app.MapPost("/v1/admin/editions/delete", (
         });
     }
 
-    var result = references.DeleteEdition(request.Fingerprint);
+    var result = references.DeleteEdition(request.Fingerprint, request.DiscardActiveAuditWork);
     return result.Outcome switch
     {
-        EditionDeleteOutcome.Deleted => LoggedNoContent(),
+        EditionDeleteOutcome.Deleted => LoggedNoContent(discardedAuditWork: false),
+        EditionDeleteOutcome.DeletedDiscardingAuditWork => LoggedNoContent(discardedAuditWork: true),
         EditionDeleteOutcome.NotFound => Results.NotFound(),
         EditionDeleteOutcome.RefusedLibraryBooksPresent => Results.Conflict(new
         {
@@ -1425,16 +1426,27 @@ app.MapPost("/v1/admin/editions/delete", (
         EditionDeleteOutcome.RefusedPaidOrActiveAuditWork => Results.Conflict(new
         {
             error = "This edition has an audit assignment that has been paid or is actively " +
-                "claimed. Resolve that before deleting."
+                "claimed. Resolve that before deleting, or set DiscardActiveAuditWork: true " +
+                "to knowingly delete it anyway."
         }),
         _ => Results.Problem("Unrecognized delete outcome.")
     };
 
-    IResult LoggedNoContent()
+    IResult LoggedNoContent(bool discardedAuditWork)
     {
-        logger.LogWarning(
-            "Deleted edition {Title} ({Sha}) and all of its scan and audit history.",
-            request.Fingerprint.WorkTitle, request.Fingerprint.Sha256[..12]);
+        if (discardedAuditWork)
+        {
+            logger.LogWarning(
+                "Deleted edition {Title} ({Sha}) and all of its scan and audit history, " +
+                "KNOWINGLY DISCARDING a real auditor's paid or in-progress claim on it.",
+                request.Fingerprint.WorkTitle, request.Fingerprint.Sha256[..12]);
+        }
+        else
+        {
+            logger.LogWarning(
+                "Deleted edition {Title} ({Sha}) and all of its scan and audit history.",
+                request.Fingerprint.WorkTitle, request.Fingerprint.Sha256[..12]);
+        }
         return Results.NoContent();
     }
 });

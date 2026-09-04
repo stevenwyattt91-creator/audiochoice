@@ -108,7 +108,7 @@ public sealed class PostgresEditionReferenceStore(NpgsqlDataSource dataSource) :
         return new EditionRepointResult(repointed, skipped);
     }
 
-    public EditionDeleteResult DeleteEdition(BookFingerprint fingerprint)
+    public EditionDeleteResult DeleteEdition(BookFingerprint fingerprint, bool discardActiveAuditWork = false)
     {
         using var connection = dataSource.OpenConnection();
         using var transaction = connection.BeginTransaction();
@@ -119,7 +119,9 @@ public sealed class PostgresEditionReferenceStore(NpgsqlDataSource dataSource) :
         // Re-read inside this transaction rather than trust whatever CountReferences returned
         // to the caller a moment earlier: a listener could have added this edition to their
         // library, or an auditor could have claimed or been paid for an assignment on it, in
-        // the time between that check and this call.
+        // the time between that check and this call. Never overridden by
+        // discardActiveAuditWork -- a listener's own library data has no override, on either
+        // endpoint.
         using var libraryCheck = new NpgsqlCommand(
             "select count(*) from user_library_books where edition_id = $1;", connection, transaction);
         libraryCheck.Parameters.AddWithValue(editionID.Value);
@@ -135,7 +137,8 @@ public sealed class PostgresEditionReferenceStore(NpgsqlDataSource dataSource) :
                   and (payment_status = 'paid' or status in ('in_progress', 'completed', 'needs_review')));
             """, connection, transaction);
         auditCheck.Parameters.AddWithValue(editionID.Value);
-        if ((bool)auditCheck.ExecuteScalar()!)
+        var hasPaidOrActiveAuditWork = (bool)auditCheck.ExecuteScalar()!;
+        if (hasPaidOrActiveAuditWork && !discardActiveAuditWork)
         {
             return new EditionDeleteResult(EditionDeleteOutcome.RefusedPaidOrActiveAuditWork);
         }
@@ -167,7 +170,10 @@ public sealed class PostgresEditionReferenceStore(NpgsqlDataSource dataSource) :
         Execute("delete from audiobook_editions where id = $1;");
 
         transaction.Commit();
-        return new EditionDeleteResult(EditionDeleteOutcome.Deleted);
+        return new EditionDeleteResult(
+            hasPaidOrActiveAuditWork
+                ? EditionDeleteOutcome.DeletedDiscardingAuditWork
+                : EditionDeleteOutcome.Deleted);
     }
 
     private static Guid? FindEditionID(

@@ -146,10 +146,16 @@ public sealed record AdminEditionRepointRequest(
 /// <see cref="ConfirmIrreversible"/> must be sent as <c>true</c> outright. This is the one
 /// admin endpoint in the product that cannot be undone by re-running it the other way, unlike
 /// an alias or a repoint, so it does not accept an ordinary request shape by accident.
+///
+/// <see cref="DiscardActiveAuditWork"/> is a second, separate confirmation for the one case
+/// an operator may knowingly choose to override: a real auditor's in-progress or unpaid claim
+/// on the edition being deleted. Defaults to false, so the ordinary confirmation alone still
+/// refuses a delete that would discard real, uncompensated work.
 /// </remarks>
 public sealed record AdminEditionDeleteRequest(
     BookFingerprint Fingerprint,
-    bool ConfirmIrreversible);
+    bool ConfirmIrreversible,
+    bool DiscardActiveAuditWork = false);
 
 public sealed record AdminEditionMetadataRequest(
     BookFingerprint Fingerprint,
