@@ -17,7 +17,28 @@ public interface IEditionReferenceStore
 {
     /// <summary>Null when the edition itself cannot be found.</summary>
     EditionReferenceCounts? CountReferences(BookFingerprint fingerprint);
+
+    /// <summary>
+    /// Points every listener's library row at <paramref name="destination"/> instead of
+    /// <paramref name="source"/>, so a duplicate edition can be retired without breaking
+    /// the library of anyone who happened to import that exact file.
+    /// </summary>
+    /// <remarks>
+    /// A row is left alone rather than merged when the same listener already has one at
+    /// the destination, because merging would silently pick a winner between two accounts
+    /// of that listener's own data -- playback position, favorite, finished -- which is
+    /// not a decision to make on their behalf without asking. Null when either fingerprint
+    /// cannot be found.
+    /// </remarks>
+    EditionRepointResult? RepointLibraryBooks(BookFingerprint source, BookFingerprint destination);
 }
+
+/// <param name="Repointed">Rows moved to the destination edition.</param>
+/// <param name="SkippedForExistingRow">
+/// Rows left on the source edition because that listener already has a row at the
+/// destination.
+/// </param>
+public sealed record EditionRepointResult(int Repointed, int SkippedForExistingRow);
 
 /// <summary>
 /// A count per referencing table. All zero is what a delete of the edition itself requires.
@@ -47,4 +68,5 @@ public sealed record EditionReferenceCounts(
 public sealed class UnavailableEditionReferenceStore : IEditionReferenceStore
 {
     public EditionReferenceCounts? CountReferences(BookFingerprint fingerprint) => null;
+    public EditionRepointResult? RepointLibraryBooks(BookFingerprint source, BookFingerprint destination) => null;
 }

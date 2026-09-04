@@ -9,14 +9,7 @@ public sealed class PostgresEditionReferenceStore(NpgsqlDataSource dataSource) :
     public EditionReferenceCounts? CountReferences(BookFingerprint fingerprint)
     {
         using var connection = dataSource.OpenConnection();
-        using var findEdition = new NpgsqlCommand("""
-            select id from audiobook_editions
-            where fingerprint_version = $1 and sha256 = $2 and file_size = $3;
-            """, connection);
-        findEdition.Parameters.AddWithValue(fingerprint.Version);
-        findEdition.Parameters.AddWithValue(fingerprint.Sha256.ToLowerInvariant());
-        findEdition.Parameters.AddWithValue(fingerprint.FileSize);
-        var editionID = findEdition.ExecuteScalar() as Guid?;
+        var editionID = FindEditionID(connection, null, fingerprint);
         if (editionID is null) return null;
 
         // One round trip covering every table that names an edition and has no
@@ -43,6 +36,55 @@ public sealed class PostgresEditionReferenceStore(NpgsqlDataSource dataSource) :
             AuditAssignments: (int)(long)reader[4],
             ApprovedScanEvents: (int)(long)reader[5],
             AuditReviewMedia: (int)(long)reader[6]);
+    }
+
+    public EditionRepointResult? RepointLibraryBooks(BookFingerprint source, BookFingerprint destination)
+    {
+        using var connection = dataSource.OpenConnection();
+        using var transaction = connection.BeginTransaction();
+
+        var sourceID = FindEditionID(connection, transaction, source);
+        var destinationID = FindEditionID(connection, transaction, destination);
+        if (sourceID is null || destinationID is null) return null;
+        if (sourceID == destinationID) return new EditionRepointResult(0, 0);
+
+        // A row already at the destination for the same listener is left alone rather than
+        // merged. Moving it would collide with user_library_books' own (user_id, edition_id)
+        // uniqueness, and even if it did not, merging is a choice between that listener's two
+        // playback positions and favorite/finished flags -- their own data -- that is not this
+        // endpoint's to make.
+        using var repoint = new NpgsqlCommand("""
+            update user_library_books set edition_id = $1, updated_at = now()
+            where edition_id = $2
+              and not exists (
+                  select 1 from user_library_books existing
+                  where existing.user_id = user_library_books.user_id
+                    and existing.edition_id = $1);
+            """, connection, transaction);
+        repoint.Parameters.AddWithValue(destinationID.Value);
+        repoint.Parameters.AddWithValue(sourceID.Value);
+        var repointed = repoint.ExecuteNonQuery();
+
+        using var remaining = new NpgsqlCommand(
+            "select count(*) from user_library_books where edition_id = $1;", connection, transaction);
+        remaining.Parameters.AddWithValue(sourceID.Value);
+        var skipped = (int)(long)remaining.ExecuteScalar()!;
+
+        transaction.Commit();
+        return new EditionRepointResult(repointed, skipped);
+    }
+
+    private static Guid? FindEditionID(
+        NpgsqlConnection connection, NpgsqlTransaction? transaction, BookFingerprint fingerprint)
+    {
+        using var command = new NpgsqlCommand("""
+            select id from audiobook_editions
+            where fingerprint_version = $1 and sha256 = $2 and file_size = $3;
+            """, connection, transaction);
+        command.Parameters.AddWithValue(fingerprint.Version);
+        command.Parameters.AddWithValue(fingerprint.Sha256.ToLowerInvariant());
+        command.Parameters.AddWithValue(fingerprint.FileSize);
+        return command.ExecuteScalar() as Guid?;
     }
 }
 #endif

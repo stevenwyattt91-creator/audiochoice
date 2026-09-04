@@ -130,6 +130,15 @@ public sealed record AdminResultCopyRequest(
     BookFingerprint Source,
     BookFingerprint Destination);
 
+/// <summary>
+/// Moves every listener's library row from one edition to another an operator has
+/// confirmed is the same recording, so the source edition can later be retired without
+/// taking anyone's library entry down with it.
+/// </summary>
+public sealed record AdminEditionRepointRequest(
+    BookFingerprint Source,
+    BookFingerprint Destination);
+
 public sealed record AdminEditionMetadataRequest(
     BookFingerprint Fingerprint,
     string WorkTitle,

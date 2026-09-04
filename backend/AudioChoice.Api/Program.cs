@@ -1316,6 +1316,45 @@ app.MapGet("/v1/admin/editions/references", (
     return counts is null ? Results.NotFound() : Results.Ok(counts);
 });
 
+// Moves every listener's library row off a duplicate edition and onto the one being kept,
+// so the duplicate can later be retired without breaking anyone's library. Not a delete --
+// nothing at the source edition is removed, including its own scan history, only library
+// rows are moved. A row is left in place rather than merged when that listener already has
+// one at the destination; see RepointLibraryBooks for why.
+//
+// Both fingerprints must resolve to a known edition, but this endpoint does not itself
+// verify they are the same recording -- that judgment (transcript comparison, or a
+// confirmed alias) is expected to have already been made before calling it, the same as
+// /v1/admin/editions/result-copy.
+app.MapPost("/v1/admin/editions/repoint", (
+    AdminEditionRepointRequest request,
+    HttpContext context,
+    IEditionReferenceStore references,
+    ILogger<Program> logger) =>
+{
+    if (!IsConfiguredApiToken(context, app.Configuration)) return Results.Unauthorized();
+
+    if (InMemoryScanCatalog.FingerprintKey(request.Source) ==
+        InMemoryScanCatalog.FingerprintKey(request.Destination))
+    {
+        return Results.BadRequest(new { error = "Both fingerprints identify the same file." });
+    }
+
+    var result = references.RepointLibraryBooks(request.Source, request.Destination);
+    if (result is null)
+    {
+        return Results.BadRequest(new { error = "One or both fingerprints do not identify a known edition." });
+    }
+
+    logger.LogInformation(
+        "Repointed {Repointed} library row(s) from {SourceTitle} ({SourceSha}) to " +
+        "{DestinationTitle} ({DestinationSha}); {Skipped} left in place because that " +
+        "listener already had a row at the destination.",
+        result.Repointed, request.Source.WorkTitle, request.Source.Sha256[..12],
+        request.Destination.WorkTitle, request.Destination.Sha256[..12], result.SkippedForExistingRow);
+    return Results.Ok(result);
+});
+
 /// Copies a scan result from one edition to another, for the case FindResult's own alias
 /// path cannot reach on its own: a fingerprint that already has a stale result of its own,
 /// where an alias would never even be consulted, because a fingerprint's own result always
