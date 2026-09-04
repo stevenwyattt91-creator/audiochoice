@@ -5,7 +5,11 @@ import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 const API = process.env.NEXT_PUBLIC_AUDIOCHOICE_API_URL || "https://audiochoice-stg-api.grayocean-b35d4bf9.eastus.azurecontainerapps.io";
 const GOOGLE_CLIENT_ID = process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID || "105248861745-34kh2v9g9825kb1drs3jrgmijjum2p3o.apps.googleusercontent.com";
 type Access = { userID: string; email: string; displayName: string; role: string; active: boolean };
-type CatalogBook = { editionID: string; scanResultID: string; fingerprint: { title: string; author?: string; edition?: string; fileHash?: string }; scanDate: string; scannerVersion: string; eventCount: number; explorePublished: boolean; hasCoverArt: boolean; hasTranscript: boolean };
+type BookFingerprint = { version: number; sha256: string; fileSize: number; duration?: number; fileType: string; workTitle?: string; author?: string; seriesTitle?: string; seriesNumber?: number; editionType?: string; partNumber?: number; totalParts?: number };
+// Field names match BookFingerprint's JSON exactly (backend/AudioChoice.Api/Contracts/CloudContracts.cs) --
+// title/author/edition/fileHash here previously named fields that do not exist on the wire, so every
+// scan-library row silently rendered blank title, author and edition for as long as this type existed.
+type CatalogBook = { editionID: string; scanResultID: string; fingerprint: BookFingerprint; scanDate: string; scannerVersion: string; eventCount: number; explorePublished: boolean; hasCoverArt: boolean; hasTranscript: boolean };
 type Audit = { id: string; title: string; author?: string; edition?: string; candidateCount: number; reviewedCount: number; status: string; completedAt?: string; compensationAmount?: number; paymentStatus: string; reviewFocus?: string; reviewMediaStatus?: string };
 type Payment = { assignmentID: string; auditorID?: string; auditorName?: string; auditorEmail?: string; title: string; edition?: string; status: string; completedAt?: string; amount?: number; paymentStatus: string; paymentDate?: string; paymentNote?: string };
 type Dashboard = { scannedEditionCount: number; awaitingApprovalCount: number; readyToPayCount: number; readyToPayAmount: number; activeAuditorCount: number };
@@ -37,9 +41,111 @@ export default function Home() {
   return <main className="app"><aside><div className="brand">Audio<span>Choice</span><small>ADMIN</small></div><nav>{nav.map(([key, label]) => <button key={key} className={section === key ? "active" : ""} onClick={() => setSection(key)}>{label}</button>)}</nav><div className="account"><strong>{user.displayName}</strong><span>{user.email}</span><button onClick={() => { sessionStorage.removeItem("audiochoice-admin-token"); location.reload(); }}>Sign out</button></div></aside><section className="content"><header><div><p className="eyebrow">INTERNAL OPERATIONS</p><h1>{nav.find(x => x[0] === section)?.[1]}</h1></div><span className="secure">● Private workspace</span></header>{error && <div className="error banner">{error}<button onClick={() => setError("")}>×</button></div>}{section === "overview" && <Overview dashboard={dashboard} catalog={catalog} openBook={openBook} setSection={setSection} />}{section === "library" && <Library catalog={catalog} search={search} setSearch={setSearch} refresh={refreshCatalog} openBook={openBook} />}{section === "audits" && <Audits items={audits} catalog={catalog} users={users} busy={busy} attach={attachReviewAudio} create={async (data) => { try { await call("/v1/internal/admin/audits", { method: "POST", body: JSON.stringify(data) }); await load(); } catch (e) { setError((e as Error).message); } }} action={doTask} approve={approveWithValue} />}{section === "payouts" && <Payouts items={payments} markPaid={markPaid} />}{section === "affiliates" && <Affiliates />}</section>{selected && <BookDrawer book={selected} detail={detail} close={() => setSelected(null)} call={call} />}</main>;
 }
 function GoogleLogin({ onCredential, disabled }: { onCredential: (credential: string) => void; disabled: boolean }) { const host = useRef<HTMLDivElement>(null); const [unavailable, setUnavailable] = useState(false); useEffect(() => { let active = true; const draw = () => { if (!active || !window.google || !host.current) return; window.google.accounts.id.initialize({ client_id: GOOGLE_CLIENT_ID, callback: (response: { credential?: string }) => response.credential && onCredential(response.credential) }); host.current.innerHTML = ""; window.google.accounts.id.renderButton(host.current, { type: "standard", theme: "outline", size: "large", text: "continue_with", shape: "rectangular", width: 360 }); }; if (window.google) { draw(); return () => { active = false; }; } const script = document.createElement("script"); script.src = "https://accounts.google.com/gsi/client"; script.async = true; script.onload = draw; script.onerror = () => setUnavailable(true); document.head.appendChild(script); return () => { active = false; }; }, [onCredential]); return <div className="google"><div ref={host} className={disabled ? "disabled" : ""}/>{unavailable && <button type="button" className="ghost" onClick={() => window.location.reload()}>Reload Google sign-in</button>}</div> }
-function Overview({ dashboard, catalog, openBook, setSection }: any) { const cards = [[dashboard?.scannedEditionCount, "Scanned editions"], [dashboard?.awaitingApprovalCount, "Ready for review"], [dashboard?.readyToPayCount, "Approved, unpaid"], [formatMoney(dashboard?.readyToPayAmount), "Payouts due"]]; return <><div className="stats">{cards.map(([value, label]) => <article key={label}><strong>{value ?? "—"}</strong><span>{label}</span></article>)}</div><section className="panel"><div className="panelhead"><div><p className="eyebrow">SCAN LIBRARY</p><h2>Recently scanned editions</h2></div><button className="ghost" onClick={() => setSection("library")}>View library →</button></div><div className="bookgrid">{catalog.slice(0, 6).map((b: CatalogBook) => <button className="book" onClick={() => openBook(b)} key={b.editionID}><span className="cover">{b.hasCoverArt ? "ART" : "SCAN"}</span><strong>{b.fingerprint.title}</strong><small>{b.fingerprint.author || "Unknown author"}</small><em>{b.eventCount} filter events</em></button>)}</div></section><section className="notice"><strong>Admin control center</strong><p>Create quality-audit work, review completed audits, record payouts, and access generated scan materials. Original customer audiobook files are never exposed here.</p></section></> }
-function Library({ catalog, search, setSearch, refresh, openBook }: any) { return <section className="panel"><div className="toolbar"><input value={search} onChange={e => setSearch(e.target.value)} onKeyDown={e => e.key === "Enter" && refresh()} placeholder="Search title, author, edition, or fingerprint" /><button onClick={refresh}>Search</button></div><div className="table">{catalog.map((b: CatalogBook) => <button key={b.editionID} className="row" onClick={() => openBook(b)}><span className="cover mini">{b.hasCoverArt ? "ART" : "SCAN"}</span><span><strong>{b.fingerprint.title}</strong><small>{b.fingerprint.author || "Unknown author"} · {b.fingerprint.edition || "Edition not specified"}</small></span><span>{b.eventCount} events<small>Scan {b.scannerVersion}</small></span><span>{formatDate(b.scanDate)}<small>{b.explorePublished ? "Explore published" : "Internal only"}</small></span><b>Open →</b></button>)}{!catalog.length && <p className="empty">No scan editions match that search.</p>}</div></section> }
-function Audits({ items, catalog, users, create, action, approve, attach, busy }: any) { const [adding, setAdding] = useState(false); const submit = (e: FormEvent<HTMLFormElement>) => { e.preventDefault(); const f = new FormData(e.currentTarget); create({ scanResultID: f.get("scanResultID"), auditorID: f.get("auditorID") || null, blindQC: f.get("blindQC") === "on", compensationAmount: Number(f.get("compensationAmount")) || null }); setAdding(false); }; return <><div className="panelhead"><div><p className="eyebrow">QUALITY CONTROL</p><h2>Audit assignments</h2><p className="muted">A completed scan creates a job here first. Attach its matching M4B to make the job available to auditors with event-only audio clips.</p></div><button onClick={() => setAdding(!adding)}>{adding ? "Cancel" : "Create audit task"}</button></div>{adding && <form className="create" onSubmit={submit}><label>Scanned edition<select name="scanResultID" required>{catalog.map((b: CatalogBook) => <option key={b.scanResultID} value={b.scanResultID}>{b.fingerprint.title} — {b.fingerprint.edition || "Unspecified edition"}</option>)}</select></label><label>Assign to auditor (optional)<select name="auditorID"><option value="">Leave available to claim</option>{users.filter((u: Access) => u.role === "auditor" && u.active).map((u: Access) => <option value={u.userID} key={u.userID}>{u.displayName}</option>)}</select></label><label>Flat compensation (USD)<input name="compensationAmount" type="number" min="0" step="0.01" placeholder="e.g. 12.00" /></label><label className="check"><input type="checkbox" name="blindQC" /> Blind quality-control task</label><button>Create task</button></form>}<section className="panel"><div className="table">{items.map((a: Audit) => <div className="row task" key={a.id}><span><strong>{a.title}</strong><small>{a.author || "Unknown author"} · {a.edition || "Edition not specified"}</small><small>{a.reviewFocus || "All detected events"}</small></span><span><b className="pill">{a.reviewMediaStatus === "waiting_for_source" ? "waiting for M4B" : a.status.replaceAll("_", " ")}</b><small>{a.reviewedCount}/{a.candidateCount} reviewed</small></span><span>{a.compensationAmount === undefined ? "Set after review" : formatMoney(a.compensationAmount)}<small>{a.paymentStatus}</small></span><span className="actions">{a.reviewMediaStatus === "waiting_for_source" && <label className="ghost">{busy ? "Attaching…" : "Attach matching M4B"}<input hidden type="file" accept=".m4b,audio/mp4" disabled={busy} onChange={e => { const file = e.currentTarget.files?.[0]; if (file) attach(a.id, file); e.currentTarget.value = ""; }} /></label>}{["completed", "needs_review"].includes(a.status) && <><button onClick={() => approve(a)}>Approve & set value</button><button className="ghost" onClick={() => action(a.id, "reject")}>Reject</button></>}{a.status === "approved" && <span>Awaiting payout</span>}</span></div>)}</div></section></> }
+function Overview({ dashboard, catalog, openBook, setSection }: any) { const cards = [[dashboard?.scannedEditionCount, "Scanned editions"], [dashboard?.awaitingApprovalCount, "Ready for review"], [dashboard?.readyToPayCount, "Approved, unpaid"], [formatMoney(dashboard?.readyToPayAmount), "Payouts due"]]; return <><div className="stats">{cards.map(([value, label]) => <article key={label}><strong>{value ?? "—"}</strong><span>{label}</span></article>)}</div><section className="panel"><div className="panelhead"><div><p className="eyebrow">SCAN LIBRARY</p><h2>Recently scanned editions</h2></div><button className="ghost" onClick={() => setSection("library")}>View library →</button></div><div className="bookgrid">{catalog.slice(0, 6).map((b: CatalogBook) => <button className="book" onClick={() => openBook(b)} key={b.editionID}><span className="cover">{b.hasCoverArt ? "ART" : "SCAN"}</span><strong>{b.fingerprint.workTitle || "Untitled audiobook"}</strong><small>{b.fingerprint.author || "Unknown author"}</small><em>{b.eventCount} filter events</em></button>)}</div></section><section className="notice"><strong>Admin control center</strong><p>Create quality-audit work, review completed audits, record payouts, and access generated scan materials. Original customer audiobook files are never exposed here.</p></section></> }
+const LIBRARY_COLUMNS: [string, (b: CatalogBook) => string][] = [
+  ["Title", b => b.fingerprint.workTitle || "Untitled audiobook"],
+  ["Author", b => b.fingerprint.author || ""],
+  ["Series", b => b.fingerprint.seriesTitle ? `${b.fingerprint.seriesTitle}${b.fingerprint.seriesNumber ? ` #${b.fingerprint.seriesNumber}` : ""}` : ""],
+  ["Edition", b => b.fingerprint.editionType || ""],
+  ["Part", b => b.fingerprint.partNumber ? `${b.fingerprint.partNumber} of ${b.fingerprint.totalParts || "?"}` : ""],
+  ["Duration", b => formatDuration(b.fingerprint.duration)],
+  ["File type", b => b.fingerprint.fileType || ""],
+  ["Fingerprint (sha256)", b => b.fingerprint.sha256 || ""],
+  ["Scanner version", b => b.scannerVersion],
+  ["Scan date", b => formatDate(b.scanDate)],
+  ["Filter events", b => String(b.eventCount)],
+  ["Transcript", b => b.hasTranscript ? "Yes" : "No"],
+  ["Cover art", b => b.hasCoverArt ? "Yes" : "No"],
+  ["Explore", b => b.explorePublished ? "Published" : "Internal only"],
+];
+
+function formatDuration(seconds?: number) {
+  if (!seconds || !Number.isFinite(seconds)) return "";
+  const total = Math.floor(seconds);
+  const h = Math.floor(total / 3600);
+  const m = Math.floor((total % 3600) / 60);
+  return h > 0 ? `${h}h ${m}m` : `${m}m`;
+}
+
+function copyToClipboard(value: string) {
+  if (!value) return;
+  navigator.clipboard?.writeText(value).catch(() => {});
+}
+
+function exportCatalogCSV(catalog: CatalogBook[]) {
+  const header = LIBRARY_COLUMNS.map(([label]) => label);
+  const rows = catalog.map(b => LIBRARY_COLUMNS.map(([, get]) => {
+    const value = get(b).replaceAll('"', '""');
+    return `"${value}"`;
+  }));
+  const csv = [header.join(","), ...rows.map(r => r.join(","))].join("\n");
+  const url = URL.createObjectURL(new Blob([csv], { type: "text/csv" }));
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = "audiochoice-scan-library.csv";
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+function Library({ catalog, search, setSearch, refresh, openBook }: any) {
+  const [sortColumn, setSortColumn] = useState(0);
+  const [sortAscending, setSortAscending] = useState(true);
+  const sorted = useMemo(() => {
+    const [, getValue] = LIBRARY_COLUMNS[sortColumn];
+    const copy = [...catalog] as CatalogBook[];
+    copy.sort((a, b) => {
+      const result = getValue(a).localeCompare(getValue(b), undefined, { numeric: true, sensitivity: "base" });
+      return sortAscending ? result : -result;
+    });
+    return copy;
+  }, [catalog, sortColumn, sortAscending]);
+  const toggleSort = (index: number) => {
+    if (index === sortColumn) setSortAscending(!sortAscending);
+    else { setSortColumn(index); setSortAscending(true); }
+  };
+  return <section className="panel">
+    <div className="toolbar">
+      <input value={search} onChange={e => setSearch(e.target.value)} onKeyDown={e => e.key === "Enter" && refresh()} placeholder="Search title, author, series, edition, or narrator" />
+      <button onClick={refresh}>Search</button>
+      <button className="ghost" onClick={() => exportCatalogCSV(sorted)}>Export CSV</button>
+    </div>
+    <p className="muted">{sorted.length} scanned edition{sorted.length === 1 ? "" : "s"}. Click a column to sort; click a row to open its filter result and transcript.</p>
+    <div className="sheet">
+      <table>
+        <thead>
+          <tr>
+            {LIBRARY_COLUMNS.map(([label], index) => (
+              <th key={label} onClick={() => toggleSort(index)} className={index === sortColumn ? "sorted" : ""}>
+                {label}{index === sortColumn && (sortAscending ? " ▲" : " ▼")}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {sorted.map(b => (
+            <tr key={b.editionID} onClick={() => openBook(b)}>
+              {LIBRARY_COLUMNS.map(([label, getValue]) => (
+                <td key={label}>
+                  {label === "Fingerprint (sha256)" ? (
+                    <span
+                      className="hash"
+                      title={getValue(b)}
+                      onClick={e => { e.stopPropagation(); copyToClipboard(getValue(b)); }}
+                    >
+                      {getValue(b).slice(0, 12)}…
+                    </span>
+                  ) : getValue(b) || "—"}
+                </td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      {!sorted.length && <p className="empty">No scan editions match that search.</p>}
+    </div>
+  </section>;
+}
+function Audits({ items, catalog, users, create, action, approve, attach, busy }: any) { const [adding, setAdding] = useState(false); const submit = (e: FormEvent<HTMLFormElement>) => { e.preventDefault(); const f = new FormData(e.currentTarget); create({ scanResultID: f.get("scanResultID"), auditorID: f.get("auditorID") || null, blindQC: f.get("blindQC") === "on", compensationAmount: Number(f.get("compensationAmount")) || null }); setAdding(false); }; return <><div className="panelhead"><div><p className="eyebrow">QUALITY CONTROL</p><h2>Audit assignments</h2><p className="muted">A completed scan creates a job here first. Attach its matching M4B to make the job available to auditors with event-only audio clips.</p></div><button onClick={() => setAdding(!adding)}>{adding ? "Cancel" : "Create audit task"}</button></div>{adding && <form className="create" onSubmit={submit}><label>Scanned edition<select name="scanResultID" required>{catalog.map((b: CatalogBook) => <option key={b.scanResultID} value={b.scanResultID}>{b.fingerprint.workTitle || "Untitled audiobook"} — {b.fingerprint.editionType || "Unspecified edition"}</option>)}</select></label><label>Assign to auditor (optional)<select name="auditorID"><option value="">Leave available to claim</option>{users.filter((u: Access) => u.role === "auditor" && u.active).map((u: Access) => <option value={u.userID} key={u.userID}>{u.displayName}</option>)}</select></label><label>Flat compensation (USD)<input name="compensationAmount" type="number" min="0" step="0.01" placeholder="e.g. 12.00" /></label><label className="check"><input type="checkbox" name="blindQC" /> Blind quality-control task</label><button>Create task</button></form>}<section className="panel"><div className="table">{items.map((a: Audit) => <div className="row task" key={a.id}><span><strong>{a.title}</strong><small>{a.author || "Unknown author"} · {a.edition || "Edition not specified"}</small><small>{a.reviewFocus || "All detected events"}</small></span><span><b className="pill">{a.reviewMediaStatus === "waiting_for_source" ? "waiting for M4B" : a.status.replaceAll("_", " ")}</b><small>{a.reviewedCount}/{a.candidateCount} reviewed</small></span><span>{a.compensationAmount === undefined ? "Set after review" : formatMoney(a.compensationAmount)}<small>{a.paymentStatus}</small></span><span className="actions">{a.reviewMediaStatus === "waiting_for_source" && <label className="ghost">{busy ? "Attaching…" : "Attach matching M4B"}<input hidden type="file" accept=".m4b,audio/mp4" disabled={busy} onChange={e => { const file = e.currentTarget.files?.[0]; if (file) attach(a.id, file); e.currentTarget.value = ""; }} /></label>}{["completed", "needs_review"].includes(a.status) && <><button onClick={() => approve(a)}>Approve & set value</button><button className="ghost" onClick={() => action(a.id, "reject")}>Reject</button></>}{a.status === "approved" && <span>Awaiting payout</span>}</span></div>)}</div></section></> }
 function Payouts({ items, markPaid }: any) { const groups = useMemo(() => Object.entries(items.filter((x: Payment) => x.paymentStatus !== "paid").reduce((all: Record<string, Payment[]>, p: Payment) => { const key = p.auditorEmail || "Unassigned"; (all[key] ||= []).push(p); return all; }, {})), [items]); return <><div className="stats">{groups.map(([email, list]) => <article key={email}><strong>{formatMoney((list as Payment[]).reduce((s, x) => s + (x.amount || 0), 0))}</strong><span>{(list as Payment[])[0]?.auditorName || email}<small>{(list as Payment[]).length} approved task(s)</small></span></article>)}</div><section className="panel"><div className="panelhead"><div><p className="eyebrow">PAYROLL QUEUE</p><h2>Approved work and payment history</h2></div></div><div className="table">{items.map((p: Payment) => <div className="row task" key={p.assignmentID}><span><strong>{p.title}</strong><small>{p.auditorName || "Unassigned"} · completed {formatDate(p.completedAt)}</small></span><span>{formatMoney(p.amount)}<small>{p.paymentStatus === "paid" ? `Paid ${formatDate(p.paymentDate)}` : "Awaiting payment"}</small></span><span>{p.paymentNote || "—"}</span><span className="actions">{p.paymentStatus !== "paid" && <button onClick={() => markPaid(p.assignmentID)}>Mark paid</button>}</span></div>)}</div></section></> }
 function Affiliates() { return <section className="panel affiliate"><p className="eyebrow">AFFILIATE PROGRAM</p><h2>Referral and commission operations</h2><p>The payout workspace is ready for auditor compensation. The subscription-connected affiliate ledger will be enabled alongside app-store subscription verification, so recurring commissions can be calculated from verified renewals—not self-reported signups.</p><div className="steps"><span>1. Affiliate enrollment</span><span>2. Referral attribution</span><span>3. Verified subscription renewal</span><span>4. Monthly commission statement</span></div><p className="muted">Planned commission rule: $2 per referred subscriber per verified monthly renewal for the first 12 months. No affiliate earnings will be recorded until subscription verification is live.</p></section> }
-function BookDrawer({ book, detail, close, call }: any) { const [transcript, setTranscript] = useState<any>(null); const [loading, setLoading] = useState(false); const getTranscript = async () => { setLoading(true); try { setTranscript(await call(`/v1/internal/admin/catalog/${book.editionID}/transcript`)); } finally { setLoading(false); } }; return <div className="overlay" onMouseDown={close}><section className="drawer" onMouseDown={e => e.stopPropagation()}><button className="close" onClick={close}>×</button><p className="eyebrow">SCANNED EDITION</p><h2>{book.fingerprint.title}</h2><p>{book.fingerprint.author || "Unknown author"} · {book.fingerprint.edition || "Edition not specified"}</p><div className="detailstats"><span><b>{book.eventCount}</b> filter events</span><span><b>{book.scannerVersion}</b> scanner</span><span><b>{formatDate(book.scanDate)}</b> scanned</span></div><section><h3>Generated filter result</h3><p>Edition-specific filter events and scan metadata are available to the administrator.</p>{detail?.filters ? <button onClick={() => download(`${book.fingerprint.title}-filters.json`, detail.filters)}>Download filter JSON</button> : <span className="muted">Loading filters…</span>}</section><section><h3>Private transcript</h3><p>Only the generated transcript is available here; original audiobooks remain private and are never stored in the portal.</p>{!transcript ? <button onClick={getTranscript} disabled={loading}>{loading ? "Loading transcript…" : "Open transcript"}</button> : <><button className="ghost" onClick={() => download(`${book.fingerprint.title}-transcript.json`, transcript)}>Download transcript JSON</button><div className="transcript">{transcript.segments?.slice(0, 100).map((x: any, i: number) => <p key={i}><small>{Math.floor(x.startTime / 60)}:{String(Math.floor(x.startTime % 60)).padStart(2, "0")}</small>{x.text}</p>)}{transcript.segments?.length > 100 && <p className="muted">Previewing the first 100 segments. Use Download transcript JSON for the complete generated transcript.</p>}</div></>}</section></section></div> }
+function BookDrawer({ book, detail, close, call }: any) { const [transcript, setTranscript] = useState<any>(null); const [loading, setLoading] = useState(false); const getTranscript = async () => { setLoading(true); try { setTranscript(await call(`/v1/internal/admin/catalog/${book.editionID}/transcript`)); } finally { setLoading(false); } }; const title = book.fingerprint.workTitle || "Untitled audiobook"; return <div className="overlay" onMouseDown={close}><section className="drawer" onMouseDown={e => e.stopPropagation()}><button className="close" onClick={close}>×</button><p className="eyebrow">SCANNED EDITION</p><h2>{title}</h2><p>{book.fingerprint.author || "Unknown author"} · {book.fingerprint.editionType || "Edition not specified"}</p><div className="detailstats"><span><b>{book.eventCount}</b> filter events</span><span><b>{book.scannerVersion}</b> scanner</span><span><b>{formatDate(book.scanDate)}</b> scanned</span></div><section><h3>Generated filter result</h3><p>Edition-specific filter events and scan metadata are available to the administrator.</p>{detail?.filters ? <button onClick={() => download(`${title}-filters.json`, detail.filters)}>Download filter JSON</button> : <span className="muted">Loading filters…</span>}</section><section><h3>Private transcript</h3><p>Only the generated transcript is available here; original audiobooks remain private and are never stored in the portal.</p>{!transcript ? <button onClick={getTranscript} disabled={loading}>{loading ? "Loading transcript…" : "Open transcript"}</button> : <><button className="ghost" onClick={() => download(`${title}-transcript.json`, transcript)}>Download transcript JSON</button><div className="transcript">{transcript.segments?.slice(0, 100).map((x: any, i: number) => <p key={i}><small>{Math.floor(x.startTime / 60)}:{String(Math.floor(x.startTime % 60)).padStart(2, "0")}</small>{x.text}</p>)}{transcript.segments?.length > 100 && <p className="muted">Previewing the first 100 segments. Use Download transcript JSON for the complete generated transcript.</p>}</div></>}</section></section></div> }
