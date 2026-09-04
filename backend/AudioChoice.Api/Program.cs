@@ -1238,6 +1238,34 @@ app.MapGet("/v1/admin/editions/result", (
     return result is null ? Results.NotFound() : Results.Ok(result);
 });
 
+// Reads a saved transcript by exact fingerprint. Read-only, and exists for the same reason
+// /v1/admin/editions/result does: deciding whether two file identities are the same
+// recording needs to compare their actual transcripts, not just their metadata, and nothing
+// else exposes what one contains outside the separately authenticated internal audit portal.
+app.MapGet("/v1/admin/transcripts/content", async (
+    HttpContext context,
+    IPrivateTranscriptStore transcriptStore,
+    string? sha256,
+    int? fingerprintVersion,
+    long? fileSize,
+    CancellationToken cancellationToken) =>
+{
+    if (!IsConfiguredApiToken(context, app.Configuration)) return Results.Unauthorized();
+
+    if (string.IsNullOrWhiteSpace(sha256) || fingerprintVersion is null || fileSize is null)
+    {
+        return Results.BadRequest(new
+        {
+            error = "sha256, fingerprintVersion and fileSize are all required to identify an edition."
+        });
+    }
+
+    var transcript = await transcriptStore.Load(new BookFingerprint(
+        fingerprintVersion.Value, sha256, fileSize.Value,
+        null, string.Empty, null, null, null, null, null, null, null), cancellationToken);
+    return transcript is null ? Results.NotFound() : Results.Ok(transcript);
+});
+
 app.MapGet("/v1/admin/editions", async (
     HttpContext context,
     IScanCatalog catalog,
