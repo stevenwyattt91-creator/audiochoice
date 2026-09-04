@@ -67,12 +67,21 @@ enum ExploreCatalogCleanup {
         return clusters.map(best)
     }
 
-    /// How far two runtimes may differ and still be the same recording.
+    /// Floor for how far two runtimes may differ, used for a short book where a percentage
+    /// of the runtime would be too tight to absorb ordinary rounding.
+    private static let minimumRuntimeMatchSeconds: Double = 5
+
+    /// How far two runtimes may differ, as a fraction of the longer one, and still be
+    /// judged the same recording.
     ///
-    /// Converting a file re-encodes it, which shifts the reported length slightly, and a
-    /// container's runtime is rounded. Two seconds absorbs that without being wide enough to
-    /// merge an abridged reading with an unabridged one.
-    private static let runtimeMatchSeconds: Double = 2
+    /// Proportional rather than a fixed number of seconds, matching what re-encoding drift
+    /// measured off the real catalogue actually looks like: it compounds across a longer
+    /// file rather than adding a constant. A flat two seconds -- absolute, not proportional
+    /// -- left real re-encoded copies of Fourth Wing, Funny Story and The Deal listed twice
+    /// even after their titles had already been unified server-side. 0.2% comfortably covers
+    /// the largest drift seen (0.065%) with room to spare, while still rejecting an abridged
+    /// reading against an unabridged one, which differs by double digits of percent.
+    private static let maximumRuntimeDriftFraction: Double = 0.002
 
     /// Whether two entries are the same recording judged on runtime rather than title.
     ///
@@ -90,7 +99,7 @@ enum ExploreCatalogCleanup {
         if left.productIdentifier != nil && right.productIdentifier != nil { return false }
         guard let leftDuration = left.duration, leftDuration > 0,
               let rightDuration = right.duration, rightDuration > 0,
-              abs(leftDuration - rightDuration) <= runtimeMatchSeconds,
+              runtimesAgree(leftDuration, rightDuration),
               partMarker(left.title) == partMarker(right.title),
               normalized(left.editionType) == normalized(right.editionType) else { return false }
         let leftAuthor = normalized(left.author)
@@ -103,7 +112,9 @@ enum ExploreCatalogCleanup {
     /// untagged file is one of the differences being reconciled here.
     private static func runtimesAgree(_ left: Double?, _ right: Double?) -> Bool {
         guard let left, left > 0, let right, right > 0 else { return true }
-        return abs(left - right) <= runtimeMatchSeconds
+        let drift = abs(left - right)
+        return drift <= minimumRuntimeMatchSeconds
+            || drift <= max(left, right) * maximumRuntimeDriftFraction
     }
 
     /// The entry to keep when several describe the same recording.

@@ -483,6 +483,16 @@ public sealed class PostgresScanCatalog(
             left join scan_events se on se.scan_result_id = r.id
             where e.work_title is not null and btrim(e.work_title) <> ''{publishedFilter}
               and lower(e.work_title) not like '%iron flame%'
+              -- Explore is a catalogue of audiobooks with reusable filter scans. An EPUB's
+              -- own fingerprint never carries a scan of this kind -- narrated books are
+              -- scanned as text, kept in a separate store, and never reach this table -- but
+              -- a read-along companion attached to an audiobook is stored under a fingerprint
+              -- whose file_type is "epub" and can otherwise satisfy every join above, since it
+              -- deliberately borrows that audiobook's own duration and identity so read-along
+              -- knows which book it belongs to. Excluded here so it is never listed twice: once
+              -- correctly, as the audiobook, and once wrongly, as if the reading edition were
+              -- itself a scanned recording.
+              and lower(btrim(e.file_type)) <> 'epub'
               -- An entry advertises a reusable scan, so the scan has to have finished. The
               -- lateral join above already requires a result row, but a result can also be
               -- written for an edition whose job later failed or is still running, and those
@@ -796,10 +806,16 @@ public sealed class PostgresScanCatalog(
         return new ScanResult(events, scanDate, scannerVersion);
     }
 
-    private static Guid UpsertEdition(
+    private Guid UpsertEdition(
         NpgsqlConnection connection, NpgsqlTransaction transaction, BookFingerprint value)
     {
         value = EditionTitleFormatter.Canonicalize(value);
+        // Checked here, rather than only in the read path, so the title stored for a brand
+        // new edition already reads correctly the first time an administrator lists it --
+        // a signature reported after the file was first seen (or one this exact recording
+        // already carried under a different fingerprint) is not always available yet, but
+        // when it is, the canonical name is what gets written.
+        var productIdentifier = editionSignatures.Find(value)?.ProductIdentifier;
         using var command = new NpgsqlCommand("""
             insert into audiobook_editions(
                 id, fingerprint_version, sha256, file_size, duration_seconds, file_type,
@@ -816,7 +832,7 @@ public sealed class PostgresScanCatalog(
         command.Parameters.AddWithValue(value.FileSize);
         AddNullable(command, value.Duration);
         command.Parameters.AddWithValue(value.FileType);
-        AddNullable(command, EditionTitleFormatter.Format(value));
+        AddNullable(command, EditionTitleFormatter.Format(value, productIdentifier));
         AddNullable(command, value.Author);
         AddNullable(command, value.SeriesTitle);
         AddNullable(command, value.SeriesNumber);
