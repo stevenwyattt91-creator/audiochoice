@@ -23,10 +23,10 @@ import kotlinx.coroutines.withContext
 import com.audiochoice.mobile.importing.EditionSignatures
 import com.audiochoice.mobile.importing.Mp4TagReader
 import kotlinx.serialization.json.Json
+import com.audiochoice.contracts.EditionSignature
 import com.audiochoice.mobile.data.ApiException
 import com.audiochoice.mobile.data.AudioChoiceApi
 import com.audiochoice.mobile.data.AudioChapter
-import com.audiochoice.mobile.data.EditionSignature
 import com.audiochoice.mobile.data.FilterReportComposer
 import com.audiochoice.mobile.data.FilterReportQueue
 import com.audiochoice.mobile.data.FilterReportRequest

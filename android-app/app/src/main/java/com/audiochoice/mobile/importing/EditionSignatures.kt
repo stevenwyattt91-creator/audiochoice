@@ -1,8 +1,8 @@
 package com.audiochoice.mobile.importing
 
 import com.audiochoice.contracts.BookFingerprint
+import com.audiochoice.contracts.EditionSignature
 import com.audiochoice.mobile.data.AudioChapter
-import com.audiochoice.mobile.data.EditionSignature
 import kotlin.math.roundToInt
 
 /**
