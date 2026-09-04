@@ -139,6 +139,18 @@ public sealed record AdminEditionRepointRequest(
     BookFingerprint Source,
     BookFingerprint Destination);
 
+/// <summary>
+/// Permanently deletes an edition and everything scanning or auditing it produced.
+/// </summary>
+/// <remarks>
+/// <see cref="ConfirmIrreversible"/> must be sent as <c>true</c> outright. This is the one
+/// admin endpoint in the product that cannot be undone by re-running it the other way, unlike
+/// an alias or a repoint, so it does not accept an ordinary request shape by accident.
+/// </remarks>
+public sealed record AdminEditionDeleteRequest(
+    BookFingerprint Fingerprint,
+    bool ConfirmIrreversible);
+
 public sealed record AdminEditionMetadataRequest(
     BookFingerprint Fingerprint,
     string WorkTitle,

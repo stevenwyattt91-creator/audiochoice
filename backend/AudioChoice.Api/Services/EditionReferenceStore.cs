@@ -38,7 +38,33 @@ public interface IEditionReferenceStore
     /// retiring the edition would touch real compensation. Null when the edition cannot be found.
     /// </summary>
     IReadOnlyList<EditionAuditAssignmentSummary>? ListAuditAssignments(BookFingerprint fingerprint);
+
+    /// <summary>
+    /// Permanently removes an edition and everything that exists only to describe it: its
+    /// scan uploads, jobs, results and events, and any audit assignment and decision made
+    /// against it.
+    /// </summary>
+    /// <remarks>
+    /// Refuses rather than trusts the caller's own prior check, for the same reason
+    /// <c>/v1/admin/editions/result-copy</c> re-derives its own match instead of trusting the
+    /// caller's claim: a listener's own library row and any paid or actively claimed audit
+    /// work are re-read inside the same transaction as the delete, not assumed still true from
+    /// whatever <see cref="CountReferences"/> returned a moment earlier to whoever is calling
+    /// this. A library row is never deleted by this or anything it touches; if one still
+    /// exists this refuses outright rather than removing an edition out from under it.
+    /// </remarks>
+    EditionDeleteResult DeleteEdition(BookFingerprint fingerprint);
 }
+
+public enum EditionDeleteOutcome
+{
+    Deleted,
+    NotFound,
+    RefusedLibraryBooksPresent,
+    RefusedPaidOrActiveAuditWork
+}
+
+public sealed record EditionDeleteResult(EditionDeleteOutcome Outcome);
 
 /// <param name="Repointed">Rows moved to the destination edition.</param>
 /// <param name="SkippedForExistingRow">
@@ -85,6 +111,8 @@ public sealed class UnavailableEditionReferenceStore : IEditionReferenceStore
     public EditionReferenceCounts? CountReferences(BookFingerprint fingerprint) => null;
     public EditionRepointResult? RepointLibraryBooks(BookFingerprint source, BookFingerprint destination) => null;
     public IReadOnlyList<EditionAuditAssignmentSummary>? ListAuditAssignments(BookFingerprint fingerprint) => null;
+    public EditionDeleteResult DeleteEdition(BookFingerprint fingerprint) =>
+        new(EditionDeleteOutcome.NotFound);
 }
 
 /// <summary>
