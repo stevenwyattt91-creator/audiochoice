@@ -1,6 +1,7 @@
 package com.audiochoice.mobile.data
 
 import com.audiochoice.contracts.BookFingerprint
+import com.audiochoice.contracts.EditionSignature
 import kotlinx.serialization.Serializable
 
 @Serializable
@@ -66,21 +67,6 @@ data class EditionSignatureReportRequest(
 data class EditionDescriptionReportRequest(
     val fingerprint: BookFingerprint,
     val description: String,
-)
-
-/**
- * Identity evidence about a recording that a file's byte hash cannot express.
- *
- * Only the client can read this, since the server never sees container tags. It is
- * what lets a converted copy be recognised as the same recording, and a matching
- * retail product identifier is the one signal strong enough to reuse filter results.
- */
-@Serializable
-data class EditionSignature(
-    val productIdentifier: String? = null,
-    val narrator: String? = null,
-    /** Chapter start offsets in whole seconds; survives re-encoding. */
-    val chapterOffsetSeconds: List<Int>? = null,
 )
 
 @Serializable

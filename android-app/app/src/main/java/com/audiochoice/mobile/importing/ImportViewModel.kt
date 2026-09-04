@@ -11,8 +11,8 @@ import androidx.lifecycle.viewModelScope
 import com.audiochoice.contracts.CloudScanResponse
 import com.audiochoice.contracts.CloudScanStatus
 import kotlin.math.roundToInt
+import com.audiochoice.contracts.EditionSignature
 import com.audiochoice.mobile.data.AudioChoiceApi
-import com.audiochoice.mobile.data.EditionSignature
 import com.audiochoice.mobile.data.LibraryBook
 import com.audiochoice.mobile.data.LibraryBookUpsertRequest
 import com.audiochoice.mobile.data.ExploreCatalogBook
@@ -472,13 +472,18 @@ class ImportViewModel(
                     rejectUnsupportedBetaImport()
                     return@runCatching
                 }
+                // Read now, before the lookup below, rather than reported only afterward as
+                // part of saveMatchedBook's library upsert: the whole point of sending it is
+                // to let THIS lookup recognise a converted or re-tagged copy of an edition
+                // already scanned, which it cannot do with evidence that only arrives later.
+                val importSignature = EditionSignatures.from(audio.tags, audio.chapters)
                 // Always reuse a matching shared scan first. This is especially
                 // important for locally converted/retagged files whose byte hash
                 // differs from the file originally scanned. The owner may still
                 // start a new Lambda scan when no existing edition matches.
                 val existing = catalogEdition?.let { edition ->
                     api.exploreFilterResult(accessToken, edition.catalogBook.catalogID)
-                } ?: api.findScan(accessToken, audio.fingerprint)
+                } ?: api.findScan(accessToken, audio.fingerprint, importSignature)
                 val result = if (catalogEdition != null) {
                     require(
                         existing.status in setOf(CloudScanStatus.AVAILABLE, CloudScanStatus.COMPLETED) &&

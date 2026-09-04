@@ -264,8 +264,12 @@ class AudioChoiceApi(private val json: Json) {
         return "%d:%02d:%02d".format(value / 3600, (value % 3600) / 60, value % 60)
     }
 
-    suspend fun findScan(accessToken: String, fingerprint: BookFingerprint): CloudScanResponse =
-        post("/v1/scans/requests", CloudScanRequest(fingerprint), accessToken, scanChannel())
+    suspend fun findScan(
+        accessToken: String,
+        fingerprint: BookFingerprint,
+        signature: EditionSignature? = null,
+    ): CloudScanResponse =
+        post("/v1/scans/requests", CloudScanRequest(fingerprint, signature = signature), accessToken, scanChannel())
 
     /**
      * What this account is entitled to.

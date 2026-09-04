@@ -51,10 +51,36 @@ data class ScanResult(
     val scannerVersion: String
 )
 
+/**
+ * Identity evidence about a recording that a file's byte hash cannot express.
+ *
+ * Only the client can read this, since the server never sees container tags. It is
+ * what lets a converted copy be recognised as the same recording, and a matching
+ * retail product identifier is the one signal strong enough to reuse filter results.
+ */
+@Serializable
+data class EditionSignature(
+    val productIdentifier: String? = null,
+    val narrator: String? = null,
+    /** Chapter start offsets in whole seconds; survives re-encoding. */
+    val chapterOffsetSeconds: List<Int>? = null,
+)
+
 @Serializable
 data class CloudScanRequest(
     val fingerprint: BookFingerprint,
-    val currentScannerVersion: String? = null
+    val currentScannerVersion: String? = null,
+    /**
+     * Identity evidence read from the file's own container tags, when the caller
+     * already has it at the moment of this lookup.
+     *
+     * A client typically reads its container tags during import, before this exact
+     * call, but historically only reported them afterward -- during a separate
+     * library-row upsert -- so the evidence that could have matched this file to an
+     * existing scanned edition arrived after the one lookup that needed it had
+     * already missed. Optional and additive: omitting it gets today's behaviour.
+     */
+    val signature: EditionSignature? = null,
 )
 
 @Serializable
