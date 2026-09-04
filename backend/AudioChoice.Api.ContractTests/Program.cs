@@ -2594,6 +2594,49 @@ Assert(
     TranscriptWordLocator.FindQuotedSubstring([bookPassage], "crossed her arms") is null,
     "A quoted substring absent from every supplied passage was located anyway.");
 
+// Comparing two transcripts directly, for the case chapter structure and a retail identifier
+// cannot reach: two files whose reported runtime disagrees for a reason that turns out to be
+// a wrong client-reported duration rather than different audio. Built from the exact shape
+// this was needed for on staging.
+static PrivateTranscript FakeTranscript(string fullText, int segmentCount)
+{
+    var words = fullText.Split(' ');
+    var perSegment = Math.Max(1, words.Length / segmentCount);
+    var segments = new List<TranscriptSegment>();
+    for (var index = 0; index * perSegment < words.Length; index += 1)
+    {
+        var slice = words.Skip(index * perSegment).Take(perSegment);
+        segments.Add(new TranscriptSegment(index * 10.0, index * 10.0 + 9.5, string.Join(' ', slice)));
+    }
+    return new PrivateTranscript("1.0", "en", "test", DateTimeOffset.UtcNow, segments, true);
+}
+
+var sharedBookText = string.Join(' ', Enumerable.Range(0, 3000).Select(i => $"word{i}"));
+var sameRecordingA = FakeTranscript(sharedBookText, 40);
+var sameRecordingB = FakeTranscript(sharedBookText, 55);
+Assert(
+    TranscriptComparison.FindMismatch(sameRecordingA, sameRecordingB) is null,
+    "Two transcriptions of the same text, chunked into a different number of segments, were "
+        + "reported as not matching.");
+
+var differentBookText = string.Join(' ', Enumerable.Range(0, 3000).Select(i => $"different{i}"));
+var differentRecording = FakeTranscript(differentBookText, 45);
+Assert(
+    TranscriptComparison.FindMismatch(sameRecordingA, differentRecording) is not null,
+    "Two transcripts of completely different text were reported as matching. A wrong "
+        + "positive here would hand one recording's filter timings to a different book.");
+
+// The one real, everyday case this exists to catch: a shared publisher intro is not enough
+// evidence on its own, because every edition of a book from the same narrator carries it.
+var sharedIntroOnly = FakeTranscript(
+    "This is Audible. Graphic Audio. A movie in your mind. " + differentBookText, 45);
+Assert(
+    TranscriptComparison.FindMismatch(
+        FakeTranscript("This is Audible. Graphic Audio. A movie in your mind. " + sharedBookText, 40),
+        sharedIntroOnly) is not null,
+    "Two transcripts sharing only a publisher intro, with different books after it, were "
+        + "reported as matching.");
+
 // Chapter structure as identity. This decides whether a converted copy of an already scanned
 // recording finds its filters, and equally whether two unrelated books are handed each other's
 // timings, so both directions are pinned.

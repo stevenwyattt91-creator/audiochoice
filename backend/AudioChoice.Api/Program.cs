@@ -1284,6 +1284,71 @@ app.MapGet("/v1/admin/editions", async (
     return Results.Ok(editions);
 });
 
+/// Copies a scan result from one edition to another, for the case FindResult's own alias
+/// path cannot reach on its own: a fingerprint that already has a stale result of its own,
+/// where an alias would never even be consulted, because a fingerprint's own result always
+/// wins over any alias. Chapter structure and a retail identifier are how the resolver
+/// verifies this automatically; this exists for a recording that has neither and was
+/// instead confirmed by a listener or an operator comparing the transcripts by hand.
+///
+/// Refuses rather than trusts the caller's word: both fingerprints must already have a
+/// saved transcript, and independently, at least three separately spaced excerpts of the
+/// destination's own transcript must appear verbatim in the source's -- not merely a
+/// similar runtime or title, which is exactly the evidence that was wrong for one of the
+/// editions this endpoint was built to fix. A wrong copy hands one recording's filter
+/// timings to a different one, which this product exists to never do.
+app.MapPost("/v1/admin/editions/result-copy", async (
+    AdminResultCopyRequest request,
+    HttpContext context,
+    IScanCatalog catalog,
+    IPrivateTranscriptStore transcriptStore,
+    ILogger<Program> logger,
+    CancellationToken cancellationToken) =>
+{
+    if (!IsConfiguredApiToken(context, app.Configuration)) return Results.Unauthorized();
+
+    if (InMemoryScanCatalog.FingerprintKey(request.Source) ==
+        InMemoryScanCatalog.FingerprintKey(request.Destination))
+    {
+        return Results.BadRequest(new { error = "Both fingerprints identify the same file." });
+    }
+
+    var sourceResult = catalog.FindResult(request.Source);
+    if (sourceResult is null)
+    {
+        return Results.BadRequest(new { error = "The source edition has no scan result to copy." });
+    }
+
+    var sourceTranscript = await transcriptStore.Load(request.Source, cancellationToken);
+    var destinationTranscript = await transcriptStore.Load(request.Destination, cancellationToken);
+    if (sourceTranscript is null || destinationTranscript is null)
+    {
+        return Results.BadRequest(new
+        {
+            error = "Both editions need a saved transcript before their content can be compared."
+        });
+    }
+
+    var mismatch = TranscriptComparison.FindMismatch(sourceTranscript, destinationTranscript);
+    if (mismatch is not null)
+    {
+        return Results.BadRequest(new
+        {
+            error = "The two transcripts do not verbatim match; refusing to copy a result " +
+                "between what the transcripts show are two different recordings.",
+            detail = mismatch
+        });
+    }
+
+    catalog.SaveResult(request.Destination, sourceResult);
+    logger.LogInformation(
+        "Copied the scan result from {SourceTitle} ({SourceSha}) to {DestinationTitle} " +
+        "({DestinationSha}) after verifying their transcripts match verbatim.",
+        request.Source.WorkTitle, request.Source.Sha256[..12],
+        request.Destination.WorkTitle, request.Destination.Sha256[..12]);
+    return Results.NoContent();
+});
+
 /// Accepts timing data produced outside the scan pipeline, keyed to an existing
 /// edition. This exists because transcription needs audio the server deliberately
 /// deletes after scanning, so a transcript lost to a storage fault cannot be
