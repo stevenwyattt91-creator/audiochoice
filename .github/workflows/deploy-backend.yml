@@ -89,11 +89,19 @@ jobs:
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
         run: |
-          token=$(openssl rand -hex 32)
+          # Kept stable across deploys once set, rather than regenerated every time. An admin
+          # token handed out for one investigation would otherwise go stale on the very next
+          # push, which previously meant re-fetching it from Key Vault after every deploy for
+          # as long as any admin work was in progress. Existence is checked first for the same
+          # reason resend-api-key's presence is checked below: setting a secret is itself a
+          # write, and this step must not perform one where nothing has changed.
+          if ! az keyvault secret show --vault-name "${{ steps.foundation.outputs.vault }}" \
+              --name staging-api-token >/dev/null 2>&1; then
+            az keyvault secret set --vault-name "${{ steps.foundation.outputs.vault }}" \
+              --name staging-api-token --value "$(openssl rand -hex 32)" >/dev/null
+          fi
           connection="Host=${{ steps.database.outputs.host }};Port=5432;Database=audiochoice;Username=audiochoice_admin;Password=$DB_PASSWORD;SSL Mode=Require"
-          az keyvault secret set --vault-name "${{ steps.foundation.outputs.vault }}" --name staging-api-token --value "$token" >/dev/null
           az keyvault secret set --vault-name "${{ steps.foundation.outputs.vault }}" --name postgres-connection-string --value "$connection" >/dev/null
-          echo "API_TOKEN=$token" >> "$GITHUB_ENV"
 
           # The premium voice is optional. A deployment must never reference a Key Vault secret
           # that is absent -- that fails the whole revision and takes the working API down with it --
