@@ -30,6 +30,42 @@ param transactionalEmailEnabled bool = true
 @description('Whether resend-api-key exists in Key Vault. A deployment must not reference a secret that is absent -- it fails the whole revision -- so email stays off unless the key is there.')
 param resendApiKeyPresent bool = true
 
+@description('Whether Apple purchase verification is turned on. Requires appleSigningKeyPresent, since there is nothing to verify a StoreKit2 transaction against otherwise.')
+param applePurchasesEnabled bool = false
+
+@description('The app bundle ID a verified Apple transaction must name. Leave as the app bundle ID; this is not a secret.')
+param applePurchasesBundleID string = 'com.audiochoice.mobile'
+
+@description('Comma-separated App Store Connect subscription product ids this server accepts. Leave empty to accept any product while only one exists.')
+param applePurchasesProductIDs string = ''
+
+@description('The App Store Connect API key id, from Users and Access > Integrations > In-App Purchase. Not a secret by itself, but meaningless without appleSigningKeyPresent.')
+param applePurchasesKeyID string = ''
+
+@description('The App Store Connect API issuer id, from the same Integrations page as the key id.')
+param applePurchasesIssuerID string = ''
+
+@description('Whether apple-purchases-signing-key exists in Key Vault (the .p8 private key downloaded when the App Store Connect API key was created).')
+param appleSigningKeyPresent bool = false
+
+@description('Whether apple-purchases-notification-token exists in Key Vault (the shared secret placed in the App Store Server Notifications V2 URL).')
+param appleNotificationTokenPresent bool = false
+
+@description('Whether Google Play purchase verification is turned on. Requires googleServiceAccountPresent.')
+param googlePurchasesEnabled bool = false
+
+@description('The Play Console package name, e.g. com.audiochoice.mobile. Not a secret.')
+param googlePurchasesPackageName string = 'com.audiochoice.mobile'
+
+@description('Comma-separated Play Console subscription product ids this server accepts. Leave empty to accept any product while only one exists.')
+param googlePurchasesProductIDs string = ''
+
+@description('Whether google-purchases-service-account exists in Key Vault (the service account JSON key granted Play Developer API access in Play Console > Setup > API access).')
+param googleServiceAccountPresent bool = false
+
+@description('Whether google-purchases-notification-token exists in Key Vault (the shared secret placed in the Pub/Sub push subscription URL).')
+param googleNotificationTokenPresent bool = false
+
 var suffix = take(uniqueString(subscription().subscriptionId, resourceGroup().id), 8)
 var registryName = 'audiochoicestg${suffix}'
 var storageName = 'audiochoicestg${suffix}'
@@ -185,6 +221,30 @@ resource api 'Microsoft.App/containerApps@2024-03-01' = {
           keyVaultUrl: '${vault.properties.vaultUri}secrets/aws-secret-access-key'
           identity: pullIdentity.id
         }
+      ] : [], appleSigningKeyPresent ? [
+        {
+          name: 'apple-purchases-signing-key'
+          keyVaultUrl: '${vault.properties.vaultUri}secrets/apple-purchases-signing-key'
+          identity: pullIdentity.id
+        }
+      ] : [], appleNotificationTokenPresent ? [
+        {
+          name: 'apple-purchases-notification-token'
+          keyVaultUrl: '${vault.properties.vaultUri}secrets/apple-purchases-notification-token'
+          identity: pullIdentity.id
+        }
+      ] : [], googleServiceAccountPresent ? [
+        {
+          name: 'google-purchases-service-account'
+          keyVaultUrl: '${vault.properties.vaultUri}secrets/google-purchases-service-account'
+          identity: pullIdentity.id
+        }
+      ] : [], googleNotificationTokenPresent ? [
+        {
+          name: 'google-purchases-notification-token'
+          keyVaultUrl: '${vault.properties.vaultUri}secrets/google-purchases-notification-token'
+          identity: pullIdentity.id
+        }
       ] : [])
     }
     template: {
@@ -298,6 +358,42 @@ resource api 'Microsoft.App/containerApps@2024-03-01' = {
               name: 'AWS_REGION'
               value: narrationAwsRegion
             }
+            {
+              // Off unless the signing key is also present -- there is otherwise nothing to
+              // verify a StoreKit2 transaction's signature against, so the endpoint would only be
+              // able to reject every request.
+              name: 'AudioChoice__Purchases__AppleEnabled'
+              value: string(applePurchasesEnabled && appleSigningKeyPresent)
+            }
+            {
+              name: 'AudioChoice__Purchases__AppleBundleID'
+              value: applePurchasesBundleID
+            }
+            {
+              name: 'AudioChoice__Purchases__AppleProductIDs'
+              value: applePurchasesProductIDs
+            }
+            {
+              name: 'AudioChoice__Purchases__AppleKeyID'
+              value: applePurchasesKeyID
+            }
+            {
+              name: 'AudioChoice__Purchases__AppleIssuerID'
+              value: applePurchasesIssuerID
+            }
+            {
+              // Off unless the service account is also present, for the same reason as Apple above.
+              name: 'AudioChoice__Purchases__GoogleEnabled'
+              value: string(googlePurchasesEnabled && googleServiceAccountPresent)
+            }
+            {
+              name: 'AudioChoice__Purchases__GooglePackageName'
+              value: googlePurchasesPackageName
+            }
+            {
+              name: 'AudioChoice__Purchases__GoogleProductIDs'
+              value: googlePurchasesProductIDs
+            }
           ], resendApiKeyPresent ? [
             {
               // secretRef, not keyVaultUrl. Only the secrets array resolves a vault URL; an
@@ -314,6 +410,26 @@ resource api 'Microsoft.App/containerApps@2024-03-01' = {
             {
               name: 'AWS_SECRET_ACCESS_KEY'
               secretRef: 'aws-secret-access-key'
+            }
+          ] : [], appleSigningKeyPresent ? [
+            {
+              name: 'AudioChoice__Purchases__AppleSigningKeyPem'
+              secretRef: 'apple-purchases-signing-key'
+            }
+          ] : [], appleNotificationTokenPresent ? [
+            {
+              name: 'AudioChoice__Purchases__AppleNotificationToken'
+              secretRef: 'apple-purchases-notification-token'
+            }
+          ] : [], googleServiceAccountPresent ? [
+            {
+              name: 'AudioChoice__Purchases__GoogleServiceAccountJson'
+              secretRef: 'google-purchases-service-account'
+            }
+          ] : [], googleNotificationTokenPresent ? [
+            {
+              name: 'AudioChoice__Purchases__GoogleNotificationToken'
+              secretRef: 'google-purchases-notification-token'
             }
           ] : [])
           probes: [
