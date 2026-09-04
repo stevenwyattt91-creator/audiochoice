@@ -135,4 +135,17 @@ public sealed record EditionAuditAssignmentSummary(
     Guid? AuditorID,
     decimal? CompensationAmount,
     string PaymentStatus,
-    DateOnly? PaymentDate);
+    DateOnly? PaymentDate,
+    /// <summary>
+    /// The scan_results row this assignment was created against. Fixed at creation and never
+    /// updated -- an assignment can silently outlive the result it points at.
+    /// </summary>
+    Guid ScanResultID,
+    string ScannerVersion,
+    DateTimeOffset ScannedAt,
+    /// <summary>
+    /// False means an auditor working this assignment is looking at events from an older
+    /// scan than the edition's current latest, most likely because the edition was rescanned
+    /// or had a result copied onto it after this assignment was created.
+    /// </summary>
+    bool PointsAtLatestResult);

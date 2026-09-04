@@ -52,9 +52,20 @@ public sealed class PostgresEditionReferenceStore(NpgsqlDataSource dataSource) :
         var editionID = FindEditionID(connection, null, fingerprint);
         if (editionID is null) return null;
 
+        // Includes which scan_results row and scanner version the assignment actually points
+        // at, and whether that is the edition's current latest result. scan_result_id is set
+        // once, at creation, and never moves -- an assignment created before a later scan (a
+        // rescan, or a result-copy inserting a fresh scanner_version row for the edition)
+        // silently keeps pointing an auditor at what they were originally handed rather than
+        // whatever /v1/admin/editions/result now reports as latest for the edition.
         using var command = new NpgsqlCommand("""
-            select id, status, auditor_id, compensation_amount, payment_status, payment_date
-            from audit_assignments where edition_id = $1 order by created_at;
+            select a.id, a.status, a.auditor_id, a.compensation_amount, a.payment_status,
+                   a.payment_date, a.scan_result_id, r.scanner_version, r.scanned_at,
+                   r.id = (select id from scan_results where edition_id = $1 order by scanned_at desc limit 1)
+            from audit_assignments a
+            join scan_results r on r.id = a.scan_result_id
+            where a.edition_id = $1
+            order by a.created_at;
             """, connection);
         command.Parameters.AddWithValue(editionID.Value);
         using var reader = command.ExecuteReader();
@@ -67,7 +78,11 @@ public sealed class PostgresEditionReferenceStore(NpgsqlDataSource dataSource) :
                 AuditorID: reader.IsDBNull(2) ? null : reader.GetGuid(2),
                 CompensationAmount: reader.IsDBNull(3) ? null : reader.GetDecimal(3),
                 PaymentStatus: reader.GetString(4),
-                PaymentDate: reader.IsDBNull(5) ? null : DateOnly.FromDateTime(reader.GetDateTime(5))));
+                PaymentDate: reader.IsDBNull(5) ? null : DateOnly.FromDateTime(reader.GetDateTime(5)),
+                ScanResultID: reader.GetGuid(6),
+                ScannerVersion: reader.GetString(7),
+                ScannedAt: reader.GetDateTime(8),
+                PointsAtLatestResult: reader.GetBoolean(9)));
         }
         return assignments;
     }
