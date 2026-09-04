@@ -61,6 +61,18 @@ public sealed class PostgresEntitlementStore(NpgsqlDataSource dataSource) : IEnt
         return Access(userID);
     }
 
+    public bool Revoke(string source, string externalReference)
+    {
+        using var connection = dataSource.OpenConnection();
+        using var command = new NpgsqlCommand("""
+            update account_entitlements set revoked_at = now()
+            where source = $1 and external_reference = $2 and revoked_at is null;
+            """, connection);
+        command.Parameters.AddWithValue(source);
+        command.Parameters.AddWithValue(externalReference);
+        return command.ExecuteNonQuery() > 0;
+    }
+
     private static string? Clean(string? value, int maximum) => string.IsNullOrWhiteSpace(value)
         ? null : value.Trim()[..Math.Min(value.Trim().Length, maximum)];
 }

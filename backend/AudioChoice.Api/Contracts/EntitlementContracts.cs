@@ -24,6 +24,13 @@ public static class AccountPlans
     /// </remarks>
     public const string Founder = "founder";
 
+    /// <summary>
+    /// A verified, paying subscriber -- the App Store or Play Store's own subscription, not a
+    /// separate product this server prices. Granted only by <c>PurchaseVerifier</c> after Apple or
+    /// Google's own API confirms the purchase; nothing else in this codebase may set this plan.
+    /// </summary>
+    public const string Premium = "premium";
+
     /// <summary>Whether a plan name means the account is never charged.</summary>
     public static bool IsComplimentary(string? plan) =>
         string.Equals(plan, Founder, StringComparison.OrdinalIgnoreCase);

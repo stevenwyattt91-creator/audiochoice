@@ -24,6 +24,7 @@ public sealed class AudioChoiceDataPaths
         EditionAliases = Path.Combine(Root, "edition-aliases.json");
         EditionSignatures = Path.Combine(Root, "edition-signatures.json");
         FilterReports = Path.Combine(Root, "filter-reports.json");
+        Affiliates = Path.Combine(Root, "affiliates.json");
     }
 
     public string Root { get; }
@@ -42,6 +43,7 @@ public sealed class AudioChoiceDataPaths
     /// <summary>Client-reported identity evidence per file fingerprint.</summary>
     public string EditionSignatures { get; }
     public string FilterReports { get; }
+    public string Affiliates { get; }
 
     public void EnsureDirectories()
     {

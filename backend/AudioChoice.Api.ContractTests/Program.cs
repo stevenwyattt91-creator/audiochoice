@@ -2373,16 +2373,21 @@ Assert(ExploreCatalog.IsAudibleProductIdentifier("B0BW2CCVQ2"), "A valid ASIN wa
         narrationSql.Contains("end_character", StringComparison.Ordinal),
         "Narration scan events must record character offsets under character-named columns.");
 
-    // Migrations are applied in filename order, so a new one must sort after every
-    // existing one or it will be skipped on databases that are already up to date.
-    var lastExisting = Directory.GetFiles(migrationsDirectory, "*.sql")
+    // Migrations are applied in filename order, so 027 had to sort after every migration
+    // that existed when it was written or it would have been skipped on databases already up
+    // to date. Checked against migrations up through 026 rather than everything present today,
+    // since later migrations (028 and on) sorting after 027 is expected and correct, not a
+    // regression -- this guard is about 027's own history, not a standing invariant on the
+    // whole directory.
+    var lastPriorToNarration = Directory.GetFiles(migrationsDirectory, "*.sql")
         .Select(Path.GetFileName)
-        .Where(name => name is not null && name != "027_epub_narration.sql")
+        .Where(name => name is not null &&
+            string.CompareOrdinal(name, "027_epub_narration.sql") < 0)
         .Order(StringComparer.Ordinal)
         .Last();
     Assert(
-        string.CompareOrdinal("027_epub_narration.sql", lastExisting) > 0,
-        $"The narration migration must sort after {lastExisting}.");
+        string.CompareOrdinal("027_epub_narration.sql", lastPriorToNarration) > 0,
+        $"The narration migration must sort after {lastPriorToNarration}.");
 }
 
 

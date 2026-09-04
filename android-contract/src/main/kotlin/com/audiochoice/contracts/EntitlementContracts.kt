@@ -32,6 +32,13 @@ object AccountPlans {
      */
     const val FOUNDER = "founder"
 
+    /**
+     * A verified, paying subscriber -- the Play Store's own subscription, not a separate product
+     * this app prices. Only ever set by the server after Google's Play Developer API confirms the
+     * purchase.
+     */
+    const val PREMIUM = "premium"
+
     /** Whether this plan means the account is never charged. */
     fun isComplimentary(plan: String?): Boolean = plan?.trim()?.equals(FOUNDER, ignoreCase = true) == true
 }

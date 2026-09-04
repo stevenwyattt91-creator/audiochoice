@@ -63,6 +63,7 @@ import com.audiochoice.mobile.beta.BetaDiagnostics
 import com.audiochoice.contracts.FaqEntry
 import com.audiochoice.contracts.FaqResponse
 import com.audiochoice.contracts.FaqSection
+import com.audiochoice.contracts.ReferralCodeCheck
 import com.audiochoice.mobile.data.AudioChoiceApi
 import com.audiochoice.mobile.data.AuthUser
 import com.audiochoice.mobile.data.LibraryBook
@@ -147,6 +148,7 @@ fun AudioChoiceApp(
                 onDismissError = auth::dismissError,
                 onRequestReset = auth::requestPasswordReset,
                 onConfirmReset = auth::confirmPasswordReset,
+                onCheckReferralCode = api::checkReferralCode,
             )
             else -> LibraryShell(
                 api = api,
@@ -172,12 +174,13 @@ private fun AuthScreen(
     busy: Boolean,
     error: String?,
     onLogin: (String, String) -> Unit,
-    onRegister: (String, String) -> Unit,
+    onRegister: (String, String, String) -> Unit,
     onGoogle: () -> Unit,
     onDismissError: () -> Unit,
     /** Asks for a reset code; reports a failure message, or null when accepted. */
     onRequestReset: (String, (String?) -> Unit) -> Unit,
     onConfirmReset: (String, String, (String?) -> Unit) -> Unit,
+    onCheckReferralCode: suspend (String) -> ReferralCodeCheck,
 ) {
     var registering by rememberSaveable { mutableStateOf(false) }
     var email by rememberSaveable { mutableStateOf("") }
@@ -190,6 +193,18 @@ private fun AuthScreen(
      */
     var confirmPassword by rememberSaveable { mutableStateOf("") }
     var resetting by rememberSaveable { mutableStateOf(false) }
+    /** Optional. Never blocks account creation -- see the debounced check below. */
+    var referralCode by rememberSaveable { mutableStateOf("") }
+    var referralCodeValid by rememberSaveable { mutableStateOf<Boolean?>(null) }
+
+    // Debounced rather than checked on every keystroke, and never blocks the Create account button
+    // either way: this is purely informational, since the server itself never rejects a signup over
+    // an unknown code.
+    LaunchedEffect(referralCode) {
+        if (referralCode.isBlank()) { referralCodeValid = null; return@LaunchedEffect }
+        delay(500)
+        referralCodeValid = runCatching { onCheckReferralCode(referralCode.trim()).valid }.getOrNull()
+    }
 
     if (resetting) {
         PasswordResetDialog(
@@ -247,11 +262,20 @@ private fun AuthScreen(
                 fontSize = 12.sp,
                 modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
             )
+            AudioField(referralCode, { referralCode = it }, "Referral code (optional)")
+            if (referralCode.isNotBlank() && referralCodeValid != null) {
+                Text(
+                    if (referralCodeValid == true) "Referral code accepted." else "That code was not recognized, but you can still create your account.",
+                    color = if (referralCodeValid == true) ChoiceGreen else ChoiceMuted,
+                    fontSize = 12.sp,
+                    modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
+                )
+            }
         }
 
         Button(
             onClick = {
-                if (registering) onRegister(email, password) else onLogin(email, password)
+                if (registering) onRegister(email, password, referralCode) else onLogin(email, password)
             },
             // The confirmation and the minimum length are checked here as well as by the server, so
             // the button refuses what the server would refuse rather than spending a round trip.
@@ -825,6 +849,7 @@ private fun LibraryShell(
                         onFaq = { profilePage = ProfilePage.FAQ },
                         onSupport = { profilePage = ProfilePage.SUPPORT },
                         onParentalControls = { profilePage = ProfilePage.PARENTAL_CONTROLS },
+                        onPremium = { profilePage = ProfilePage.PREMIUM },
                         // Experimental only: a diagnostic for a feature the beta build has no
                         // access to, so it must not appear there.
                         onVoiceMeasurement = if (NarrationConfig.enabled) {
@@ -851,6 +876,7 @@ private fun LibraryShell(
                     )
                     ProfilePage.VOICE_MEASUREMENT ->
                         VoiceMeasurementScreen(onBack = { profilePage = ProfilePage.MAIN })
+                    ProfilePage.PREMIUM -> PremiumScreen(onBack = { profilePage = ProfilePage.MAIN })
                 }
             }
         }
@@ -858,7 +884,113 @@ private fun LibraryShell(
     }
 }
 
-private enum class ProfilePage { MAIN, FAQ, SUPPORT, PARENTAL_CONTROLS, VOICE_MEASUREMENT }
+private enum class ProfilePage { MAIN, FAQ, SUPPORT, PARENTAL_CONTROLS, VOICE_MEASUREMENT, PREMIUM }
+
+/**
+ * The subscription paywall.
+ *
+ * Reachable anytime from Profile, not gated behind hitting a limit -- the premium voice itself
+ * is what [NarrationTierStore] gates, and a listener deciding whether to subscribe should be
+ * able to find this screen without first bumping into a wall.
+ *
+ * A fresh [PurchaseViewModel] per visit rather than one held for the app's lifetime: it owns a
+ * live [com.android.billingclient.api.BillingClient] connection, and ending that connection when
+ * this screen closes (`onCleared`) is the whole reason `viewModel()` + `remember` are used here
+ * instead of a singleton, unlike iOS where StoreKit2 has no comparable per-screen connection to
+ * manage.
+ */
+@Composable
+private fun PremiumScreen(onBack: () -> Unit) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val activity = context as? android.app.Activity ?: return
+    val api = remember { com.audiochoice.mobile.data.AudioChoiceApi(kotlinx.serialization.json.Json { ignoreUnknownKeys = true; encodeDefaults = true }) }
+    val sessions = remember { com.audiochoice.mobile.data.SessionStore(context, kotlinx.serialization.json.Json { ignoreUnknownKeys = true; encodeDefaults = true }) }
+    val viewModel: com.audiochoice.mobile.purchase.PurchaseViewModel = androidx.lifecycle.viewmodel.compose.viewModel(
+        factory = com.audiochoice.mobile.purchase.PurchaseViewModel.Factory(api, sessions, activity),
+    )
+    val state by viewModel.state.collectAsStateWithLifecycle()
+
+    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(bottom = 24.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            IconButton(onClick = onBack) { Icon(Icons.Outlined.ArrowBack, "Back") }
+            Text("Premium", fontSize = 22.sp, fontWeight = FontWeight.Bold)
+        }
+        Spacer(Modifier.height(8.dp))
+        Card(Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = ChoiceSurface), shape = RoundedCornerShape(14.dp)) {
+            Column(Modifier.padding(20.dp)) {
+                Row {
+                    Text("Audio", fontSize = 20.sp, fontWeight = FontWeight.Bold)
+                    Text("Choice", fontSize = 20.sp, fontWeight = FontWeight.Bold, color = ChoiceGreen)
+                    Text(" Premium", fontSize = 20.sp, fontWeight = FontWeight.Bold)
+                }
+                Spacer(Modifier.height(6.dp))
+                Text(
+                    "The most natural narration voice, closest to a human narrator.",
+                    color = ChoiceMuted,
+                )
+            }
+        }
+        Spacer(Modifier.height(18.dp))
+
+        when {
+            state.access.plan == "premium" && state.access.isActive -> Card(
+                Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(containerColor = ChoiceSurface),
+                shape = RoundedCornerShape(14.dp),
+            ) {
+                Row(Modifier.padding(18.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Outlined.CheckCircle, null, tint = ChoiceGreen)
+                    Spacer(Modifier.width(10.dp))
+                    Text("You're subscribed to AudioChoice Premium.", fontWeight = FontWeight.SemiBold)
+                }
+            }
+            state.access.plan == "founder" -> Card(
+                Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(containerColor = ChoiceSurface),
+                shape = RoundedCornerShape(14.dp),
+            ) {
+                Row(Modifier.padding(18.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Outlined.Star, null, tint = ChoiceGreen)
+                    Spacer(Modifier.width(10.dp))
+                    Text("You have free lifetime Founder access.", fontWeight = FontWeight.SemiBold)
+                }
+            }
+            state.product != null -> {
+                val price = state.product?.subscriptionOfferDetails?.firstOrNull()
+                    ?.pricingPhases?.pricingPhaseList?.firstOrNull()?.formattedPrice ?: ""
+                Button(
+                    onClick = { viewModel.purchase(activity) },
+                    enabled = !state.isPurchasing,
+                    modifier = Modifier.fillMaxWidth().height(54.dp),
+                    shape = RoundedCornerShape(12.dp),
+                ) {
+                    if (state.isPurchasing) CircularProgressIndicator(Modifier.size(22.dp), strokeWidth = 2.dp)
+                    else Text("Subscribe — $price/month", fontWeight = FontWeight.Bold)
+                }
+                Spacer(Modifier.height(12.dp))
+                TextButton(onClick = { viewModel.restorePurchases() }, enabled = !state.isPurchasing) {
+                    Text("Restore Purchases")
+                }
+            }
+            state.isLoadingProducts -> Box(Modifier.fillMaxWidth().padding(20.dp), contentAlignment = Alignment.Center) {
+                CircularProgressIndicator(color = ChoiceGreen)
+            }
+            else -> {
+                Text(
+                    "AudioChoice Premium is not available for purchase yet. Please check back soon.",
+                    color = ChoiceMuted,
+                )
+                Spacer(Modifier.height(12.dp))
+                TextButton(onClick = { viewModel.restorePurchases() }) { Text("Restore Purchases") }
+            }
+        }
+
+        state.error?.let {
+            Spacer(Modifier.height(12.dp))
+            Text(it, color = MaterialTheme.colorScheme.error, fontSize = 13.sp)
+        }
+    }
+}
 private enum class LibrarySection { MY_LIBRARY, EXPLORE }
 private enum class LibrarySort(val label: String) { RECENT("Recently Added"), A_TO_Z("A–Z"), Z_TO_A("Z–A") }
 
@@ -1379,6 +1511,7 @@ private fun ProfileScreen(
     onFaq: () -> Unit,
     onSupport: () -> Unit,
     onParentalControls: () -> Unit,
+    onPremium: () -> Unit,
     /** Null outside the experimental build, where the row must not appear at all. */
     onVoiceMeasurement: (() -> Unit)? = null,
     onLogout: () -> Unit,
@@ -1424,6 +1557,8 @@ private fun ProfileScreen(
         }
         Spacer(Modifier.height(18.dp))
         Card(Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = ChoiceSurface), shape = RoundedCornerShape(14.dp)) {
+            ProfileRow(Icons.Outlined.Star, "Premium", "The most natural narration voice", onPremium)
+            HorizontalDivider(color = ChoiceOutline)
             ProfileRow(Icons.Outlined.Lock, "Parental Controls", "Protect audiobook filters with a PIN", onParentalControls)
             HorizontalDivider(color = ChoiceOutline)
             ProfileRow(Icons.Outlined.HelpOutline, "FAQs", "Answers about importing, privacy, and filters", onFaq)

@@ -7,6 +7,20 @@ public interface IEntitlementStore
 {
     AccountAccessResponse Access(Guid userID);
     AccountAccessResponse Grant(Guid userID, EntitlementGrantRequest request);
+
+    /// <summary>
+    /// Ends a specific grant immediately, identified by <paramref name="source"/> and
+    /// <paramref name="externalReference"/> alone -- no user id, because
+    /// <c>account_entitlements_source_reference</c> already guarantees at most one active grant per
+    /// source+reference, and a store's cancellation/refund notification names its own transaction or
+    /// order id, never our internal user id.
+    /// </summary>
+    /// <remarks>
+    /// Used for a refund or cancellation reported by a store, where access must end now rather than
+    /// wait for the grant's own expiry -- the two are different events (a subscription that lapses
+    /// on schedule vs. one Apple or Google reversed early) and only the second needs this.
+    /// </remarks>
+    bool Revoke(string source, string externalReference);
 }
 
 /// <summary>
@@ -44,6 +58,18 @@ public sealed class FileEntitlementStore(AudioChoiceDataPaths paths) : IEntitlem
             _state.Grants.Add(new EntitlementGrant(userID, plan, source, request.ExpiresAt, reference, DateTimeOffset.UtcNow));
             Persist();
             return ToAccess(_state.Grants.Where(value => value.UserID == userID));
+        }
+    }
+
+    public bool Revoke(string source, string externalReference)
+    {
+        lock (_lock)
+        {
+            var removed = _state.Grants.RemoveAll(value =>
+                value.Source.Equals(source, StringComparison.OrdinalIgnoreCase) &&
+                value.ExternalReference == externalReference);
+            if (removed > 0) Persist();
+            return removed > 0;
         }
     }
 
