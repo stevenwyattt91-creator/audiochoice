@@ -31,6 +31,13 @@ public interface IEditionReferenceStore
     /// cannot be found.
     /// </remarks>
     EditionRepointResult? RepointLibraryBooks(BookFingerprint source, BookFingerprint destination);
+
+    /// <summary>
+    /// The detail behind <see cref="EditionReferenceCounts.HasPaidOrActiveAuditWork"/>: every
+    /// audit assignment on the edition, with enough of its own fields to judge by hand whether
+    /// retiring the edition would touch real compensation. Null when the edition cannot be found.
+    /// </summary>
+    IReadOnlyList<EditionAuditAssignmentSummary>? ListAuditAssignments(BookFingerprint fingerprint);
 }
 
 /// <param name="Repointed">Rows moved to the destination edition.</param>
@@ -50,7 +57,15 @@ public sealed record EditionReferenceCounts(
     int ScanResults,
     int AuditAssignments,
     int ApprovedScanEvents,
-    int AuditReviewMedia)
+    int AuditReviewMedia,
+    /// <summary>
+    /// Whether any of this edition's audit assignments has ever been paid, or is currently
+    /// claimed by an auditor. A count alone does not say this: an edition scanned only for
+    /// this investigation could carry an assignment that was created and then abandoned,
+    /// indistinguishable from one with real compensation owed on it without asking the
+    /// database this directly.
+    /// </summary>
+    bool HasPaidOrActiveAuditWork)
 {
     /// <summary>
     /// Whether every referencing table is empty for this edition. <see cref="LibraryBooks"/>
@@ -69,4 +84,17 @@ public sealed class UnavailableEditionReferenceStore : IEditionReferenceStore
 {
     public EditionReferenceCounts? CountReferences(BookFingerprint fingerprint) => null;
     public EditionRepointResult? RepointLibraryBooks(BookFingerprint source, BookFingerprint destination) => null;
+    public IReadOnlyList<EditionAuditAssignmentSummary>? ListAuditAssignments(BookFingerprint fingerprint) => null;
 }
+
+/// <summary>
+/// Every audit assignment on an edition, so an operator can read what compensation or
+/// active claim exists before deciding a duplicate is safe to retire.
+/// </summary>
+public sealed record EditionAuditAssignmentSummary(
+    Guid AssignmentID,
+    string Status,
+    Guid? AuditorID,
+    decimal? CompensationAmount,
+    string PaymentStatus,
+    DateOnly? PaymentDate);

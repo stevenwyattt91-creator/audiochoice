@@ -15,6 +15,9 @@ public sealed class PostgresEditionReferenceStore(NpgsqlDataSource dataSource) :
         // One round trip covering every table that names an edition and has no
         // on-delete-cascade back to it, so a caller sees the complete picture a delete
         // would be blocked by rather than discovering the second table on a failed attempt.
+        // The last column looks past a bare count of audit_assignments, which says nothing
+        // about whether real compensation is at stake: an assignment can exist and have been
+        // abandoned with nothing paid and no auditor holding it.
         using var command = new NpgsqlCommand("""
             select
                 (select count(*) from user_library_books where edition_id = $1),
@@ -23,7 +26,11 @@ public sealed class PostgresEditionReferenceStore(NpgsqlDataSource dataSource) :
                 (select count(*) from scan_results where edition_id = $1),
                 (select count(*) from audit_assignments where edition_id = $1),
                 (select count(*) from approved_scan_events where edition_id = $1),
-                (select count(*) from audit_review_media where edition_id = $1);
+                (select count(*) from audit_review_media where edition_id = $1),
+                exists(
+                    select 1 from audit_assignments
+                    where edition_id = $1
+                      and (payment_status = 'paid' or status in ('in_progress', 'completed', 'needs_review')));
             """, connection);
         command.Parameters.AddWithValue(editionID.Value);
         using var reader = command.ExecuteReader();
@@ -35,7 +42,34 @@ public sealed class PostgresEditionReferenceStore(NpgsqlDataSource dataSource) :
             ScanResults: (int)(long)reader[3],
             AuditAssignments: (int)(long)reader[4],
             ApprovedScanEvents: (int)(long)reader[5],
-            AuditReviewMedia: (int)(long)reader[6]);
+            AuditReviewMedia: (int)(long)reader[6],
+            HasPaidOrActiveAuditWork: (bool)reader[7]);
+    }
+
+    public IReadOnlyList<EditionAuditAssignmentSummary>? ListAuditAssignments(BookFingerprint fingerprint)
+    {
+        using var connection = dataSource.OpenConnection();
+        var editionID = FindEditionID(connection, null, fingerprint);
+        if (editionID is null) return null;
+
+        using var command = new NpgsqlCommand("""
+            select id, status, auditor_id, compensation_amount, payment_status, payment_date
+            from audit_assignments where edition_id = $1 order by created_at;
+            """, connection);
+        command.Parameters.AddWithValue(editionID.Value);
+        using var reader = command.ExecuteReader();
+        var assignments = new List<EditionAuditAssignmentSummary>();
+        while (reader.Read())
+        {
+            assignments.Add(new EditionAuditAssignmentSummary(
+                AssignmentID: reader.GetGuid(0),
+                Status: reader.GetString(1),
+                AuditorID: reader.IsDBNull(2) ? null : reader.GetGuid(2),
+                CompensationAmount: reader.IsDBNull(3) ? null : reader.GetDecimal(3),
+                PaymentStatus: reader.GetString(4),
+                PaymentDate: reader.IsDBNull(5) ? null : DateOnly.FromDateTime(reader.GetDateTime(5))));
+        }
+        return assignments;
     }
 
     public EditionRepointResult? RepointLibraryBooks(BookFingerprint source, BookFingerprint destination)
