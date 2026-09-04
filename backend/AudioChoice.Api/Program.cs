@@ -1088,6 +1088,16 @@ app.MapGet("/v1/admin/scans/jobs/{scanID:guid}", (
 // means those pairs are findable -- this reports them so they can be looked at before anything is
 // merged, because a wrong merge hands one book's filter timings to another.
 //
+// Extended to also surface a pair the catalogue's own files carry no chapter marks or retail
+// identifier for at all -- most of what is actually in this catalogue, which is personal rips
+// rather than retail downloads. Reported as its own, clearly weaker kind of evidence: a shared
+// title, author, part and presentation with a runtime within EditionMatch's flat fifteen
+// seconds is suggestive, the same way it was for a real pair on staging whose only difference
+// turned out to be a wrong stored duration, but it is not proof the way a dozen agreeing
+// chapter marks or a matching ASIN is. Every pair's own evidence is reported alongside the
+// group rather than collapsed into one label per group, since a chain of three files can rest
+// on stronger evidence for one link than another.
+//
 // Read-only. It groups and explains, and changes nothing.
 app.MapGet("/v1/admin/editions/duplicates", (
     HttpContext context,
@@ -1101,6 +1111,7 @@ app.MapGet("/v1/admin/editions/duplicates", (
     // one group of three instead of three separate pairs to reconcile by hand.
     var groupOf = new Dictionary<string, int>(StringComparer.Ordinal);
     var groups = new List<List<BookFingerprint>>();
+    var matchesByGroup = new List<List<(string Left, string Right, string Evidence)>>();
 
     for (var i = 0; i < editions.Length; i += 1)
     {
@@ -1118,62 +1129,97 @@ app.MapGet("/v1/admin/editions/duplicates", (
                 !string.IsNullOrWhiteSpace(leftSignature?.ProductIdentifier) &&
                 !string.IsNullOrWhiteSpace(rightSignature?.ProductIdentifier) &&
                 EditionMatch.SameRecording(left, right, leftSignature, rightSignature);
-            if (!sameStructure && !sameIdentifier) continue;
+            // Falls through to the same title/author/part/presentation/runtime rule
+            // EditionResolver.LoadTranscript already trusts for a transcript, but never for a
+            // scan result: consulted here only when neither stronger kind of evidence applies,
+            // and reported as its own "metadata" tier rather than silently counted the same as
+            // one of them.
+            var sameMetadata = !sameStructure && !sameIdentifier &&
+                EditionMatch.SameRecording(left, right, leftSignature, rightSignature);
+            var evidence = sameStructure ? "structure" : sameIdentifier ? "identifier" : sameMetadata ? "metadata" : null;
+            if (evidence is null) continue;
 
             var leftKey = InMemoryScanCatalog.FingerprintKey(left);
             var rightKey = InMemoryScanCatalog.FingerprintKey(right);
             var leftGroup = groupOf.TryGetValue(leftKey, out var l) ? l : -1;
             var rightGroup = groupOf.TryGetValue(rightKey, out var r) ? r : -1;
 
+            int targetGroup;
             if (leftGroup >= 0 && rightGroup >= 0)
             {
                 // Both already grouped, separately. Four copies of one recording can pair as A-B
                 // and C-D before B-C is reached, and leaving those apart would report one book as
                 // two groups to reconcile by hand -- the very thing this is meant to end.
-                if (leftGroup == rightGroup) continue;
-                foreach (var moved in groups[rightGroup])
+                if (leftGroup != rightGroup)
                 {
-                    groups[leftGroup].Add(moved);
-                    groupOf[InMemoryScanCatalog.FingerprintKey(moved)] = leftGroup;
+                    foreach (var moved in groups[rightGroup])
+                    {
+                        groups[leftGroup].Add(moved);
+                        groupOf[InMemoryScanCatalog.FingerprintKey(moved)] = leftGroup;
+                    }
+                    matchesByGroup[leftGroup].AddRange(matchesByGroup[rightGroup]);
+                    groups[rightGroup].Clear();
+                    matchesByGroup[rightGroup].Clear();
                 }
-                groups[rightGroup].Clear();
+                targetGroup = leftGroup;
             }
             else if (leftGroup >= 0)
             {
                 groups[leftGroup].Add(right);
                 groupOf[rightKey] = leftGroup;
+                targetGroup = leftGroup;
             }
             else if (rightGroup >= 0)
             {
                 groups[rightGroup].Add(left);
                 groupOf[leftKey] = rightGroup;
+                targetGroup = rightGroup;
             }
             else
             {
                 groups.Add([left, right]);
-                groupOf[leftKey] = groups.Count - 1;
-                groupOf[rightKey] = groups.Count - 1;
+                matchesByGroup.Add([]);
+                targetGroup = groups.Count - 1;
+                groupOf[leftKey] = targetGroup;
+                groupOf[rightKey] = targetGroup;
             }
+            matchesByGroup[targetGroup].Add((left.Sha256[..12], right.Sha256[..12], evidence));
         }
     }
 
-    return Results.Ok(groups.Where(group => group.Count > 1).Select(group => new
-    {
-        members = group.Select(item => new
+    return Results.Ok(groups.Select((group, index) => (group, matches: matchesByGroup[index]))
+        .Where(value => value.group.Count > 1)
+        .Select(value => new
         {
-            item.Sha256,
-            item.FileSize,
-            item.Version,
-            item.WorkTitle,
-            item.Author,
-            item.Duration,
-            item.FileType,
-            chapterMarks = signatures.Find(item)?.ChapterOffsetSeconds?.Count ?? 0,
-            productIdentifier = signatures.Find(item)?.ProductIdentifier,
-            // Which member to keep: the one already carrying a scan.
-            hasResult = catalog.FindResult(item) is not null
-        })
-    }));
+            members = value.group.Select(item => new
+            {
+                item.Sha256,
+                item.FileSize,
+                item.Version,
+                item.WorkTitle,
+                item.Author,
+                item.Duration,
+                item.FileType,
+                chapterMarks = signatures.Find(item)?.ChapterOffsetSeconds?.Count ?? 0,
+                productIdentifier = signatures.Find(item)?.ProductIdentifier,
+                // Which member to keep: the one already carrying a scan.
+                hasResult = catalog.FindResult(item) is not null
+            }),
+            // Every pairwise link that placed a member in this group, and what evidence
+            // supported it -- so a group resting only on "metadata" reads differently from
+            // one confirmed by a dozen agreeing chapter marks or a retail identifier.
+            matches = value.matches.Select(match => new
+            {
+                left = match.Left,
+                right = match.Right,
+                evidence = match.Evidence
+            }),
+            // True only when every link in the group is chapter structure or a retail
+            // identifier -- the two kinds of evidence strong enough for FindResult to reuse a
+            // scan result automatically. A group containing even one "metadata" link still
+            // needs a transcript comparison before anything is copied or merged.
+            confirmed = value.matches.All(match => match.Evidence is "structure" or "identifier")
+        }));
 });
 
 // Records that two file identities are the same recording.
