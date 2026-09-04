@@ -1316,6 +1316,31 @@ app.MapGet("/v1/admin/editions/references", (
     return counts is null ? Results.NotFound() : Results.Ok(counts);
 });
 
+// The detail behind a "true" on CountReferences' HasPaidOrActiveAuditWork, or a count that
+// otherwise still looks worth a second look before an edition is retired. Read-only.
+app.MapGet("/v1/admin/editions/audit-assignments", (
+    HttpContext context,
+    IEditionReferenceStore references,
+    string? sha256,
+    int? fingerprintVersion,
+    long? fileSize) =>
+{
+    if (!IsConfiguredApiToken(context, app.Configuration)) return Results.Unauthorized();
+
+    if (string.IsNullOrWhiteSpace(sha256) || fingerprintVersion is null || fileSize is null)
+    {
+        return Results.BadRequest(new
+        {
+            error = "sha256, fingerprintVersion and fileSize are all required to identify an edition."
+        });
+    }
+
+    var assignments = references.ListAuditAssignments(new BookFingerprint(
+        fingerprintVersion.Value, sha256, fileSize.Value,
+        null, string.Empty, null, null, null, null, null, null, null));
+    return assignments is null ? Results.NotFound() : Results.Ok(assignments);
+});
+
 // Moves every listener's library row off a duplicate edition and onto the one being kept,
 // so the duplicate can later be retired without breaking anyone's library. Not a delete --
 // nothing at the source edition is removed, including its own scan history, only library
