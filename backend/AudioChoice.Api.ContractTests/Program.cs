@@ -2542,6 +2542,116 @@ Assert(
         Math.Abs(repeated[1].StartTime - 201.5) < 0.001,
     "A repeated word reused the first occurrence's timing for both.");
 
+// Word-level re-anchoring for every model-driven category, not only profanity. This is what
+// stops a real event's timing from landing on an unrelated nearby sentence: a model proposes
+// a wide range and a quote, and the quote is located in the transcript's own word timing
+// before the model's numbers are ever trusted.
+var reanchorSegment = new TranscriptSegment(
+    500, 512, "She crossed her arms and took a stance, refusing to back down.", new[]
+    {
+        new TranscriptWord("She", 500.0, 500.3),
+        new TranscriptWord("crossed", 500.3, 500.7),
+        new TranscriptWord("her", 500.7, 500.9),
+        new TranscriptWord("arms", 500.9, 501.3),
+        new TranscriptWord("and", 501.3, 501.5),
+        new TranscriptWord("took", 501.5, 501.8),
+        new TranscriptWord("a", 501.8, 501.9),
+        new TranscriptWord("stance,", 501.9, 502.4),
+    });
+var multiWordSpan = TranscriptWordLocator.FindPhrase(reanchorSegment.Words, "crossed her arms");
+Assert(
+    multiWordSpan is not null &&
+        Math.Abs(multiWordSpan.StartTime - 500.3) < 0.001 &&
+        Math.Abs(multiWordSpan.EndTime - 501.3) < 0.001,
+    "A three-word phrase spanning consecutive transcript words was not located, or its span " +
+    "did not match the words' own timing.");
+Assert(
+    TranscriptWordLocator.FindPhrase(reanchorSegment.Words, "took a firm stance") is null,
+    "A phrase whose words do not actually appear in that order was located anyway. This is " +
+    "the exact failure mode a real filter bug would produce: a model claims support for an " +
+    "event using words the passage never contains, and a locator that finds a near-miss " +
+    "instead of rejecting it would let the mistake straight through.");
+Assert(
+    TranscriptWordLocator.FindPhraseInSegments([reanchorSegment], "crossed her arms and took a stance")
+        is { } fullPhrase && Math.Abs(fullPhrase.StartTime - 500.3) < 0.001,
+    "A longer phrase spanning most of a segment's words was not located across the segment " +
+    "list.");
+Assert(
+    TranscriptWordLocator.FindPhraseInSegments([reanchorSegment], "their union was blessed") is null,
+    "A quote for content that does not appear anywhere in the supplied segments was located " +
+    "anyway, which is exactly how an unrelated real event's quote could wrongly confirm a " +
+    "completely different proposed range.");
+
+// The character-offset path a narrated book's own passages use, which carries no word list
+// at all -- only the passage's own text and its absolute starting offset.
+var bookPassage = new TranscriptSegment(
+    1200, 1260, "Their union was blessed by the elders that very night.");
+Assert(
+    TranscriptWordLocator.FindQuotedSubstring([bookPassage], "union was blessed")
+        is { } substringSpan && substringSpan.StartTime == 1200 + "Their ".Length,
+    "A quoted substring was not located at its exact character offset within the passage.");
+Assert(
+    TranscriptWordLocator.FindQuotedSubstring([bookPassage], "crossed her arms") is null,
+    "A quoted substring absent from every supplied passage was located anyway.");
+
+// Comparing two transcripts directly, for the case chapter structure and a retail identifier
+// cannot reach: two files whose reported runtime disagrees for a reason that turns out to be
+// a wrong client-reported duration rather than different audio. Built from the exact shape
+// this was needed for on staging.
+static PrivateTranscript FakeTranscript(string fullText, int segmentCount)
+{
+    var words = fullText.Split(' ');
+    var perSegment = Math.Max(1, words.Length / segmentCount);
+    var segments = new List<TranscriptSegment>();
+    for (var index = 0; index * perSegment < words.Length; index += 1)
+    {
+        var slice = words.Skip(index * perSegment).Take(perSegment);
+        segments.Add(new TranscriptSegment(index * 10.0, index * 10.0 + 9.5, string.Join(' ', slice)));
+    }
+    return new PrivateTranscript("1.0", "en", "test", DateTimeOffset.UtcNow, segments, true);
+}
+
+var sharedBookText = string.Join(' ', Enumerable.Range(0, 3000).Select(i => $"word{i}"));
+var sameRecordingA = FakeTranscript(sharedBookText, 40);
+var sameRecordingB = FakeTranscript(sharedBookText, 55);
+Assert(
+    TranscriptComparison.FindMismatch(sameRecordingA, sameRecordingB) is null,
+    "Two transcriptions of the same text, chunked into a different number of segments, were "
+        + "reported as not matching.");
+
+var differentBookText = string.Join(' ', Enumerable.Range(0, 3000).Select(i => $"different{i}"));
+var differentRecording = FakeTranscript(differentBookText, 45);
+Assert(
+    TranscriptComparison.FindMismatch(sameRecordingA, differentRecording) is not null,
+    "Two transcripts of completely different text were reported as matching. A wrong "
+        + "positive here would hand one recording's filter timings to a different book.");
+
+// The real near-miss found on staging: two transcriptions of one book agreed word for word
+// everywhere except one checkpoint, where an invented fantasy name was transcribed two
+// different ways by ear -- "faera" in one, "pharah" in the other. One differing word out of
+// twelve is exactly the ordinary noise two independent transcriptions produce and must not
+// be reported as a mismatch. Substituted at word 2565, inside checkpoint 6's own window
+// (2561-2573 of 3000 words), which is exactly where the real pair's difference landed --
+// near the end of the book, past every other checkpoint.
+var namedCharacterText = sharedBookText.Replace("word2565", "faera");
+var otherSpellingText = sharedBookText.Replace("word2565", "pharah");
+Assert(
+    TranscriptComparison.FindMismatch(
+        FakeTranscript(namedCharacterText, 40), FakeTranscript(otherSpellingText, 55)) is null,
+    "A single differently-transcribed invented name was reported as a mismatch between two "
+        + "transcripts that otherwise agree word for word across the entire book.");
+
+// The one real, everyday case this exists to catch: a shared publisher intro is not enough
+// evidence on its own, because every edition of a book from the same narrator carries it.
+var sharedIntroOnly = FakeTranscript(
+    "This is Audible. Graphic Audio. A movie in your mind. " + differentBookText, 45);
+Assert(
+    TranscriptComparison.FindMismatch(
+        FakeTranscript("This is Audible. Graphic Audio. A movie in your mind. " + sharedBookText, 40),
+        sharedIntroOnly) is not null,
+    "Two transcripts sharing only a publisher intro, with different books after it, were "
+        + "reported as matching.");
+
 // Chapter structure as identity. This decides whether a converted copy of an already scanned
 // recording finds its filters, and equally whether two unrelated books are handed each other's
 // timings, so both directions are pinned.

@@ -305,6 +305,22 @@ builder.Services.AddSingleton<INarrationMeasurementStore>(services =>
 // explain audio a listener already has and stay meaningful after the feature is switched off.
 builder.Services.AddSingleton<INarrationRenderStore>(services =>
     new FileNarrationRenderStore(services.GetRequiredService<AudioChoiceDataPaths>()));
+// Registered unconditionally for the same reason as the two stores above, but for a sharper
+// failure mode: every route handler that takes this as a parameter -- /v1/narration/voices
+// among them -- is still mapped when narration is off, since MapGet runs regardless of any
+// runtime flag. Minimal APIs validate parameter binding for every mapped route at startup, so
+// leaving this registration inside the narration conditional did not disable those routes; it
+// broke every route in the app, because ASP.NET could not resolve this as a service, tried to
+// infer it as a request body instead, collided with another inferred parameter, and threw
+// while building the route table itself -- before the first request, and before the flag check
+// already written inside each of those handlers ever got to run.
+builder.Services.AddSingleton<INarrationAgreementStore>(services =>
+    new FileNarrationAgreementStore(services.GetRequiredService<AudioChoiceDataPaths>()));
+// Same reasoning and the same failure mode: NarrationChapterJobs is bound directly as a route
+// parameter (/v1/narration/chapters and its status route), so it has to be resolvable at
+// startup regardless of whether synthesis is enabled. It holds nothing but an in-memory
+// dictionary, so there is no cost to keeping it registered when the feature is off.
+builder.Services.AddSingleton<NarrationChapterJobs>();
 builder.Services.AddSingleton<IEditionAliasStore>(services =>
     new FileEditionAliasStore(services.GetRequiredService<AudioChoiceDataPaths>()));
 // Looked up only for books whose own file carries no description. A short timeout because a
@@ -468,9 +484,6 @@ if (narrationOptions.TextScanEnabled || narrationOptions.SynthesisEnabled)
     // control flow.
     builder.Services.AddSingleton<ISynthesisProvider>(services =>
         services.GetRequiredService<PollySynthesisProvider>());
-    builder.Services.AddSingleton<NarrationChapterJobs>();
-    builder.Services.AddSingleton<INarrationAgreementStore>(services =>
-        new FileNarrationAgreementStore(services.GetRequiredService<AudioChoiceDataPaths>()));
     builder.Services.AddSingleton(services => new SynthesisRouter(
         primary: services.GetRequiredService<PollySynthesisProvider>(),
         fallback: services.GetRequiredService<PollySynthesisProvider>(),
@@ -1225,6 +1238,34 @@ app.MapGet("/v1/admin/editions/result", (
     return result is null ? Results.NotFound() : Results.Ok(result);
 });
 
+// Reads a saved transcript by exact fingerprint. Read-only, and exists for the same reason
+// /v1/admin/editions/result does: deciding whether two file identities are the same
+// recording needs to compare their actual transcripts, not just their metadata, and nothing
+// else exposes what one contains outside the separately authenticated internal audit portal.
+app.MapGet("/v1/admin/transcripts/content", async (
+    HttpContext context,
+    IPrivateTranscriptStore transcriptStore,
+    string? sha256,
+    int? fingerprintVersion,
+    long? fileSize,
+    CancellationToken cancellationToken) =>
+{
+    if (!IsConfiguredApiToken(context, app.Configuration)) return Results.Unauthorized();
+
+    if (string.IsNullOrWhiteSpace(sha256) || fingerprintVersion is null || fileSize is null)
+    {
+        return Results.BadRequest(new
+        {
+            error = "sha256, fingerprintVersion and fileSize are all required to identify an edition."
+        });
+    }
+
+    var transcript = await transcriptStore.Load(new BookFingerprint(
+        fingerprintVersion.Value, sha256, fileSize.Value,
+        null, string.Empty, null, null, null, null, null, null, null), cancellationToken);
+    return transcript is null ? Results.NotFound() : Results.Ok(transcript);
+});
+
 app.MapGet("/v1/admin/editions", async (
     HttpContext context,
     IScanCatalog catalog,
@@ -1241,6 +1282,81 @@ app.MapGet("/v1/admin/editions", async (
         editions.Add(new AdminEditionInfo(fingerprint, segmentCount > 0, segmentCount));
     }
     return Results.Ok(editions);
+});
+
+/// Copies a scan result from one edition to another, for the case FindResult's own alias
+/// path cannot reach on its own: a fingerprint that already has a stale result of its own,
+/// where an alias would never even be consulted, because a fingerprint's own result always
+/// wins over any alias. Chapter structure and a retail identifier are how the resolver
+/// verifies this automatically; this exists for a recording that has neither and was
+/// instead confirmed by a listener or an operator comparing the transcripts by hand.
+///
+/// Refuses rather than trusts the caller's word: both fingerprints must already have a
+/// saved transcript, and independently, at least three separately spaced excerpts of the
+/// destination's own transcript must appear verbatim in the source's -- not merely a
+/// similar runtime or title, which is exactly the evidence that was wrong for one of the
+/// editions this endpoint was built to fix. A wrong copy hands one recording's filter
+/// timings to a different one, which this product exists to never do.
+app.MapPost("/v1/admin/editions/result-copy", async (
+    AdminResultCopyRequest request,
+    HttpContext context,
+    IScanCatalog catalog,
+    IPrivateTranscriptStore transcriptStore,
+    ILogger<Program> logger,
+    CancellationToken cancellationToken) =>
+{
+    if (!IsConfiguredApiToken(context, app.Configuration)) return Results.Unauthorized();
+
+    if (InMemoryScanCatalog.FingerprintKey(request.Source) ==
+        InMemoryScanCatalog.FingerprintKey(request.Destination))
+    {
+        return Results.BadRequest(new { error = "Both fingerprints identify the same file." });
+    }
+
+    var sourceResult = catalog.FindResult(request.Source);
+    if (sourceResult is null)
+    {
+        return Results.BadRequest(new { error = "The source edition has no scan result to copy." });
+    }
+    // Each ScanEvent carries the Id it was already stored under at the source edition. The
+    // events table's primary key is that Id alone, not (Id, edition), so writing the source's
+    // own rows again under a different edition collides on the row that already exists rather
+    // than creating a second one. Regenerated here, once, at the one call site that hands
+    // SaveResult events it did not just create -- every other caller already passes freshly
+    // generated ids because it is saving a scan that has never been stored before.
+    var copiedResult = sourceResult with
+    {
+        Events = sourceResult.Events.Select(value => value with { Id = Guid.NewGuid() }).ToArray()
+    };
+
+    var sourceTranscript = await transcriptStore.Load(request.Source, cancellationToken);
+    var destinationTranscript = await transcriptStore.Load(request.Destination, cancellationToken);
+    if (sourceTranscript is null || destinationTranscript is null)
+    {
+        return Results.BadRequest(new
+        {
+            error = "Both editions need a saved transcript before their content can be compared."
+        });
+    }
+
+    var mismatch = TranscriptComparison.FindMismatch(sourceTranscript, destinationTranscript);
+    if (mismatch is not null)
+    {
+        return Results.BadRequest(new
+        {
+            error = "The two transcripts do not verbatim match; refusing to copy a result " +
+                "between what the transcripts show are two different recordings.",
+            detail = mismatch
+        });
+    }
+
+    catalog.SaveResult(request.Destination, copiedResult);
+    logger.LogInformation(
+        "Copied the scan result from {SourceTitle} ({SourceSha}) to {DestinationTitle} " +
+        "({DestinationSha}) after verifying their transcripts match verbatim.",
+        request.Source.WorkTitle, request.Source.Sha256[..12],
+        request.Destination.WorkTitle, request.Destination.Sha256[..12]);
+    return Results.NoContent();
 });
 
 /// Accepts timing data produced outside the scan pipeline, keyed to an existing

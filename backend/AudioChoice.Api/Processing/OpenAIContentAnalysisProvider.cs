@@ -18,9 +18,9 @@ public sealed class OpenAIContentAnalysisProvider(
 {
     // Bump this whenever the baseline classification policy changes so cached batch
     // answers cannot silently reintroduce events produced under an older policy.
-    private const string BaseAnalysisPromptVersion = "3.1-context-not-words";
-    private const string SceneVerificationVersion = "3.4-discreet-descriptions";
-    private const string SceneEscalationVersion = "3.3-discreet-descriptions";
+    private const string BaseAnalysisPromptVersion = "4.0-word-anchored";
+    private const string SceneVerificationVersion = "4.0-word-anchored";
+    private const string SceneEscalationVersion = "4.0-word-anchored";
     private readonly string _checkpointFolder = dataPaths.AnalysisCheckpoints;
     public string ScannerVersion => options.ScannerVersion;
 
@@ -149,7 +149,8 @@ public sealed class OpenAIContentAnalysisProvider(
             {
                 if (AddEvent(events, item.Label, item.StartTime, item.EndTime,
                     item.Confidence, item.SafeDescription, item.ProfanityWord,
-                    batchStart, batchEnd)) admitted += 1;
+                    batchStart, batchEnd, quote: item.Quote,
+                    contextSegments: batch)) admitted += 1;
             }
             if (admitted != classified.Events.Count)
             {
@@ -255,7 +256,8 @@ public sealed class OpenAIContentAnalysisProvider(
             {
                 AddEvent(events, item.Label, item.StartTime, item.EndTime,
                     item.Confidence, item.SafeDescription, item.ProfanityWord,
-                    batchStart, batchEnd);
+                    batchStart, batchEnd, quote: item.Quote, contextSegments: batch,
+                    isCharacterOffsets: true);
             }
         }
 
@@ -425,6 +427,30 @@ public sealed class OpenAIContentAnalysisProvider(
         File.Move(temporary, path, overwrite: true);
     }
 
+    /// <summary>
+    /// How far a located quote may sit from the model's own claimed range and still confirm
+    /// it, rather than the claim being treated as unrelated to any text that actually exists.
+    /// </summary>
+    /// <remarks>
+    /// Matches the slack already trusted elsewhere in this file for a model-refined boundary
+    /// (Sol's escalation clamp is the same 30 seconds), rather than inventing a second number
+    /// for the same kind of judgement call.
+    /// </remarks>
+    private const double QuoteProximitySeconds = 30;
+
+    /// <summary>
+    /// The claimed width, in seconds, below which a located quote's own tight span replaces
+    /// the model's numbers outright rather than merely confirming them.
+    /// </summary>
+    /// <remarks>
+    /// Below this a claimed range is an isolated phrase or short passage, where the located
+    /// quote's own word-level timing is strictly better evidence than the model's guess at
+    /// seconds. At or above it the model was asked to report the complete span of a sustained
+    /// scene, where the quote is deliberately only one supporting sentence inside a longer
+    /// arc and must not shrink the boundary down to it.
+    /// </remarks>
+    private const double ShortEventMaximumSeconds = 15;
+
     /// <returns>False when the event was rejected and will not reach a listener.</returns>
     private bool AddEvent(
         ICollection<ScanEvent> events,
@@ -436,7 +462,10 @@ public sealed class OpenAIContentAnalysisProvider(
         string? profanityWord,
         double batchStart,
         double batchEnd,
-        string? stableSuffix = null)
+        string? stableSuffix = null,
+        string? quote = null,
+        IReadOnlyList<TranscriptSegment>? contextSegments = null,
+        bool isCharacterOffsets = false)
     {
         if (!ContentTaxonomy.Mappings.TryGetValue(label, out var mapping))
         {
@@ -457,6 +486,29 @@ public sealed class OpenAIContentAnalysisProvider(
         }
         var startTime = Math.Clamp(start, batchStart, batchEnd);
         var endTime = Math.Clamp(end, startTime, batchEnd);
+
+        // contextSegments is only supplied for a model-proposed event -- deterministic
+        // profanity and the Lambda candidate-window overview already carry exact or
+        // deliberately approximate timing of their own and skip this. For everything else,
+        // the model's startTime/endTime are a number it invented and are trusted here only
+        // after being confirmed against words that actually appear in the transcript; see
+        // TranscriptWordLocator's remarks for why a model-driven category needed the same
+        // protection profanity already had.
+        if (contextSegments is not null)
+        {
+            var anchored = AnchorToTranscript(
+                startTime, endTime, quote, contextSegments, isCharacterOffsets);
+            if (anchored is null)
+            {
+                logger.LogInformation(
+                    "Discarded a proposed {Label} event at {Start:F1}-{End:F1}: its quote " +
+                    "could not be located in the supplied transcript.",
+                    label, startTime, endTime);
+                return false;
+            }
+            (startTime, endTime) = anchored.Value;
+        }
+
         var description = label.StartsWith("profanity_", StringComparison.Ordinal)
             ? "Profanity detected"
             : SafeDescriptionForEvent(label, safeDescription);
@@ -466,6 +518,63 @@ public sealed class OpenAIContentAnalysisProvider(
             StableEventKey(mapping, startTime, endTime, description, stableSuffix), description,
             AggregateKey(profanityWord), CensorWord(profanityWord)));
         return true;
+    }
+
+    /// <summary>
+    /// Confirms a model-proposed event's claimed range against the transcript's own words,
+    /// and narrows it to exact word timing when the claim was for a short, isolated phrase.
+    /// </summary>
+    /// <remarks>
+    /// Returns null -- rejecting the event outright -- when the quote cannot be found
+    /// anywhere in the supplied segments at all, or when it is found nowhere near the
+    /// claimed range. Both are the same failure this exists to catch: a claim with no real
+    /// text behind it. This is deliberately stricter than <see cref="DeterministicContentDetector"/>'s
+    /// own word matching, which always has a regex-confirmed word somewhere in the segment
+    /// and can safely fall back to that segment's bounds. A model's claim carries no such
+    /// independent confirmation that the words it describes exist at all, so there is nothing
+    /// safe to fall back to.
+    /// </remarks>
+    private static (double Start, double End)? AnchorToTranscript(
+        double claimedStart,
+        double claimedEnd,
+        string? quote,
+        IReadOnlyList<TranscriptSegment> contextSegments,
+        bool isCharacterOffsets)
+    {
+        if (string.IsNullOrWhiteSpace(quote)) return null;
+
+        // The two coordinate spaces this method is ever called in need different matches
+        // entirely, and the caller states which one it is rather than this method guessing
+        // from whether a segment happens to carry Words: an audio transcript stored before
+        // word timings existed also has none, and treating that absence as "this must be a
+        // book" would add a character index to a time in seconds and call it a timestamp.
+        var located = isCharacterOffsets
+            ? TranscriptWordLocator.FindQuotedSubstring(contextSegments, quote)
+            : TranscriptWordLocator.FindPhraseInSegments(contextSegments, quote);
+        if (located is null) return null;
+
+        // The claim and the located text disagree about where in the book this even is.
+        // Neither number is trustworthy at that point, and there is no third source to
+        // arbitrate between them.
+        if (located.EndTime < claimedStart - QuoteProximitySeconds ||
+            located.StartTime > claimedEnd + QuoteProximitySeconds)
+        {
+            return null;
+        }
+
+        // A short, isolated claim: the located quote is not merely supporting evidence for a
+        // wider range, it is essentially the whole event, so its own word-level timing is
+        // strictly more precise than the model's estimate of the seconds around it.
+        if (claimedEnd - claimedStart <= ShortEventMaximumSeconds)
+        {
+            return (located.StartTime, Math.Max(located.EndTime, located.StartTime));
+        }
+
+        // A claimed scene or sustained passage: the quote is one confirmed sentence inside a
+        // longer arc the model was asked to report in full, per the prompt's own instruction
+        // that its quote need not span the whole scene. Proximity above is what stands in for
+        // verifying the rest of the claimed span, since nothing else here can.
+        return (claimedStart, claimedEnd);
     }
 
     public static string SafeDescriptionForEvent(string label, string? supplied)
@@ -938,6 +1047,33 @@ Candidates:
                 sourceRange.ProposedStartTime - 30, sourceRange.ProposedEndTime);
             var end = Math.Clamp(verification.EndTime,
                 start, sourceRange.ProposedEndTime + 30);
+
+            // The refined start is a second model-invented number, one call further from the
+            // transcript than the first pass's own proposal. Confirmed the same way: locate
+            // the quote the verifier says begins the activity, and if it exists nowhere near
+            // the refined start, that refinement is not trusted -- the proposal that already
+            // passed AddEvent's own anchoring is kept instead of an unconfirmed narrowing of it.
+            if (!string.IsNullOrWhiteSpace(verification.Quote) &&
+                sourceCandidates.TryGetValue(verification.CandidateKey, out var sourceCandidate))
+            {
+                var located = TranscriptWordLocator.FindPhraseInSegments(
+                    sourceCandidate.Segments, verification.Quote);
+                if (located is not null &&
+                    Math.Abs(located.StartTime - start) <= QuoteProximitySeconds)
+                {
+                    start = located.StartTime;
+                }
+                else
+                {
+                    logger.LogInformation(
+                        "Terra/Sol's refined start for {CandidateKey} could not be confirmed " +
+                        "against the transcript; keeping the original proposed start.",
+                        verification.CandidateKey);
+                    start = sourceRange.ProposedStartTime;
+                    end = Math.Max(end, start);
+                }
+            }
+
             retained.Add(new ScanEvent(
                 Guid.NewGuid(), start, end, mapping.CategoryID, mapping.GroupID,
                 mapping.EventID, verification.Confidence,
@@ -1204,8 +1340,12 @@ Keep timestamps within the supplied excerpt. Use a neutral, non-graphic but usef
 that distinguishes the scene from a single explicit phrase. Do not return the generic wording
 "Complete sexual scene". Examples of acceptable style are "Sustained consensual sexual
 activity" or "Sexual activity following romantic dialogue". Do not include graphic details
-or quotations. Never name intimate anatomy or describe touching mechanics, positions, squeezing,
-or similar physical details. Return one decision for every candidateKey.
+or quotations in safeDescription. Never name intimate anatomy or describe touching mechanics,
+positions, squeezing, or similar physical details. Also return quote: for an accepted candidate,
+the exact consecutive words, copied verbatim from a single segment's text, that begin the
+activity at your refined startTime -- this is not shown to a listener, it is how the server
+confirms your refined boundary against the transcript's own word timing. For a rejected
+candidate return an empty string. Return one decision for every candidateKey.
 
 Candidates:
 """ + JsonSerializer.Serialize(candidates);
@@ -1375,8 +1515,17 @@ Never describe gore, wounds, removed body parts, or the method used for self-har
 Use clean wording such as "Graphic violence is described", "Torture is described",
 "Self-harm is depicted", or "Suicidal thoughts are described". The description itself must
 not expose a listener to the unwanted graphic or explicit material they are trying to avoid.
-Do not quote transcript text. For profanity labels only, return the exact single profane word
-in profanityWord so the server can censor and count it; otherwise return null.
+For every event, also return quote: the exact consecutive words from the supplied transcript
+text that support this event, copied verbatim from a single segment's text field, not
+paraphrased, summarized, or combined across segments. This is not shown to any listener; it is
+how the server locates the words you mean. A short event's quote should be just the words that
+carry it, matching startTime and endTime -- three words for a three-word event, not the whole
+sentence around them. A longer scene's quote should be the clearest single supporting sentence
+or clause inside it, near where you believe the scene most clearly qualifies; it does not need
+to span the whole scene, and the server uses startTime and endTime for the outer boundary. If
+you cannot point to specific words that justify an event, do not report the event.
+For profanity labels only, return the exact single profane word in profanityWord so the server
+can censor and count it; otherwise return null. The profane word should also be the quote.
 For profanity, emit one event for every occurrence so playback can skip each timestamp; the
 app will group all occurrences of the same word under one switch. For longer sexual, violent, substance,
 or self-harm scenes, emit one event spanning the complete supported scene rather than one
@@ -1406,7 +1555,7 @@ Transcript segments:
                     ["additionalProperties"] = false,
                     ["required"] = new JsonArray(
                         "label", "startTime", "endTime", "confidence",
-                        "safeDescription", "profanityWord"),
+                        "safeDescription", "profanityWord", "quote"),
                     ["properties"] = new JsonObject
                     {
                         ["label"] = new JsonObject
@@ -1431,7 +1580,11 @@ Transcript segments:
                         {
                             ["type"] = new JsonArray("string", "null"),
                             ["maxLength"] = 80
-                        }
+                        },
+                        // Never shown to a listener. This is how AddEvent locates the exact
+                        // words that justify the event in the transcript's own word timing,
+                        // rather than trusting startTime/endTime as invented numbers.
+                        ["quote"] = new JsonObject { ["type"] = "string", ["maxLength"] = 200 }
                     }
                 }
             }
@@ -1456,7 +1609,7 @@ Transcript segments:
                     ["required"] = new JsonArray(
                         "candidateKey", "accepted", "needsEscalation", "directSexualActEvidence",
                         "sustainedBeyondKissing", "startTime", "endTime",
-                        "confidence", "safeDescription"),
+                        "confidence", "safeDescription", "quote"),
                     ["properties"] = new JsonObject
                     {
                         ["candidateKey"] = new JsonObject { ["type"] = "string" },
@@ -1476,7 +1629,10 @@ Transcript segments:
                         {
                             ["type"] = "string",
                             ["maxLength"] = 80
-                        }
+                        },
+                        // Never shown to a listener. Confirms the refined startTime against
+                        // the transcript's own word timing before it is trusted.
+                        ["quote"] = new JsonObject { ["type"] = "string", ["maxLength"] = 200 }
                     }
                 }
             }
@@ -1498,7 +1654,13 @@ Transcript segments:
         [property: JsonPropertyName("endTime")] double EndTime,
         [property: JsonPropertyName("confidence")] double Confidence,
         [property: JsonPropertyName("safeDescription")] string SafeDescription,
-        [property: JsonPropertyName("profanityWord")] string? ProfanityWord);
+        [property: JsonPropertyName("profanityWord")] string? ProfanityWord,
+        /// <summary>
+        /// The exact words the model says support this event, copied verbatim from the
+        /// transcript. Never shown to a listener; used only to locate the event's real
+        /// word-level timing before the model's own startTime/endTime are trusted.
+        /// </summary>
+        [property: JsonPropertyName("quote")] string? Quote = null);
 
     private sealed record SceneVerificationCandidate(
         [property: JsonPropertyName("candidateKey")] string CandidateKey,
@@ -1528,7 +1690,13 @@ Transcript segments:
         [property: JsonPropertyName("startTime")] double StartTime,
         [property: JsonPropertyName("endTime")] double EndTime,
         [property: JsonPropertyName("confidence")] double Confidence,
-        [property: JsonPropertyName("safeDescription")] string SafeDescription);
+        [property: JsonPropertyName("safeDescription")] string SafeDescription,
+        /// <summary>
+        /// The words the verifier says begin the activity at its refined startTime. Confirmed
+        /// against the transcript before the refined boundary is trusted; see AddEvent's
+        /// sibling logic in AnchorToTranscript, which this mirrors on a smaller scale.
+        /// </summary>
+        [property: JsonPropertyName("quote")] string? Quote = null);
 
     private static string SafeDescription(string? value)
     {

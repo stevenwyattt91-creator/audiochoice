@@ -121,6 +121,15 @@ public sealed record AdminTranscriptIngestRequest(
     BookFingerprint Fingerprint,
     Processing.PrivateTranscript Transcript);
 
+/// <summary>
+/// Copies a scan result from one edition to another that an operator has independently
+/// confirmed is the same recording -- by comparing their transcripts, not by inferring
+/// from metadata.
+/// </summary>
+public sealed record AdminResultCopyRequest(
+    BookFingerprint Source,
+    BookFingerprint Destination);
+
 public sealed record AdminEditionMetadataRequest(
     BookFingerprint Fingerprint,
     string WorkTitle,

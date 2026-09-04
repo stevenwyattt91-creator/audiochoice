@@ -206,11 +206,28 @@ def main() -> None:
                 text = (segment.get("text") or "").strip()
                 if not text:
                     continue
-                segments.append({
+                # whisper-server.py already returns each word's own timing; a script that
+                # dropped it here would silently produce a transcript indistinguishable from
+                # one saved before word timings existed at all, defeating the entire point of
+                # matching a model-proposed event against real words rather than a guess.
+                words = [
+                    {
+                        "text": (word.get("word") or "").strip(),
+                        "startTime": float(word["start"]) + start,
+                        "endTime": float(word["end"]) + start,
+                    }
+                    for word in (segment.get("words") or [])
+                    if word.get("start") is not None and word.get("end") is not None
+                    and (word.get("word") or "").strip()
+                ]
+                entry = {
                     "startTime": float(segment["start"]) + start,
                     "endTime": float(segment["end"]) + start,
                     "text": text,
-                })
+                }
+                if words:
+                    entry["words"] = words
+                segments.append(entry)
             chunk_path.unlink(missing_ok=True)
             print(
                 f"  chunk {index + 1}/{chunk_count} at {start:.0f}s "

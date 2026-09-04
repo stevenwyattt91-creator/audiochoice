@@ -101,9 +101,10 @@ public static partial class DeterministicContentDetector
     /// The spoken word matching <paramref name="word"/> that has not been used yet.
     /// </summary>
     /// <remarks>
-    /// Matched on the word list rather than on position, because the transcriber's word list and a
-    /// regex over the segment text do not always split identically -- punctuation, hyphenation and
-    /// contractions differ -- so the nth regex match is not reliably the nth reported word.
+    /// Delegates to <see cref="TranscriptWordLocator.FindUnclaimedWord"/>, which generalizes
+    /// this exact matching rule -- word list rather than position, because the transcriber's
+    /// word list and a regex over the segment text do not always split identically -- to every
+    /// content category, not only profanity.
     ///
     /// Returns null when there is no confident match, and the caller then keeps the segment's own
     /// range. A wrong word's timing would remove the wrong moment and leave the profanity audible,
@@ -112,20 +113,8 @@ public static partial class DeterministicContentDetector
     private static TranscriptWord? FindWord(
         IReadOnlyList<TranscriptWord>? words,
         string word,
-        ISet<int> claimed)
-    {
-        if (words is null) return null;
-        for (var index = 0; index < words.Count; index += 1)
-        {
-            if (claimed.Contains(index)) continue;
-            // The reported word carries its punctuation, so "damn," has to match "damn".
-            var candidate = words[index].Text.Trim([',', '.', '!', '?', ';', ':', '"', '\'', '-']);
-            if (!string.Equals(candidate, word, StringComparison.OrdinalIgnoreCase)) continue;
-            claimed.Add(index);
-            return words[index];
-        }
-        return null;
-    }
+        ISet<int> claimed) =>
+        TranscriptWordLocator.FindUnclaimedWord(words, word, claimed);
 
     /// <summary>
     /// Cheap keyword cues, for deciding what deserves model review.
