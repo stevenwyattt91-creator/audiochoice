@@ -1318,6 +1318,16 @@ app.MapPost("/v1/admin/editions/result-copy", async (
     {
         return Results.BadRequest(new { error = "The source edition has no scan result to copy." });
     }
+    // Each ScanEvent carries the Id it was already stored under at the source edition. The
+    // events table's primary key is that Id alone, not (Id, edition), so writing the source's
+    // own rows again under a different edition collides on the row that already exists rather
+    // than creating a second one. Regenerated here, once, at the one call site that hands
+    // SaveResult events it did not just create -- every other caller already passes freshly
+    // generated ids because it is saving a scan that has never been stored before.
+    var copiedResult = sourceResult with
+    {
+        Events = sourceResult.Events.Select(value => value with { Id = Guid.NewGuid() }).ToArray()
+    };
 
     var sourceTranscript = await transcriptStore.Load(request.Source, cancellationToken);
     var destinationTranscript = await transcriptStore.Load(request.Destination, cancellationToken);
@@ -1340,7 +1350,7 @@ app.MapPost("/v1/admin/editions/result-copy", async (
         });
     }
 
-    catalog.SaveResult(request.Destination, sourceResult);
+    catalog.SaveResult(request.Destination, copiedResult);
     logger.LogInformation(
         "Copied the scan result from {SourceTitle} ({SourceSha}) to {DestinationTitle} " +
         "({DestinationSha}) after verifying their transcripts match verbatim.",
