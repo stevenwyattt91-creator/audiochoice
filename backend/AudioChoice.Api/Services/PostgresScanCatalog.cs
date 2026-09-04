@@ -717,7 +717,7 @@ public sealed class PostgresScanCatalog(
             ParseStatus(reader.GetString(15)));
     }
 
-    private static void SaveResult(
+    private void SaveResult(
         NpgsqlConnection connection, NpgsqlTransaction transaction,
         BookFingerprint fingerprint, ScanResult result)
     {
