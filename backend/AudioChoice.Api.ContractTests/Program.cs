@@ -2542,6 +2542,58 @@ Assert(
         Math.Abs(repeated[1].StartTime - 201.5) < 0.001,
     "A repeated word reused the first occurrence's timing for both.");
 
+// Word-level re-anchoring for every model-driven category, not only profanity. This is what
+// stops a real event's timing from landing on an unrelated nearby sentence: a model proposes
+// a wide range and a quote, and the quote is located in the transcript's own word timing
+// before the model's numbers are ever trusted.
+var reanchorSegment = new TranscriptSegment(
+    500, 512, "She crossed her arms and took a stance, refusing to back down.", new[]
+    {
+        new TranscriptWord("She", 500.0, 500.3),
+        new TranscriptWord("crossed", 500.3, 500.7),
+        new TranscriptWord("her", 500.7, 500.9),
+        new TranscriptWord("arms", 500.9, 501.3),
+        new TranscriptWord("and", 501.3, 501.5),
+        new TranscriptWord("took", 501.5, 501.8),
+        new TranscriptWord("a", 501.8, 501.9),
+        new TranscriptWord("stance,", 501.9, 502.4),
+    });
+var multiWordSpan = TranscriptWordLocator.FindPhrase(reanchorSegment.Words, "crossed her arms");
+Assert(
+    multiWordSpan is not null &&
+        Math.Abs(multiWordSpan.StartTime - 500.3) < 0.001 &&
+        Math.Abs(multiWordSpan.EndTime - 501.3) < 0.001,
+    "A three-word phrase spanning consecutive transcript words was not located, or its span " +
+    "did not match the words' own timing.");
+Assert(
+    TranscriptWordLocator.FindPhrase(reanchorSegment.Words, "took a firm stance") is null,
+    "A phrase whose words do not actually appear in that order was located anyway. This is " +
+    "the exact failure mode a real filter bug would produce: a model claims support for an " +
+    "event using words the passage never contains, and a locator that finds a near-miss " +
+    "instead of rejecting it would let the mistake straight through.");
+Assert(
+    TranscriptWordLocator.FindPhraseInSegments([reanchorSegment], "crossed her arms and took a stance")
+        is { } fullPhrase && Math.Abs(fullPhrase.StartTime - 500.3) < 0.001,
+    "A longer phrase spanning most of a segment's words was not located across the segment " +
+    "list.");
+Assert(
+    TranscriptWordLocator.FindPhraseInSegments([reanchorSegment], "their union was blessed") is null,
+    "A quote for content that does not appear anywhere in the supplied segments was located " +
+    "anyway, which is exactly how an unrelated real event's quote could wrongly confirm a " +
+    "completely different proposed range.");
+
+// The character-offset path a narrated book's own passages use, which carries no word list
+// at all -- only the passage's own text and its absolute starting offset.
+var bookPassage = new TranscriptSegment(
+    1200, 1260, "Their union was blessed by the elders that very night.");
+Assert(
+    TranscriptWordLocator.FindQuotedSubstring([bookPassage], "union was blessed")
+        is { } substringSpan && substringSpan.StartTime == 1200 + "Their ".Length,
+    "A quoted substring was not located at its exact character offset within the passage.");
+Assert(
+    TranscriptWordLocator.FindQuotedSubstring([bookPassage], "crossed her arms") is null,
+    "A quoted substring absent from every supplied passage was located anyway.");
+
 // Chapter structure as identity. This decides whether a converted copy of an already scanned
 // recording finds its filters, and equally whether two unrelated books are handed each other's
 // timings, so both directions are pinned.
