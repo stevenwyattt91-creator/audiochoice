@@ -125,10 +125,14 @@ public sealed class EditionResolver(
                 !string.IsNullOrWhiteSpace(candidateSignature?.ProductIdentifier) &&
                 EditionMatch.SameRecording(fingerprint, candidate, signature, candidateSignature);
             // Runtime stays required, as it is for every match, because it is the one claim a
-            // re-tag cannot forge.
+            // re-tag cannot forge. File kind stays required too: a read-along EPUB attached
+            // to this recording reports this recording's own runtime and chapter offsets by
+            // design, which would otherwise satisfy every check below and hand its own
+            // filter timings back for the text file that merely accompanies it.
             var structureAgrees =
                 EditionMatch.ChapterStructureIdentifies(signature, candidateSignature) &&
-                EditionMatch.SameRuntime(fingerprint, candidate);
+                EditionMatch.SameRuntime(fingerprint, candidate) &&
+                EditionMatch.SameFileKind(fingerprint, candidate);
             if (!identifiersAgree && !structureAgrees) continue;
 
             var matched = catalog.FindResult(candidate);

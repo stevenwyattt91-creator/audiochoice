@@ -46,6 +46,14 @@ public static class EditionMatch
             return true;
         }
 
+        // A recording and a text file can share a runtime, a retail identifier and even a
+        // chapter structure -- an EPUB companion attached for read-along inherits exactly
+        // those fields from the audiobook it was attached to, because that is deliberately
+        // how read-along identifies which book a reading edition belongs to. None of that
+        // makes the EPUB a second copy of the recording, so file kind is checked before
+        // anything else and, like runtime, is never waived by a stated identifier.
+        if (!SameFileKind(left, right)) return false;
+
         // Runtime is checked before anything else and is never waived.
         //
         // Signatures are reported by clients, and a matching product identifier is
@@ -162,6 +170,27 @@ public static class EditionMatch
         if (left.Duration is not > 0 || right.Duration is not > 0) return false;
         return Math.Abs(left.Duration.Value - right.Duration.Value) <= MaximumRuntimeDriftSeconds;
     }
+
+    /// <summary>
+    /// Whether two fingerprints describe files of the same kind -- both audio, or both
+    /// text -- required alongside every other check because a recording and a reading
+    /// edition are never the same file no matter what else agrees.
+    /// </summary>
+    /// <remarks>
+    /// A read-along EPUB attached to an audiobook deliberately carries that audiobook's
+    /// own duration, retail identifier and chapter offsets, because that is how the
+    /// server tells which recording a reading edition belongs to. Without this check that
+    /// same borrowed evidence would satisfy every other rule in <see cref="SameRecording"/>
+    /// and <see cref="ChapterStructureIdentifies"/>, and the EPUB would be reported as a
+    /// second copy of the recording rather than its companion. <c>"epub"</c> is the one
+    /// non-audio <see cref="BookFingerprint.FileType"/> in use; everything else compares
+    /// equal to itself and unequal to it.
+    /// </remarks>
+    public static bool SameFileKind(BookFingerprint left, BookFingerprint right) =>
+        IsEbook(left) == IsEbook(right);
+
+    private static bool IsEbook(BookFingerprint fingerprint) =>
+        string.Equals(fingerprint.FileType?.Trim(), "epub", StringComparison.OrdinalIgnoreCase);
 
     private static bool SameTitle(BookFingerprint left, BookFingerprint right)
     {

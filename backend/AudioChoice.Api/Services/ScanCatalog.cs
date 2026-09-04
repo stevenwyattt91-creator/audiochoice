@@ -641,7 +641,7 @@ public static class ExploreCatalog
         // merged above, so anything left carrying one on both sides is genuinely two books.
         if (left.ProductIdentifier is not null && right.ProductIdentifier is not null) return false;
         if (left.Duration is not > 0 || right.Duration is not > 0) return false;
-        if (Math.Abs(left.Duration.Value - right.Duration.Value) > RuntimeMatchSeconds) return false;
+        if (!RuntimesAgree(left.Duration, right.Duration)) return false;
         if (PartMarker(left.Title) != PartMarker(right.Title)) return false;
         if (Normalize(left.EditionType) != Normalize(right.EditionType)) return false;
         var leftAuthor = Normalize(left.Author);
@@ -655,20 +655,36 @@ public static class ExploreCatalog
     /// <remarks>
     /// An unknown runtime counts as agreement rather than a mismatch, because an untagged
     /// file is one of the differences being reconciled here.
+    ///
+    /// The bound is proportional rather than a fixed number of seconds, because that is what
+    /// the drift measured off Explore's own catalogue actually looks like: two GraphicAudio
+    /// ACOTAR Part 2 files nine seconds apart on a six-hour book, two Funny Story files
+    /// thirteen apart on an eleven-hour one, two copies of The Deal twenty-nine apart on a
+    /// twelve-hour one -- rounding and container overhead compound across a longer file
+    /// rather than adding a constant. <see cref="MaximumRuntimeDriftFraction"/> comfortably
+    /// covers the largest of those (0.065%) with room to spare, while still rejecting an
+    /// abridged reading against an unabridged one, which differs by double digits of percent
+    /// rather than a fraction of one. A false merge here duplicates or drops one row in a
+    /// browse list; a false merge in <see cref="EditionMatch"/>, which stays a flat fifteen
+    /// seconds, hands one recording's filter timings to another, which is a materially worse
+    /// mistake and is why that check is not loosened the same way.
     /// </remarks>
-    private static bool RuntimesAgree(double? left, double? right) =>
-        left is not > 0 || right is not > 0 ||
-        Math.Abs(left.Value - right.Value) <= RuntimeMatchSeconds;
+    private static bool RuntimesAgree(double? left, double? right)
+    {
+        if (left is not > 0 || right is not > 0) return true;
+        var drift = Math.Abs(left.Value - right.Value);
+        return drift <= MinimumRuntimeMatchSeconds
+            || drift <= Math.Max(left.Value, right.Value) * MaximumRuntimeDriftFraction;
+    }
+
+    /// <summary>Floor for a short book, where a fraction of the runtime would be too tight.</summary>
+    private const double MinimumRuntimeMatchSeconds = 5;
 
     /// <summary>
-    /// How far two runtimes may differ and still be the same recording.
+    /// How far two runtimes may differ, as a fraction of the longer one, and still be
+    /// judged the same recording.
     /// </summary>
-    /// <remarks>
-    /// Converting a file re-encodes it, which shifts the reported length by a fraction of a
-    /// second, and a container's runtime is rounded. Two seconds absorbs that without being
-    /// wide enough to merge an abridged reading with an unabridged one.
-    /// </remarks>
-    private const double RuntimeMatchSeconds = 2;
+    private const double MaximumRuntimeDriftFraction = 0.002;
 
     /// <summary>
     /// Which entry survives: a cover first, since a missing one is the visible symptom,
@@ -826,6 +842,17 @@ public static class ExploreCatalog
     /// </remarks>
     public static string? UnpublishableReason(BookFingerprint fingerprint)
     {
+        // Explore is a catalogue of audiobooks with reusable filter scans. A narrated
+        // book's own text is scanned separately and never reaches this table, but a
+        // read-along EPUB attached to an audiobook is stored under a fingerprint of its
+        // own -- one that borrows that audiobook's runtime and identity so read-along
+        // knows which recording it belongs to -- and that borrowed evidence is exactly
+        // what could otherwise let it slip into this list as if it were a second copy of
+        // the recording rather than its companion.
+        if (string.Equals(fingerprint.FileType?.Trim(), "epub", StringComparison.OrdinalIgnoreCase))
+        {
+            return "This is a reading edition (EPUB), not an audiobook recording.";
+        }
         var title = Normalize(EditionTitleFormatter.Format(fingerprint));
         if (title.Length == 0) return "The edition has no title.";
         if (PlaceholderTitles.Contains(title, StringComparer.Ordinal))
@@ -835,7 +862,16 @@ public static class ExploreCatalog
         // A title that is only digits, or a single character, names nothing.
         if (title.Length < 2) return "The title is too short to name a book.";
         if (title.All(char.IsDigit)) return "The title is only digits, so it is a filename.";
-        return string.IsNullOrWhiteSpace(fingerprint.Author)
+        // A blank author tag is normally the cheapest sign a title was guessed from a
+        // filename rather than read off the file. It stops being that sign once the title
+        // resolved to a book in KnownWorkCatalog by title alone: that match already
+        // required a title specific enough to name one known book, which a guessed
+        // filename does not produce, and the work carries its own correct author
+        // regardless of what this file's tags say. (A retail identifier is not checked
+        // here -- this method only ever sees the fingerprint, not the signature that
+        // carries it -- but a file with an identifier almost always has an author too.)
+        var known = KnownWorkCatalog.FindByTitle(EditionTitleFormatter.Canonicalize(fingerprint).WorkTitle);
+        return string.IsNullOrWhiteSpace(fingerprint.Author) && known is null
             ? "The edition has no author, so its title was probably guessed from a filename."
             : null;
     }
@@ -952,8 +988,24 @@ Carl and his ex-girlfriend's cat, Princess Donut, are forced into a planet-spann
         string? storedDescription = null,
         string? productIdentifier = null)
     {
-        var title = EditionTitleFormatter.Format(fingerprint);
-        var query = string.Join(' ', new[] { title, fingerprint.Author }.Where(value => !string.IsNullOrWhiteSpace(value)));
+        var title = EditionTitleFormatter.Format(fingerprint, productIdentifier);
+        // A known work supplies its own correct author and series when this file's own
+        // tags are blank or wrong -- the same reasoning that already applies to the title
+        // itself. Checked by identifier first, same order as the title.
+        var known = KnownWorkCatalog.FindByIdentifier(productIdentifier)
+            ?? KnownWorkCatalog.FindByTitle(EditionTitleFormatter.Canonicalize(fingerprint).WorkTitle);
+        var author = string.IsNullOrWhiteSpace(fingerprint.Author) ? known?.Author : fingerprint.Author;
+        var seriesTitle = fingerprint.SeriesTitle ?? known?.SeriesTitle;
+        var seriesNumber = fingerprint.SeriesNumber ?? known?.SeriesNumber;
+        // A known work's dramatization is now decided once, by KnownWorkCatalog, and folded
+        // into every copy's title -- but Deduplicate on the listener-facing view still
+        // compares this raw column between two candidates before merging them. Two files of
+        // the identical GraphicAudio recording, one tagged "Dramatized Adaptation" and one
+        // left blank, would otherwise carry the same title and still fail to merge on this
+        // field alone. Set here so every field describing one book agrees, not only the
+        // title text.
+        var editionType = known is { IsDramatized: true } ? "Dramatized Adaptation" : fingerprint.EditionType;
+        var query = string.Join(' ', new[] { title, author }.Where(value => !string.IsNullOrWhiteSpace(value)));
         var catalogID = fingerprint.Sha256[..Math.Min(24, fingerprint.Sha256.Length)].ToLowerInvariant();
         var isAcotarMistAndFury = title.Contains("A Court of Mist and Fury", StringComparison.OrdinalIgnoreCase);
         var isIronFlame = title.Contains("Iron Flame", StringComparison.OrdinalIgnoreCase);
@@ -962,15 +1014,15 @@ Carl and his ex-girlfriend's cat, Princess Donut, are forced into a planet-spann
         var isFourthWingPart1 = isFourthWing && title.Contains("Part 1 of 2", StringComparison.OrdinalIgnoreCase);
         var isAcotar = title.Contains("A Court of Thorns and Roses", StringComparison.OrdinalIgnoreCase);
         var isDungeonCrawlerCarl = title.Contains("Dungeon Crawler Carl", StringComparison.OrdinalIgnoreCase) &&
-            fingerprint.Author?.Contains("Matt Dinniman", StringComparison.OrdinalIgnoreCase) == true;
+            author?.Contains("Matt Dinniman", StringComparison.OrdinalIgnoreCase) == true;
         var purchaseURL = AudiblePurchaseURL(query, productIdentifier);
         return new ExploreCatalogBook(
             catalogID,
             title,
-            fingerprint.Author,
-            fingerprint.SeriesTitle,
-            fingerprint.SeriesNumber,
-            fingerprint.EditionType,
+            author,
+            seriesTitle,
+            seriesNumber,
+            editionType,
             fingerprint.Duration,
             fingerprint.FileType,
             result.ScanDate,

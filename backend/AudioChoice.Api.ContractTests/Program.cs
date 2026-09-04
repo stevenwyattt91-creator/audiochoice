@@ -117,6 +117,136 @@ Assert(
         == "Fourth Wing (Part 2 of 2) (Dramatized Adaptation)",
     "Re-formatting a stored Part 2 title doubled its part or edition wording.");
 
+// The known-work catalogue: one canonical name for every way a file's own tags or
+// filename might spell it, replacing what used to be a single hardcoded sha256 check.
+Assert(
+    KnownWorkCatalog.FindByIdentifier("9798890551030")?.CanonicalTitle == "Fourth Wing",
+    "A known ASIN did not resolve to its work.");
+Assert(
+    KnownWorkCatalog.FindByIdentifier("978-9890551030") is null,
+    "An unrelated identifier resolved to a known work.");
+Assert(
+    KnownWorkCatalog.FindByTitle("A Court of Thorns and Roses [Dramatized Adaptation] (Part 1 of 2)")
+        ?.CanonicalTitle == "A Court of Thorns and Roses",
+    "A title with part and edition wording did not resolve by title.");
+Assert(
+    KnownWorkCatalog.FindByTitle(
+        "ACourtofThornsandRosesDramatizedAdaptationACourtofThornsandRosesBook1 ep7 (Part 1 of 2)")
+        ?.CanonicalTitle == "A Court of Thorns and Roses",
+    "A run-together EPUB-derived title did not resolve to its known work.");
+Assert(
+    KnownWorkCatalog.FindByTitle("A Court of Mist and Fury: A Court of Thorns and Roses, Book 2 (Part 2 of 2)")
+        ?.CanonicalTitle == "A Court of Mist and Fury",
+    "A series-qualified title resolved to the wrong book in its own series.");
+Assert(
+    KnownWorkCatalog.FindByTitle("Some Entirely Unrelated Audiobook") is null,
+    "An unrelated title matched a known work.");
+
+Assert(
+    EditionTitleFormatter.Format(new BookFingerprint(
+        1, new string('e', 64), 1_000, 21_846.68, "m4a",
+        "1 A Court of Thorns and Roses [Dramatized Adaptation] (Dramatized) (Part 1 of 2) "
+            + "(Dramatized Adaptation)",
+        "Sarah J. Maas", null, null, null, null, null))
+        == "A Court of Thorns and Roses (Part 1 of 2) (Dramatized Adaptation)",
+    "A messy real-world ACOTAR title was not normalized to its canonical name.");
+Assert(
+    EditionTitleFormatter.Format(new BookFingerprint(
+        1, new string('f', 64), 1_000, 21_107.5, "m4b",
+        "A Court of Thorns and Roses (2 of 2)", "Sarah J. Maas", null, null, null, null, null))
+        == "A Court of Thorns and Roses (Part 2 of 2) (Dramatized Adaptation)",
+    "An abbreviated '(2 of 2)' title was not resolved to the known work's part and total.");
+Assert(
+    EditionTitleFormatter.Format(new BookFingerprint(
+        1, new string('g', 64), 1_000, 93_855, "audio",
+        "King Sorrow", "Joe Hill", "King Sorrow", null, null, null, null),
+        productIdentifier: "B0DSCGNTXS")
+        == "King Sorrow",
+    "A known single-part work gained part wording it does not have.");
+
+// A scan with no author tag but a title specific enough to name a known book must not be
+// withheld from Explore for exactly the reason the title already answers.
+var acotarNoAuthor = new BookFingerprint(
+    1, new string('h', 64), 1_000, 21_846.68, "m4b",
+    "ACourtofThornsandRosesDramatizedAdaptationACourtofThornsandRosesBook1 ep7 (Part 1 of 2)",
+    null, null, null, null, null, null);
+Assert(
+    ExploreCatalog.IsPublishable(acotarNoAuthor),
+    "A known work with no author tag was withheld as if its title had been guessed.");
+Assert(
+    ExploreCatalog.Create(acotarNoAuthor, result).Author == "Sarah J. Maas",
+    "A known work's author was not supplied for a catalogue entry whose own tag was blank.");
+Assert(
+    !ExploreCatalog.IsPublishable(acotarNoAuthor with
+    {
+        WorkTitle = "Some Entirely Unrelated Audiobook With A Real Title But No Author",
+    }),
+    "An unknown book with no author tag was published; the author gate must still apply "
+        + "to titles KnownWorkCatalog cannot vouch for.");
+
+// End to end: the exact messy real-world titles seen live on staging, once canonicalized
+// by the title formatter, must collapse into one Explore entry rather than several -- this
+// is what makes the fix visible to a listener without a database migration, since
+// Deduplicate groups on the formatted title and runs at read time on every request.
+var messyAcotarPart2Variant1 = new BookFingerprint(
+    1, new string('i', 64), 1_000, 21_107.5, "m4b",
+    "A Court of Thorns and Roses (2 of 2)", "Sarah J. Maas", null, null, null, null, null);
+var messyAcotarPart2Variant2 = new BookFingerprint(
+    1, new string('j', 64), 1_000, 21_107.537, "m4a",
+    "A Court of Thorns and Roses: A Court of Thorns and Roses, Book 1 (Part 2 of 2) (Dramatized)",
+    "Sarah J. Maas", null, null, null, null, null);
+var messyAcotarResult = new ScanResult(
+    [new ScanEvent(Guid.NewGuid(), 1, 2, Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), 1)],
+    DateTimeOffset.UtcNow, "test");
+var mergedAcotarView = ExploreCatalog.Deduplicate([
+    ExploreCatalog.Create(messyAcotarPart2Variant1, messyAcotarResult),
+    ExploreCatalog.Create(messyAcotarPart2Variant2, messyAcotarResult),
+]);
+Assert(
+    mergedAcotarView.Count == 1,
+    "Two messy real-world spellings of the same ACOTAR part did not collapse into one "
+        + "Explore entry once their titles were canonicalized.");
+Assert(
+    mergedAcotarView[0].Title == "A Court of Thorns and Roses (Part 2 of 2) (Dramatized Adaptation)",
+    "The surviving merged ACOTAR entry did not carry the canonical title.");
+
+// The real drift measured off Explore's own catalogue: two copies of one recording, same
+// canonical title after formatting, whose reported runtimes still differ by a fraction of a
+// percent because one is a re-encode of the other. These used to survive as separate rows
+// even after their titles converged, because the merge tolerance was a flat two seconds.
+var fourthWingCopy1 = new BookFingerprint(
+    1, new string('k', 64), 449_954_471, 28_800, "audio",
+    "Fourth Wing (Part 1 of 2) (Dramatized Adaptation)", "Rebecca Yarros",
+    "The Empyrean", 1, "Dramatized Adaptation", 1, 2);
+var fourthWingCopy2 = new BookFingerprint(
+    1, new string('l', 64), 450_760_050, 28_350.682, "m4a",
+    "Fourth Wing (Part 1 of 2) (Dramatized Adaptation)", "Rebecca Yarros",
+    "Fourth Wing", null, "Dramatized Adaptation", 1, 2);
+// This real pair drifts 1.56%, past the 0.2% re-encoding tolerance, so it is deliberately
+// left unmerged here for the evidence-based admin duplicate tool (chapter structure, not a
+// runtime guess) to resolve with actual proof rather than being folded in on a coincidence.
+Assert(
+    ExploreCatalog.Deduplicate([
+        ExploreCatalog.Create(fourthWingCopy1, messyAcotarResult),
+        ExploreCatalog.Create(fourthWingCopy2, messyAcotarResult),
+    ]).Count == 2,
+    "Two Fourth Wing copies 1.56% apart merged on runtime alone; that drift is too large to "
+        + "be re-encoding noise and this pair should be left for evidence-based matching.");
+
+var funnyStoryCopy1 = new BookFingerprint(
+    1, new string('m', 64), 1_000, 40_982.854, "audio/x-m4a",
+    "Funny Story", "Emily Henry", null, null, null, null, null);
+var funnyStoryCopy2 = new BookFingerprint(
+    1, new string('n', 64), 1_000, 40_995.7, "application/octet-stream",
+    "Funny Story", "Emily Henry", null, null, null, null, null);
+Assert(
+    ExploreCatalog.Deduplicate([
+        ExploreCatalog.Create(funnyStoryCopy1, messyAcotarResult),
+        ExploreCatalog.Create(funnyStoryCopy2, messyAcotarResult),
+    ]).Count == 1,
+    "Two real-world copies of Funny Story, 12.8 seconds apart on an 11-hour runtime, did "
+        + "not merge.");
+
 var persistenceFolder = Path.Combine(
     Path.GetTempPath(),
     $"audiochoice-catalog-{Guid.NewGuid()}");
@@ -456,6 +586,22 @@ Assert(EditionMatch.SameRecording(
     "A trailing title qualifier defeated the match.");
 Assert(EditionMatch.SameRecording(editionBase, editionConverted with { Author = null }),
     "A missing author was treated as a contradiction.");
+
+// A read-along EPUB attached to King Sorrow deliberately reports the audiobook's own
+// duration and title so read-along knows which recording it belongs to. That borrowed
+// evidence must never make the EPUB match as a second copy of the recording itself.
+var kingSorrowEpub = editionBase with
+{
+    Sha256 = new string('c', 64), FileSize = 500, FileType = "epub",
+};
+Assert(!EditionMatch.SameRecording(editionBase, kingSorrowEpub),
+    "An EPUB companion matched its own audiobook as the same recording.");
+Assert(!EditionMatch.SameFileKind(editionBase, kingSorrowEpub),
+    "An audiobook and an EPUB were reported as the same kind of file.");
+Assert(EditionMatch.SameFileKind(editionBase, editionConverted),
+    "Two audio files of different formats were not reported as the same kind of file.");
+Assert(EditionMatch.SameFileKind(kingSorrowEpub, kingSorrowEpub with { Sha256 = new string('d', 64) }),
+    "Two EPUB files were not reported as the same kind of file.");
 
 var aliasFolder = Path.Combine(Path.GetTempPath(), $"audiochoice-aliases-{Guid.NewGuid()}");
 try
@@ -1088,6 +1234,19 @@ Assert(OpenLibrarySynopsisProvider.AsISBN(null) is null, "A missing identifier b
 Assert(OpenLibrarySynopsisProvider.AsISBN("12345") is null,
     "A short number was treated as an ISBN.");
 
+// Automatic cover art enrichment. The content-type gate only accepts what the storage
+// endpoints themselves accept, and jpg is folded into the canonical jpeg spelling.
+Assert(ITunesCoverArtProvider.NormalizeContentType("image/jpeg") == "image/jpeg",
+    "A JPEG content type was not recognised.");
+Assert(ITunesCoverArtProvider.NormalizeContentType("image/jpg") == "image/jpeg",
+    "The nonstandard 'image/jpg' spelling was not folded into 'image/jpeg'.");
+Assert(ITunesCoverArtProvider.NormalizeContentType("IMAGE/PNG") == "image/png",
+    "A differently-cased content type was not recognised.");
+Assert(ITunesCoverArtProvider.NormalizeContentType("text/html") is null,
+    "An HTML error page's content type was accepted as an image.");
+Assert(ITunesCoverArtProvider.NormalizeContentType(null) is null,
+    "A missing content type was accepted as an image.");
+
 // Curating the catalogue. Hiding has to be reversible and has to leave the scan alone: the
 // entry comes off the store front, but a listener who owns that file keeps its filter
 // results, and putting it back must not need a database edit.
@@ -1417,10 +1576,14 @@ Assert(ExploreCatalog.IsAudibleProductIdentifier("B0BW2CCVQ2"), "A valid ASIN wa
         Assert(
             exclusionStore.Load(narratedFingerprint, "text-contract-test") is not null,
             "The text scan was not stored, so the exclusion test proves nothing.");
+        // An EPUB is now also unpublishable on its metadata alone -- a read-along companion
+        // borrows its audiobook's identity and must never be listed as a second recording --
+        // which is a second, independent reason this fingerprint cannot reach the catalogue.
+        // Asserted directly rather than assumed, and the completed-scan-jobs mechanism below
+        // is still checked on its own terms via the narration store, which holds no scan job.
         Assert(
-            ExploreCatalog.IsPublishable(narratedFingerprint),
-            "The narrated fingerprint is unpublishable on its metadata alone, so this test " +
-            "would pass even if a text scan did create a catalogue entry.");
+            !ExploreCatalog.IsPublishable(narratedFingerprint),
+            "An EPUB fingerprint was reported publishable; it must be excluded by file type.");
         Assert(
             exclusionCatalog.ListExploreBooks().Count == 0,
             "A completed text scan produced an Explore catalogue entry.");

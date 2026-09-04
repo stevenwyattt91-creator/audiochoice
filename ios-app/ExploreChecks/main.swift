@@ -184,6 +184,21 @@ check("two parts sharing a runtime stay separate",
         book("b", "Fourth Wing Part 2 of 2", author: "Rebecca Yarros", duration: 39_600)
       ]).count == 2)
 
+// Real drift measured off Explore's own catalogue. A flat two-second tolerance left these
+// exact pairs listed twice even after their titles had already converged server-side.
+check("two real-world Funny Story copies 12.8 seconds apart on an 11-hour runtime merge",
+      ExploreCatalogCleanup.deduplicated([
+        book("a", "Funny Story", author: "Emily Henry", duration: 40_982.854),
+        book("b", "Funny Story", author: "Emily Henry", duration: 40_995.7)
+      ]).count == 1)
+// This real pair drifts 1.56%, past the tolerance, and is deliberately left unmerged for
+// evidence-based matching (chapter structure) rather than folded in on a coincidence.
+check("two Fourth Wing copies 1.56% apart on an 8-hour runtime stay separate",
+      ExploreCatalogCleanup.deduplicated([
+        book("a", "Fourth Wing Part 1 of 2", author: "Rebecca Yarros", duration: 28_800),
+        book("b", "Fourth Wing Part 1 of 2", author: "Rebecca Yarros", duration: 28_350.682)
+      ]).count == 2)
+
 print("Stability")
 let unordered = [
     book("z", "King Sorrow", author: "Joe Hill"),

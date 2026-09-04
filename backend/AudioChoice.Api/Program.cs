@@ -318,6 +318,14 @@ builder.Services.AddHttpClient<ISynopsisProvider, OpenLibrarySynopsisProvider>(c
     client.DefaultRequestHeaders.UserAgent.ParseAdd(
         "AudioChoice/1.0 (+https://audiochoice.app)");
 });
+// No base address: this calls both itunes.apple.com and covers.openlibrary.org.
+builder.Services.AddHttpClient<ICoverArtProvider, ITunesCoverArtProvider>(client =>
+{
+    client.Timeout = TimeSpan.FromSeconds(15);
+    client.DefaultRequestHeaders.UserAgent.ParseAdd(
+        "AudioChoice/1.0 (+https://audiochoice.app)");
+});
+builder.Services.AddHostedService<ExploreCatalogEnrichmentService>();
 
 builder.Services.AddSingleton<IEditionSignatureStore>(services =>
     new FileEditionSignatureStore(services.GetRequiredService<AudioChoiceDataPaths>()));
@@ -1089,7 +1097,8 @@ app.MapGet("/v1/admin/editions/duplicates", (
             var rightSignature = signatures.Find(right);
 
             var sameStructure = EditionMatch.ChapterStructureIdentifies(leftSignature, rightSignature) &&
-                EditionMatch.SameRuntime(left, right);
+                EditionMatch.SameRuntime(left, right) &&
+                EditionMatch.SameFileKind(left, right);
             var sameIdentifier =
                 !string.IsNullOrWhiteSpace(leftSignature?.ProductIdentifier) &&
                 !string.IsNullOrWhiteSpace(rightSignature?.ProductIdentifier) &&
