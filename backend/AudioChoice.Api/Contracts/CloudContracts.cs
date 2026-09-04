@@ -50,7 +50,20 @@ public sealed record ScanResult(
 
 public sealed record CloudScanRequest(
     BookFingerprint Fingerprint,
-    string? CurrentScannerVersion);
+    string? CurrentScannerVersion,
+    /// <summary>
+    /// Identity evidence read from the file's own container tags, when the caller already
+    /// has it at the moment of this lookup.
+    /// </summary>
+    /// <remarks>
+    /// A client typically reads its container tags during import, before this exact call,
+    /// but historically only reported them afterward -- during a separate library-row
+    /// upsert -- so the evidence that could have matched this file to an existing scanned
+    /// edition arrived after the one lookup that needed it had already missed. Optional and
+    /// additive: a caller that has nothing yet, or an older client build, omits this and gets
+    /// exactly today's behaviour.
+    /// </remarks>
+    EditionSignature? Signature = null);
 
 public sealed record CloudScanResponse(
     CloudScanStatus Status,
