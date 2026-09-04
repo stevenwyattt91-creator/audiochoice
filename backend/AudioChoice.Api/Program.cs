@@ -1341,6 +1341,58 @@ app.MapGet("/v1/admin/editions/audit-assignments", (
     return assignments is null ? Results.NotFound() : Results.Ok(assignments);
 });
 
+// Permanently removes a duplicate edition. Never removes a listener's own library row, and
+// refuses outright rather than doing anything if one still exists or if the edition's audit
+// work has been paid or is actively claimed -- both re-checked here, not trusted from an
+// earlier call to /v1/admin/editions/references. Use that endpoint and, if a library row is
+// still attached, /v1/admin/editions/repoint first.
+//
+// The one admin endpoint here that cannot be undone. Requires ConfirmIrreversible: true
+// outright, so it cannot be triggered by a request built for a different endpoint's shape.
+app.MapPost("/v1/admin/editions/delete", (
+    AdminEditionDeleteRequest request,
+    HttpContext context,
+    IEditionReferenceStore references,
+    ILogger<Program> logger) =>
+{
+    if (!IsConfiguredApiToken(context, app.Configuration)) return Results.Unauthorized();
+
+    if (!request.ConfirmIrreversible)
+    {
+        return Results.BadRequest(new
+        {
+            error = "ConfirmIrreversible must be true. This permanently deletes the edition " +
+                "and cannot be undone."
+        });
+    }
+
+    var result = references.DeleteEdition(request.Fingerprint);
+    return result.Outcome switch
+    {
+        EditionDeleteOutcome.Deleted => LoggedNoContent(),
+        EditionDeleteOutcome.NotFound => Results.NotFound(),
+        EditionDeleteOutcome.RefusedLibraryBooksPresent => Results.Conflict(new
+        {
+            error = "This edition still has a listener's library row attached. Use " +
+                "/v1/admin/editions/repoint to move it first."
+        }),
+        EditionDeleteOutcome.RefusedPaidOrActiveAuditWork => Results.Conflict(new
+        {
+            error = "This edition has an audit assignment that has been paid or is actively " +
+                "claimed. Resolve that before deleting."
+        }),
+        _ => Results.Problem("Unrecognized delete outcome.")
+    };
+
+    IResult LoggedNoContent()
+    {
+        logger.LogWarning(
+            "Deleted edition {Title} ({Sha}) and all of its scan and audit history.",
+            request.Fingerprint.WorkTitle, request.Fingerprint.Sha256[..12]);
+        return Results.NoContent();
+    }
+});
+
 // Moves every listener's library row off a duplicate edition and onto the one being kept,
 // so the duplicate can later be retired without breaking anyone's library. Not a delete --
 // nothing at the source edition is removed, including its own scan history, only library

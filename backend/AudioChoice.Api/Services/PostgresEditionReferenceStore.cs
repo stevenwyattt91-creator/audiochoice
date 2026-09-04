@@ -108,6 +108,68 @@ public sealed class PostgresEditionReferenceStore(NpgsqlDataSource dataSource) :
         return new EditionRepointResult(repointed, skipped);
     }
 
+    public EditionDeleteResult DeleteEdition(BookFingerprint fingerprint)
+    {
+        using var connection = dataSource.OpenConnection();
+        using var transaction = connection.BeginTransaction();
+
+        var editionID = FindEditionID(connection, transaction, fingerprint);
+        if (editionID is null) return new EditionDeleteResult(EditionDeleteOutcome.NotFound);
+
+        // Re-read inside this transaction rather than trust whatever CountReferences returned
+        // to the caller a moment earlier: a listener could have added this edition to their
+        // library, or an auditor could have claimed or been paid for an assignment on it, in
+        // the time between that check and this call.
+        using var libraryCheck = new NpgsqlCommand(
+            "select count(*) from user_library_books where edition_id = $1;", connection, transaction);
+        libraryCheck.Parameters.AddWithValue(editionID.Value);
+        if ((long)libraryCheck.ExecuteScalar()! > 0)
+        {
+            return new EditionDeleteResult(EditionDeleteOutcome.RefusedLibraryBooksPresent);
+        }
+
+        using var auditCheck = new NpgsqlCommand("""
+            select exists(
+                select 1 from audit_assignments
+                where edition_id = $1
+                  and (payment_status = 'paid' or status in ('in_progress', 'completed', 'needs_review')));
+            """, connection, transaction);
+        auditCheck.Parameters.AddWithValue(editionID.Value);
+        if ((bool)auditCheck.ExecuteScalar()!)
+        {
+            return new EditionDeleteResult(EditionDeleteOutcome.RefusedPaidOrActiveAuditWork);
+        }
+
+        // Deleted in dependency order rather than left to cascades, because most of these
+        // relationships deliberately have none -- see the remarks on IEditionReferenceStore.
+        // approved_scan_events and audit_assignments come first: both name a scan_event_id or
+        // scan_result_id without a cascade of their own, so either would block the scan_results
+        // delete below if left in place. scan_jobs before scan_uploads for the same reason, in
+        // the other direction: scan_jobs.upload_id names scan_uploads, so the upload row must
+        // outlive its job, not the other way around.
+        void Execute(string sql)
+        {
+            using var command = new NpgsqlCommand(sql, connection, transaction);
+            command.Parameters.AddWithValue(editionID.Value);
+            command.ExecuteNonQuery();
+        }
+
+        Execute("delete from approved_scan_events where edition_id = $1;");
+        // Cascades to audit_decisions, audit_review_sources and audit_review_clips.
+        Execute("delete from audit_assignments where edition_id = $1;");
+        Execute("delete from audit_review_media where edition_id = $1;");
+        // Cascades to scan_events.
+        Execute("delete from scan_results where edition_id = $1;");
+        // Cascades to scan_job_subscribers.
+        Execute("delete from scan_jobs where edition_id = $1;");
+        Execute("delete from scan_uploads where edition_id = $1;");
+        Execute("delete from private_transcripts where edition_id = $1;");
+        Execute("delete from audiobook_editions where id = $1;");
+
+        transaction.Commit();
+        return new EditionDeleteResult(EditionDeleteOutcome.Deleted);
+    }
+
     private static Guid? FindEditionID(
         NpgsqlConnection connection, NpgsqlTransaction? transaction, BookFingerprint fingerprint)
     {
