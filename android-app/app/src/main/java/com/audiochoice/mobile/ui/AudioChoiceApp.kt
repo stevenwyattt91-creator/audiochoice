@@ -2455,19 +2455,35 @@ private fun PlayerScreen(
                 Icon(Icons.Outlined.KeyboardArrowDown, "Book details")
             }
             if (BuildConfig.BETA_BUILD) {
+                val readerEpubLauncher = rememberLauncherForActivityResult(
+                    ActivityResultContracts.OpenDocument(),
+                ) { uri -> uri?.let(player::attachEpub) }
                 IconButton(
                     onClick = {
-                        if (state.epubText != null) {
-                            readerMode = !readerMode
+                        when {
+                            state.epubText != null -> readerMode = !readerMode
+                            // No EPUB yet: the icon's other job is attaching one, so a tap
+                            // here opens the file picker instead of doing nothing. Mirrors
+                            // the dual behaviour iOS's reader icon already has.
+                            else -> readerEpubLauncher.launch(
+                                arrayOf("application/epub+zip", "application/octet-stream", "*/*"),
+                            )
                         }
                     },
-                    enabled = state.epubText != null,
                 ) {
-                    // Open book invites opening the reader; closed book invites
-                    // returning to the player.
+                    // Open book invites opening the reader; closed book invites returning
+                    // to the player; no book yet invites attaching one.
                     Icon(
-                        if (readerMode) Icons.Outlined.Book else Icons.Outlined.MenuBook,
-                        if (readerMode) "Close reading edition" else "Open reading edition",
+                        when {
+                            readerMode -> Icons.Outlined.Book
+                            state.epubText != null -> Icons.Outlined.MenuBook
+                            else -> Icons.Outlined.LibraryAdd
+                        },
+                        when {
+                            readerMode -> "Close reading edition"
+                            state.epubText != null -> "Open reading edition"
+                            else -> "Attach a reading edition"
+                        },
                         tint = ChoiceGreen,
                     )
                 }
@@ -2679,6 +2695,60 @@ private fun PlayerScreen(
                 }
             }
         }
+    }
+    if (state.filterReportRefinementPending) {
+        var selectedCategory by remember { mutableStateOf<com.audiochoice.mobile.data.FilterReportCategory?>(null) }
+        var selectedTimeframe by remember {
+            mutableStateOf(com.audiochoice.mobile.data.FilterReportTimeframe.JUST_THIS_MOMENT)
+        }
+        AlertDialog(
+            // Already saved by the time this shows, so dismissing it loses nothing.
+            onDismissRequest = { player.dismissMissedContentRefinement() },
+            title = { Text("What did you hear?") },
+            text = {
+                Column(Modifier.heightIn(max = 420.dp).verticalScroll(rememberScrollState())) {
+                    Text(
+                        "Optional. Your report at ${formatTime(state.positionMs)} is already saved.",
+                        color = ChoiceMuted,
+                        fontSize = 12.sp,
+                    )
+                    Spacer(Modifier.height(12.dp))
+                    Text("Category", fontSize = 12.sp, color = ChoiceMuted)
+                    com.audiochoice.mobile.data.FilterReportCategory.entries.forEach { category ->
+                        Row(
+                            Modifier.fillMaxWidth()
+                                .clickable { selectedCategory = category }
+                                .padding(vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            RadioButton(selected = selectedCategory == category, onClick = { selectedCategory = category })
+                            Text(category.label)
+                        }
+                    }
+                    Spacer(Modifier.height(8.dp))
+                    Text("How far back", fontSize = 12.sp, color = ChoiceMuted)
+                    com.audiochoice.mobile.data.FilterReportTimeframe.entries.forEach { timeframe ->
+                        Row(
+                            Modifier.fillMaxWidth()
+                                .clickable { selectedTimeframe = timeframe }
+                                .padding(vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            RadioButton(selected = selectedTimeframe == timeframe, onClick = { selectedTimeframe = timeframe })
+                            Text(timeframe.label)
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    player.refineMissedContentReport(selectedCategory?.categoryID, selectedTimeframe.seconds)
+                }) { Text("Submit") }
+            },
+            dismissButton = {
+                TextButton(onClick = { player.dismissMissedContentRefinement() }) { Text("Skip") }
+            },
+        )
     }
     if (chapterDialog) {
         AlertDialog(

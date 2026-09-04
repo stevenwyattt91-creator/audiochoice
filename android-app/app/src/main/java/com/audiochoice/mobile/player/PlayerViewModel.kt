@@ -102,6 +102,21 @@ data class PlayerUiState(
     /** Set after a filter report is queued, so the player can confirm it. */
     val filterReportSent: Boolean = false,
     /**
+     * Set alongside [filterReportSent], the moment (in seconds) the just-sent report
+     * covers. Offered back to the refinement dialog so a category or a wider time frame
+     * chosen afterward describes the same moment rather than wherever playback has since
+     * moved to.
+     */
+    val filterReportPositionSeconds: Double = 0.0,
+    /**
+     * Whether the optional "what did you hear / how far back" refinement is showing.
+     *
+     * Separate from [filterReportSent] on purpose: the report is already saved by the time
+     * this appears, so dismissing it loses nothing. Mirrors iOS's confirmationDialog, which
+     * Android has not had until now.
+     */
+    val filterReportRefinementPending: Boolean = false,
+    /**
      * Present only for a narrated book, and the marker the two playback guards test on.
      *
      * Null for every imported audiobook, which is what keeps both guards inert on the
@@ -1271,7 +1286,39 @@ class PlayerViewModel(
                 scannerVersion = current.scannerVersion,
                 categoryID = categoryID,
             ),
+            positionSeconds = positionSeconds,
+            offerRefinement = categoryID == null,
         )
+    }
+
+    /**
+     * Resends the just-reported moment with a category and/or a wider look-back window.
+     *
+     * A second report rather than an edit of the first: the report already saved when the
+     * flag button was tapped is never at risk of being lost if this one fails, and triage
+     * seeing two rows for one moment is a smaller cost than a listener's original report
+     * silently vanishing.
+     */
+    fun refineMissedContentReport(categoryID: String?, windowSeconds: Double) {
+        val current = mutableState.value
+        val book = current.book ?: return
+        mutableState.value = current.copy(filterReportRefinementPending = false)
+        queueReport(
+            FilterReportComposer.missedContent(
+                fingerprint = book.fingerprint,
+                positionSeconds = current.filterReportPositionSeconds,
+                scannerVersion = current.scannerVersion,
+                categoryID = categoryID,
+                windowSeconds = windowSeconds,
+            ),
+            positionSeconds = current.filterReportPositionSeconds,
+            offerRefinement = false,
+        )
+    }
+
+    /** Dismisses the refinement offer without sending anything further. */
+    fun dismissMissedContentRefinement() {
+        mutableState.value = mutableState.value.copy(filterReportRefinementPending = false)
     }
 
     /**
@@ -1302,15 +1349,23 @@ class PlayerViewModel(
         )
     }
 
-    private fun queueReport(report: FilterReportRequest) {
+    private fun queueReport(
+        report: FilterReportRequest,
+        positionSeconds: Double = report.positionSeconds,
+        offerRefinement: Boolean = false,
+    ) {
         // Written to disk before anything is sent, so a report made with no signal survives.
         filterReports.enqueue(report)
-        mutableState.value = mutableState.value.copy(filterReportSent = true)
+        mutableState.value = mutableState.value.copy(
+            filterReportSent = true,
+            filterReportPositionSeconds = positionSeconds,
+            filterReportRefinementPending = offerRefinement,
+        )
         val accessToken = token ?: return
         viewModelScope.launch { filterReports.flush(accessToken) }
     }
 
-    /** Clears the confirmation once the UI has shown it. */
+    /** Clears the confirmation once the UI has shown it. Leaves any pending refinement alone. */
     fun acknowledgeFilterReport() {
         mutableState.value = mutableState.value.copy(filterReportSent = false)
     }

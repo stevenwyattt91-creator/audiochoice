@@ -29,6 +29,17 @@ public sealed class TransactionalEmailOptions
 
     /// <summary>Where operational alerts are sent.</summary>
     public string AlertAddress { get; init; } = "admin@audiochoiceapp.com";
+
+    /// <summary>
+    /// Where a listener's filter report is sent, separately from <see cref="AlertAddress"/>.
+    /// </summary>
+    /// <remarks>
+    /// A listener's own report of a specific missed or wrongly-filtered moment is the one
+    /// alert kind that needs a named owner reading it before launch, not a shared operational
+    /// inbox. Kept as its own setting rather than repointing <see cref="AlertAddress"/> itself,
+    /// since every other alert (a new catalog scan completing) has no reason to move with it.
+    /// </remarks>
+    public string FilterReportAddress { get; init; } = "steven.wyatt@audiochoiceapp.com";
 }
 
 public interface ITransactionalEmailSender
@@ -193,7 +204,7 @@ public sealed class ResendTransactionalEmailSender(
 
             Scanner version: {report.ScannerVersion ?? "Not recorded"}
             Scan event: {report.ScanEventID?.ToString() ?? "None -- no control covered that moment"}
-            Category: {report.CategoryID?.ToString() ?? "Not recorded"}
+            Category: {CategoryName(report.CategoryID)}
 
             Reported at: {report.ReportedAt:u}
             Report ID: {report.ID}
@@ -210,12 +221,33 @@ public sealed class ResendTransactionalEmailSender(
             """;
 
         return Send(
-            options.AlertAddress,
+            options.FilterReportAddress,
             $"Filter report · {report.Fingerprint.WorkTitle ?? report.Fingerprint.Sha256[..12]}",
             text,
             options.ReplyToAddress,
             cancellationToken);
     }
+
+    /// <summary>
+    /// The taxonomy's top-level category names, keyed by the same six GUIDs both clients'
+    /// own hardcoded pickers use (<c>IOSContentTaxonomy</c> on iOS, the top-level entries
+    /// <c>PlaybackFilterTaxonomy</c> groups on Android). Kept here rather than read from the
+    /// audit portal's own <c>audit_filter_categories</c> table so this class, which otherwise
+    /// only formats text, does not gain a database dependency for six names that never change.
+    /// </summary>
+    private static readonly IReadOnlyDictionary<Guid, string> CategoryNames = new Dictionary<Guid, string>
+    {
+        [Guid.Parse("10000000-0000-0000-0000-000000000001")] = "Sexual Content",
+        [Guid.Parse("20000000-0000-0000-0000-000000000001")] = "Profanity",
+        [Guid.Parse("30000000-0000-0000-0000-000000000001")] = "Violence",
+        [Guid.Parse("40000000-0000-0000-0000-000000000001")] = "Drugs & Alcohol",
+        [Guid.Parse("50000000-0000-0000-0000-000000000001")] = "Blasphemy",
+        [Guid.Parse("60000000-0000-0000-0000-000000000001")] = "Self-Harm & Suicide",
+    };
+
+    private static string CategoryName(Guid? categoryID) => categoryID is { } id
+        ? CategoryNames.GetValueOrDefault(id, id.ToString())
+        : "Not specified";
 
     public Task SendNewCatalogScanAlert(
         Guid scanID,
