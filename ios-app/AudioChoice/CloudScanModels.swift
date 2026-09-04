@@ -42,6 +42,14 @@ struct ScanResult: Codable, Equatable {
 struct CloudScanRequest: Codable {
     let fingerprint: BookFingerprint
     let currentScannerVersion: String?
+    /// Identity evidence read from the file's own container tags, when the caller already
+    /// has it at the moment of this lookup.
+    ///
+    /// A client typically reads its container tags during import, before this exact call,
+    /// but historically only reported them afterward -- during a separate library-row
+    /// upsert -- so the evidence that could have matched this file to an existing scanned
+    /// edition arrived after the one lookup that needed it had already missed.
+    var signature: EditionSignature? = nil
 }
 
 struct CloudScanResponse: Codable {

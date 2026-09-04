@@ -58,10 +58,17 @@ final class CloudScanViewModel: ObservableObject {
                         result = try await resolveJob(pending, client: client, bookID: record.id)
                     } else {
                         phase = .searching
+                        // AudiobookImportService already read this file's container tags and
+                        // built this signature at import time, before this lookup ever runs.
+                        // Sent here so THIS lookup can use it to recognise a converted or
+                        // re-tagged copy of an edition already scanned, rather than the
+                        // evidence only reaching the server afterward through LibraryScreen's
+                        // separate, unrelated library-row upsert.
                         let lookup = try await client.requestScan(
                             CloudScanRequest(
                                 fingerprint: fingerprint,
-                                currentScannerVersion: latest.scanResult?.scannerVersion
+                                currentScannerVersion: latest.scanResult?.scannerVersion,
+                                signature: latest.editionSignature
                             )
                         )
                         markReconnectedIfNeeded()
