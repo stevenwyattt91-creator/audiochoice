@@ -83,18 +83,27 @@ public static class TranscriptComparison
         var low = Math.Max(0, center - radius);
         var high = Math.Min(haystack.Count - WordsPerCheckpoint, center + radius);
 
+        // At most one word of the checkpoint may differ. Two independent transcriptions of
+        // the same audio routinely disagree about exactly one kind of word: an invented
+        // name, in a fantasy novel, that a speech model can only guess the spelling of from
+        // how it sounds -- confirmed on a real pair on staging, where the two transcripts
+        // agreed word for word for the entire book except that one side heard a character's
+        // name as "faera" and the other as "pharah". A single such disagreement is normal
+        // transcription noise, not evidence of different audio; two or more within the
+        // twelve-word window is treated as a genuine mismatch rather than explained away.
+        const int maximumDifferingWords = 1;
         for (var start = low; start <= high; start += 1)
         {
-            var matched = true;
+            var differences = 0;
             for (var offset = 0; offset < needle.Length; offset += 1)
             {
                 if (!string.Equals(haystack[start + offset], needle[offset], StringComparison.Ordinal))
                 {
-                    matched = false;
-                    break;
+                    differences += 1;
+                    if (differences > maximumDifferingWords) break;
                 }
             }
-            if (matched) return start;
+            if (differences <= maximumDifferingWords) return start;
         }
         return null;
     }

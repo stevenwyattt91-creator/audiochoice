@@ -2626,6 +2626,21 @@ Assert(
     "Two transcripts of completely different text were reported as matching. A wrong "
         + "positive here would hand one recording's filter timings to a different book.");
 
+// The real near-miss found on staging: two transcriptions of one book agreed word for word
+// everywhere except one checkpoint, where an invented fantasy name was transcribed two
+// different ways by ear -- "faera" in one, "pharah" in the other. One differing word out of
+// twelve is exactly the ordinary noise two independent transcriptions produce and must not
+// be reported as a mismatch. Substituted at word 2565, inside checkpoint 6's own window
+// (2561-2573 of 3000 words), which is exactly where the real pair's difference landed --
+// near the end of the book, past every other checkpoint.
+var namedCharacterText = sharedBookText.Replace("word2565", "faera");
+var otherSpellingText = sharedBookText.Replace("word2565", "pharah");
+Assert(
+    TranscriptComparison.FindMismatch(
+        FakeTranscript(namedCharacterText, 40), FakeTranscript(otherSpellingText, 55)) is null,
+    "A single differently-transcribed invented name was reported as a mismatch between two "
+        + "transcripts that otherwise agree word for word across the entire book.");
+
 // The one real, everyday case this exists to catch: a shared publisher intro is not enough
 // evidence on its own, because every edition of a book from the same narrator carries it.
 var sharedIntroOnly = FakeTranscript(
