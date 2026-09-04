@@ -91,11 +91,21 @@ public sealed class ITunesCoverArtProvider(
             return null;
         }
 
-        // iTunes' own relevance ranking is trusted for which result is the right book; only
-        // the artwork URL needs work. It hands back a 100x100 thumbnail by default, and the
-        // catalogue needs a size worth displaying full-screen.
+        // iTunes' own relevance ranking decides result order, but not which result is
+        // accepted -- that still has to be checked against the title actually being searched
+        // for. A free-text search for "A Court of Thorns and Roses" returns "A Court of
+        // Silver Flames" ahead of an exact match often enough that trusting rank alone
+        // stored the wrong series entry's cover for every listener of that book, permanently
+        // (SaveEditionCover never overwrites an existing cover once one is stored). It hands
+        // back a 100x100 thumbnail by default, and the catalogue needs a size worth
+        // displaying full-screen.
         foreach (var result in results.EnumerateArray())
         {
+            var collectionName = result.TryGetProperty("collectionName", out var name)
+                ? name.GetString()
+                : null;
+            if (!TitleMatches(title, collectionName)) continue;
+
             var artwork = result.TryGetProperty("artworkUrl100", out var url) ? url.GetString() : null;
             if (string.IsNullOrWhiteSpace(artwork)) continue;
             foreach (var replacement in new[] { "1200x1200bb", "600x600bb" })
@@ -107,6 +117,30 @@ public sealed class ITunesCoverArtProvider(
         }
         return null;
     }
+
+    /// <summary>
+    /// Whether a search result actually names the book being searched for, rather than
+    /// merely a highly-ranked one.
+    /// </summary>
+    /// <remarks>
+    /// Deliberately conservative: two books in a series routinely share every word except
+    /// the last ("...and Roses" vs "...and Silver Flames"), so containment either way is
+    /// accepted only once both sides are reduced to letters and digits, and a returned title
+    /// that only shares a prefix with the request -- the exact shape of that collision -- is
+    /// rejected rather than accepted on a partial match.
+    /// </remarks>
+    private static bool TitleMatches(string requested, string? returned)
+    {
+        var normalizedRequested = Normalize(requested);
+        var normalizedReturned = Normalize(returned);
+        if (normalizedRequested.Length == 0 || normalizedReturned.Length == 0) return false;
+        return normalizedRequested == normalizedReturned
+            || normalizedReturned.StartsWith(normalizedRequested, StringComparison.Ordinal)
+            || normalizedRequested.StartsWith(normalizedReturned, StringComparison.Ordinal);
+    }
+
+    private static string Normalize(string? value) =>
+        new(value?.Where(char.IsLetterOrDigit).Select(char.ToLowerInvariant).ToArray() ?? []);
 
     private async Task<(byte[] Bytes, string ContentType)?> Download(
         string url, CancellationToken cancellationToken)
