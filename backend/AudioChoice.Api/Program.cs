@@ -2962,8 +2962,19 @@ app.MapPost("/v1/scans/requests", async (
     IScanJobQueue queue,
     IPrivateTranscriptStore transcriptStore,
     IEditionResolver editions,
+    IEditionSignatureStore editionSignatures,
     CancellationToken cancellationToken) =>
 {
+    // Recorded before resolution is attempted, not after, so a signature the caller already
+    // has at the moment of this exact call -- read from the file's own tags during import,
+    // before this lookup ever ran -- can actually be used by the match it was read for,
+    // instead of only helping a lookup that happens to run again later. Record itself is a
+    // no-op on an empty signature, so nothing extra needs guarding here.
+    if (request.Signature is not null)
+    {
+        editionSignatures.Record(request.Fingerprint, request.Signature);
+    }
+
     // Resolved rather than looked up directly, so a converted or re-tagged copy of an
     // already-scanned edition reuses its filters instead of paying to scan again.
     // FindResult only accepts proof, never metadata similarity.
