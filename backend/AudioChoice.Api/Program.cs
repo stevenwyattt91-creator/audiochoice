@@ -1547,6 +1547,7 @@ app.MapPost("/v1/admin/editions/result-copy", async (
     HttpContext context,
     IScanCatalog catalog,
     IPrivateTranscriptStore transcriptStore,
+    IEditionReferenceStore editionReferences,
     ILogger<Program> logger,
     CancellationToken cancellationToken) =>
 {
@@ -1601,6 +1602,27 @@ app.MapPost("/v1/admin/editions/result-copy", async (
         "({DestinationSha}) after verifying their transcripts match verbatim.",
         request.Source.WorkTitle, request.Source.Sha256[..12],
         request.Destination.WorkTitle, request.Destination.Sha256[..12]);
+
+    // The destination may already have had audit assignments pointed at whatever result it
+    // carried before this copy. Left alone, an unclaimed one would silently keep reviewing
+    // that superseded result rather than the copy that was just saved.
+    try
+    {
+        var retargeted = editionReferences.RetargetAvailableAuditAssignments(request.Destination);
+        if (retargeted is { Retargeted: > 0 })
+        {
+            logger.LogInformation(
+                "Retargeted {Count} unclaimed audit assignment(s) on {DestinationTitle} onto " +
+                "the copied result.", retargeted.Retargeted, request.Destination.WorkTitle);
+        }
+    }
+    catch (Exception retargetException)
+    {
+        logger.LogWarning(
+            retargetException,
+            "Could not retarget audit assignments on {DestinationTitle} after a result copy.",
+            request.Destination.WorkTitle);
+    }
     return Results.NoContent();
 });
 

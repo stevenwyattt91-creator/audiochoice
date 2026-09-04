@@ -11,6 +11,7 @@ public sealed class ScanWorker(
     IPrivateTranscriptStore transcriptStore,
     ITransactionalEmailSender emailSender,
     IInternalAuditStore audits,
+    IEditionReferenceStore editionReferences,
     OpenAIProcessingOptions options,
     ILogger<ScanWorker> logger) : BackgroundService
 {
@@ -102,6 +103,32 @@ public sealed class ScanWorker(
                 }
 
                 var completed = catalog.CompleteJob(scanID, result);
+                if (completed && !isNewCatalogEdition)
+                {
+                    // A rescan or reanalysis of an edition that already had a result. Any
+                    // still-unclaimed audit assignment on it was created against the result
+                    // this job just superseded, and would otherwise silently keep pointing an
+                    // auditor at the old one -- see EditionReferenceStore's remarks on why an
+                    // already-claimed assignment is deliberately left alone instead.
+                    try
+                    {
+                        var retargeted = editionReferences.RetargetAvailableAuditAssignments(job.Fingerprint);
+                        if (retargeted is { Retargeted: > 0 })
+                        {
+                            logger.LogInformation(
+                                "Retargeted {Count} unclaimed audit assignment(s) onto the " +
+                                "result from scan job {ScanID}.", retargeted.Retargeted, scanID);
+                        }
+                    }
+                    catch (Exception retargetException)
+                    {
+                        // Never turns a completed scan into a failed one over this.
+                        logger.LogWarning(
+                            retargetException,
+                            "Could not retarget audit assignments after scan job {ScanID}.",
+                            scanID);
+                    }
+                }
                 if (completed && isNewCatalogEdition)
                 {
                     if (audits.CreateAutomaticFocusedAssignment(scanID))
