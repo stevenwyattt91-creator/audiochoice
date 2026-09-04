@@ -1,5 +1,34 @@
 import Foundation
 
+/// How far back a refined report reaches, as a labelled choice rather than free entry.
+///
+/// A listener choosing this has no reason to know the server's own limit, so the choices
+/// stop at it (FilterReportComposer.maximumWindowSeconds) rather than offering one that
+/// would be silently clamped. Mirrors Android's FilterReportTimeframe.
+enum FilterReportTimeframe: CaseIterable, Identifiable {
+    case justThisMoment, halfMinute, oneMinute, twoMinutes
+
+    var id: Self { self }
+
+    var seconds: Double {
+        switch self {
+        case .justThisMoment: FilterReportComposer.lookBackSeconds
+        case .halfMinute: 30
+        case .oneMinute: 60
+        case .twoMinutes: FilterReportComposer.maximumWindowSeconds
+        }
+    }
+
+    var title: String {
+        switch self {
+        case .justThisMoment: "Just this moment (20s)"
+        case .halfMinute: "Last 30 seconds"
+        case .oneMinute: "Last minute"
+        case .twoMinutes: "Last 2 minutes"
+        }
+    }
+}
+
 /// Turns a moment in a book into a report.
 ///
 /// Kept apart from the queue and the player so the part that decides *what* a report says
@@ -12,6 +41,10 @@ enum FilterReportComposer {
     /// sweeping in so much that triage cannot tell what was meant.
     static let lookBackSeconds: Double = 20
 
+    /// Longer than this describes the book rather than a moment in it. Matches the server's
+    /// own clamp, so a choice offered here is never silently narrowed after submission.
+    static let maximumWindowSeconds: Double = 120
+
     /// A report that something played which should have been removed.
     ///
     /// The position is the tap, not the passage: the window carries the look-back, so the
@@ -20,13 +53,14 @@ enum FilterReportComposer {
         fingerprint: BookFingerprint,
         position: Double,
         scannerVersion: String?,
-        categoryID: UUID? = nil
+        categoryID: UUID? = nil,
+        windowSeconds: Double = lookBackSeconds
     ) -> FilterReportRequest {
         FilterReportRequest(
             fingerprint: fingerprint,
             kind: .missedContent,
             positionSeconds: max(position, 0),
-            windowSeconds: lookBackSeconds,
+            windowSeconds: min(max(windowSeconds, 1), maximumWindowSeconds),
             scannerVersion: scannerVersion,
             scanEventID: nil,
             categoryID: categoryID

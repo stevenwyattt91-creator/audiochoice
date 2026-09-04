@@ -59,27 +59,94 @@ struct FilterReportControl: View {
                 }
             }
             // Asked after the report is already safe, so dismissing it loses nothing.
-            .confirmationDialog(
-                "What did you hear?",
-                isPresented: $showingRefinement,
-                titleVisibility: .visible
-            ) {
-                ForEach(FilterCategory.allCases) { category in
-                    Button(category.title) {
+            .sheet(isPresented: $showingRefinement) {
+                FilterReportRefinementSheet(
+                    reportedPosition: reportedPosition,
+                    onSubmit: { category, timeframe in
                         queue.submit(
                             FilterReportComposer.missedContent(
                                 fingerprint: fingerprint,
                                 position: reportedPosition,
                                 scannerVersion: record.scanResult?.scannerVersion,
-                                categoryID: IOSContentTaxonomy.categoryID(for: category)
+                                categoryID: category.map(IOSContentTaxonomy.categoryID(for:)),
+                                windowSeconds: timeframe.seconds
                             ),
-                            confirmation: "Thank you. Noted as \(category.title.lowercased())."
+                            confirmation: "Thank you, noted."
                         )
                     }
+                )
+                .presentationDetents([.medium])
+            }
+        }
+    }
+
+    private func timestamp(_ seconds: Double) -> String {
+        let total = max(Int(seconds), 0)
+        return String(format: "%d:%02d:%02d", total / 3600, (total % 3600) / 60, total % 60)
+    }
+}
+
+/// The optional "what did you hear, and how far back" refinement offered after a report
+/// is already saved. A sheet rather than a confirmationDialog because that control only
+/// supports a flat list of buttons, and this needs two independent choices -- category and
+/// time frame -- submitted together.
+private struct FilterReportRefinementSheet: View {
+    let reportedPosition: Double
+    let onSubmit: (FilterCategory?, FilterReportTimeframe) -> Void
+    @Environment(\.dismiss) private var dismiss
+    @State private var selectedCategory: FilterCategory?
+    @State private var selectedTimeframe: FilterReportTimeframe = .justThisMoment
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    Text("Optional. Your report at \(timestamp(reportedPosition)) is already saved.")
+                        .foregroundStyle(ACTheme.secondaryText)
                 }
-                Button("Skip", role: .cancel) {}
-            } message: {
-                Text("Optional. Your report at \(timestamp(reportedPosition)) is already saved.")
+                Section("Category") {
+                    ForEach(FilterCategory.allCases) { category in
+                        Button {
+                            selectedCategory = selectedCategory == category ? nil : category
+                        } label: {
+                            HStack {
+                                Text(category.title).foregroundStyle(.primary)
+                                Spacer()
+                                if selectedCategory == category {
+                                    Image(systemName: "checkmark").foregroundStyle(ACTheme.accent)
+                                }
+                            }
+                        }
+                    }
+                }
+                Section("How far back") {
+                    ForEach(FilterReportTimeframe.allCases) { timeframe in
+                        Button {
+                            selectedTimeframe = timeframe
+                        } label: {
+                            HStack {
+                                Text(timeframe.title).foregroundStyle(.primary)
+                                Spacer()
+                                if selectedTimeframe == timeframe {
+                                    Image(systemName: "checkmark").foregroundStyle(ACTheme.accent)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            .navigationTitle("What did you hear?")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Skip") { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Submit") {
+                        onSubmit(selectedCategory, selectedTimeframe)
+                        dismiss()
+                    }
+                }
             }
         }
     }

@@ -81,6 +81,38 @@ object FilterReportPositionUnit {
 data class FilterReportAcknowledgement(val id: String)
 
 /**
+ * The taxonomy's six top-level categories, for a report's own category picker.
+ *
+ * Independent of [PlaybackFilterTaxonomy][com.audiochoice.mobile.player.PlaybackFilterTaxonomy],
+ * which only lists categories a book's own scan actually produced. A report's picker has to
+ * offer every category regardless of what this book was found to contain -- the whole point
+ * is telling triage about something the scan missed. Mirrors iOS's IOSContentTaxonomy so the
+ * two apps' pickers name the same six things with the same identifiers.
+ */
+enum class FilterReportCategory(val categoryID: String, val label: String) {
+    SEXUAL_CONTENT("10000000-0000-0000-0000-000000000001", "Sexual Content"),
+    PROFANITY("20000000-0000-0000-0000-000000000001", "Profanity"),
+    VIOLENCE("30000000-0000-0000-0000-000000000001", "Violence"),
+    DRUGS_AND_ALCOHOL("40000000-0000-0000-0000-000000000001", "Drugs & Alcohol"),
+    BLASPHEMY("50000000-0000-0000-0000-000000000001", "Blasphemy"),
+    SELF_HARM("60000000-0000-0000-0000-000000000001", "Self-Harm & Suicide"),
+}
+
+/**
+ * How far back a refined report reaches, as a labelled choice rather than free entry.
+ *
+ * A listener picking this has no reason to know the server's own limit, so the choices stop
+ * at it ([FilterReportComposer.MAXIMUM_WINDOW_SECONDS]) rather than offering one that would be
+ * silently clamped.
+ */
+enum class FilterReportTimeframe(val seconds: Double, val label: String) {
+    JUST_THIS_MOMENT(FilterReportComposer.LOOK_BACK_SECONDS, "Just this moment (20s)"),
+    HALF_MINUTE(30.0, "Last 30 seconds"),
+    ONE_MINUTE(60.0, "Last minute"),
+    TWO_MINUTES(FilterReportComposer.MAXIMUM_WINDOW_SECONDS, "Last 2 minutes"),
+}
+
+/**
  * Turns a moment in a book into a report.
  *
  * Mirrors FilterReportComposer on iOS, so a report means the same thing whichever app it came
@@ -104,11 +136,12 @@ object FilterReportComposer {
         positionSeconds: Double,
         scannerVersion: String?,
         categoryID: String? = null,
+        windowSeconds: Double = LOOK_BACK_SECONDS,
     ): FilterReportRequest = FilterReportRequest(
         fingerprint = fingerprint,
         kind = FilterReportKind.MISSED_CONTENT,
         positionSeconds = positionSeconds.coerceAtLeast(0.0),
-        windowSeconds = LOOK_BACK_SECONDS,
+        windowSeconds = windowSeconds.coerceIn(1.0, MAXIMUM_WINDOW_SECONDS),
         scannerVersion = scannerVersion,
         categoryID = categoryID,
     )
