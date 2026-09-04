@@ -305,6 +305,22 @@ builder.Services.AddSingleton<INarrationMeasurementStore>(services =>
 // explain audio a listener already has and stay meaningful after the feature is switched off.
 builder.Services.AddSingleton<INarrationRenderStore>(services =>
     new FileNarrationRenderStore(services.GetRequiredService<AudioChoiceDataPaths>()));
+// Registered unconditionally for the same reason as the two stores above, but for a sharper
+// failure mode: every route handler that takes this as a parameter -- /v1/narration/voices
+// among them -- is still mapped when narration is off, since MapGet runs regardless of any
+// runtime flag. Minimal APIs validate parameter binding for every mapped route at startup, so
+// leaving this registration inside the narration conditional did not disable those routes; it
+// broke every route in the app, because ASP.NET could not resolve this as a service, tried to
+// infer it as a request body instead, collided with another inferred parameter, and threw
+// while building the route table itself -- before the first request, and before the flag check
+// already written inside each of those handlers ever got to run.
+builder.Services.AddSingleton<INarrationAgreementStore>(services =>
+    new FileNarrationAgreementStore(services.GetRequiredService<AudioChoiceDataPaths>()));
+// Same reasoning and the same failure mode: NarrationChapterJobs is bound directly as a route
+// parameter (/v1/narration/chapters and its status route), so it has to be resolvable at
+// startup regardless of whether synthesis is enabled. It holds nothing but an in-memory
+// dictionary, so there is no cost to keeping it registered when the feature is off.
+builder.Services.AddSingleton<NarrationChapterJobs>();
 builder.Services.AddSingleton<IEditionAliasStore>(services =>
     new FileEditionAliasStore(services.GetRequiredService<AudioChoiceDataPaths>()));
 // Looked up only for books whose own file carries no description. A short timeout because a
@@ -468,9 +484,6 @@ if (narrationOptions.TextScanEnabled || narrationOptions.SynthesisEnabled)
     // control flow.
     builder.Services.AddSingleton<ISynthesisProvider>(services =>
         services.GetRequiredService<PollySynthesisProvider>());
-    builder.Services.AddSingleton<NarrationChapterJobs>();
-    builder.Services.AddSingleton<INarrationAgreementStore>(services =>
-        new FileNarrationAgreementStore(services.GetRequiredService<AudioChoiceDataPaths>()));
     builder.Services.AddSingleton(services => new SynthesisRouter(
         primary: services.GetRequiredService<PollySynthesisProvider>(),
         fallback: services.GetRequiredService<PollySynthesisProvider>(),
