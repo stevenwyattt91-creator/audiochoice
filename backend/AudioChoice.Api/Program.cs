@@ -180,12 +180,14 @@ if (databaseOptions.Enabled)
 #if POSTGRES
     builder.Services.AddSingleton<IUserDataStore, PostgresUserDataStore>();
     builder.Services.AddSingleton<IInternalAuditStore, PostgresInternalAuditStore>();
+    builder.Services.AddSingleton<IEditionReferenceStore, PostgresEditionReferenceStore>();
 #endif
 }
 else
 {
     builder.Services.AddSingleton<IUserDataStore, FileUserDataStore>();
     builder.Services.AddSingleton<IInternalAuditStore, DisabledInternalAuditStore>();
+    builder.Services.AddSingleton<IEditionReferenceStore, UnavailableEditionReferenceStore>();
 }
 builder.Services.AddSingleton(externalAuthOptions);
 if (databaseOptions.Enabled)
@@ -1282,6 +1284,36 @@ app.MapGet("/v1/admin/editions", async (
         editions.Add(new AdminEditionInfo(fingerprint, segmentCount > 0, segmentCount));
     }
     return Results.Ok(editions);
+});
+
+// What still names an edition, so a delete can be judged safe (or refused) before it is
+// attempted rather than by reading a failed constraint's error text. Counts only -- this
+// never returns which listener a library row belongs to, just whether one exists.
+//
+// Read-only, changes nothing. Every table it counts lacks an on delete cascade back to
+// audiobook_editions, so a plain delete already fails loudly rather than orphaning a real
+// listener's library row; this exists so that can be known in advance instead of by trying.
+app.MapGet("/v1/admin/editions/references", (
+    HttpContext context,
+    IEditionReferenceStore references,
+    string? sha256,
+    int? fingerprintVersion,
+    long? fileSize) =>
+{
+    if (!IsConfiguredApiToken(context, app.Configuration)) return Results.Unauthorized();
+
+    if (string.IsNullOrWhiteSpace(sha256) || fingerprintVersion is null || fileSize is null)
+    {
+        return Results.BadRequest(new
+        {
+            error = "sha256, fingerprintVersion and fileSize are all required to identify an edition."
+        });
+    }
+
+    var counts = references.CountReferences(new BookFingerprint(
+        fingerprintVersion.Value, sha256, fileSize.Value,
+        null, string.Empty, null, null, null, null, null, null, null));
+    return counts is null ? Results.NotFound() : Results.Ok(counts);
 });
 
 /// Copies a scan result from one edition to another, for the case FindResult's own alias
