@@ -52,13 +52,23 @@ public interface IEditionReferenceStore
     /// whatever <see cref="CountReferences"/> returned a moment earlier to whoever is calling
     /// this. A library row is never deleted by this or anything it touches; if one still
     /// exists this refuses outright rather than removing an edition out from under it.
+    ///
+    /// <paramref name="discardActiveAuditWork"/> is a second, separate override from the
+    /// caller's own irreversibility confirmation: it exists for the one case an operator may
+    /// knowingly choose to discard a real auditor's in-progress, uncompensated claim on a
+    /// fingerprint being retired as a duplicate, and defaults to false so the ordinary path
+    /// still refuses outright. Never bypasses the library-row check -- that one has no
+    /// override, on either endpoint, because it is a listener's own data rather than
+    /// compensable work an operator can choose to write off.
     /// </remarks>
-    EditionDeleteResult DeleteEdition(BookFingerprint fingerprint);
+    EditionDeleteResult DeleteEdition(BookFingerprint fingerprint, bool discardActiveAuditWork = false);
 }
 
 public enum EditionDeleteOutcome
 {
     Deleted,
+    /// <summary>Deleted with a real auditor's active or unpaid claim knowingly discarded.</summary>
+    DeletedDiscardingAuditWork,
     NotFound,
     RefusedLibraryBooksPresent,
     RefusedPaidOrActiveAuditWork
@@ -111,7 +121,7 @@ public sealed class UnavailableEditionReferenceStore : IEditionReferenceStore
     public EditionReferenceCounts? CountReferences(BookFingerprint fingerprint) => null;
     public EditionRepointResult? RepointLibraryBooks(BookFingerprint source, BookFingerprint destination) => null;
     public IReadOnlyList<EditionAuditAssignmentSummary>? ListAuditAssignments(BookFingerprint fingerprint) => null;
-    public EditionDeleteResult DeleteEdition(BookFingerprint fingerprint) =>
+    public EditionDeleteResult DeleteEdition(BookFingerprint fingerprint, bool discardActiveAuditWork = false) =>
         new(EditionDeleteOutcome.NotFound);
 }
 
