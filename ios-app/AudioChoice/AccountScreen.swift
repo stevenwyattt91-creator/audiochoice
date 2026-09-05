@@ -18,6 +18,10 @@ struct AccountScreen: View {
     @State private var resettingPassword = false
     @State private var working = false
     @State private var errorMessage: String?
+    /// Optional. Never blocks account creation -- see the debounced check in `checkReferralCode`.
+    @State private var referralCode = ""
+    @State private var referralCodeValid: Bool?
+    @State private var referralCheckTask: Task<Void, Never>?
 
     var body: some View {
         Form {
@@ -68,6 +72,17 @@ struct AccountScreen: View {
                             Text("Those passwords do not match.")
                                 .font(.caption)
                                 .foregroundStyle(.orange)
+                        }
+                        TextField("Referral code (optional)", text: $referralCode)
+                            .textInputAutocapitalization(.characters)
+                            .autocorrectionDisabled()
+                            .onChange(of: referralCode) { _, newValue in checkReferralCode(newValue) }
+                        if !referralCode.isEmpty, let referralCodeValid {
+                            Text(referralCodeValid
+                                ? "Referral code accepted."
+                                : "That code was not recognized, but you can still create your account.")
+                                .font(.caption)
+                                .foregroundStyle(referralCodeValid ? ACTheme.accent : ACTheme.secondaryText)
                         }
                     }
                     Button(creatingAccount ? "Create Account" : "Sign In") {
@@ -145,10 +160,28 @@ struct AccountScreen: View {
         do {
             let client = try AuthenticationClient()
             let response = creatingAccount
-                ? try await client.register(email: email, password: password)
+                ? try await client.register(email: email, password: password, referralCode: referralCode)
                 : try await client.login(email: email, password: password)
             session.accept(response)
         } catch { errorMessage = error.localizedDescription }
+    }
+
+    /// Debounced rather than checked on every keystroke, and never blocks the Create Account button
+    /// either way: this is purely informational, since the server itself never rejects a signup over
+    /// an unknown code.
+    private func checkReferralCode(_ code: String) {
+        referralCheckTask?.cancel()
+        guard !code.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            referralCodeValid = nil
+            return
+        }
+        referralCheckTask = Task {
+            try? await Task.sleep(nanoseconds: 500_000_000)
+            guard !Task.isCancelled else { return }
+            let result = try? await AuthenticationClient().checkReferralCode(code)
+            guard !Task.isCancelled else { return }
+            referralCodeValid = result?.valid
+        }
     }
 
     private func handleApple(_ result: Result<ASAuthorization, Error>) async {

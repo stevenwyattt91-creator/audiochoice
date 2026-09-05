@@ -119,6 +119,21 @@ struct CloudScanClient {
         try await post(value, path: "v1/scans/requests")
     }
 
+    func accountAccess() async throws -> AccountAccessResponse {
+        try await get(path: "v1/account/access")
+    }
+
+    /// Submits a StoreKit2 transaction's signed JWS for server-side verification. The server
+    /// decodes the product and expiry from Apple's own payload -- nothing about the purchase is
+    /// trusted from the client beyond "here is a token, please check it."
+    func submitAppleTransaction(signedTransactionInfo: String) async throws -> AccountAccessResponse {
+        try await post(
+            AppleTransactionSubmission(signedTransactionInfo: signedTransactionInfo),
+            path: "v1/purchases/apple")
+    }
+
+    private struct AppleTransactionSubmission: Encodable { let signedTransactionInfo: String }
+
     func authorizeUpload(_ value: CloudUploadAuthorizationRequest) async throws -> CloudUploadAuthorizationResponse {
         try await post(value, path: "v1/uploads/authorizations")
     }

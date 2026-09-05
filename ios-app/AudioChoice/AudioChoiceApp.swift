@@ -12,6 +12,12 @@ struct AudioChoiceApp: App {
         // Runs before any screen can read the lock, so a PIN set by an earlier build keeps
         // working and its plaintext copy stops existing.
         ParentalPinStore.migrateLegacyPinIfNeeded()
+
+        // Forces PurchaseManager's lazy singleton to initialize now, starting its
+        // Transaction.updates listener for the app's whole lifetime rather than only once the
+        // Premium screen happens to be opened -- a renewal, refund, or a purchase made on
+        // another device can arrive at any time.
+        _ = PurchaseManager.shared
     }
 
     var body: some Scene {

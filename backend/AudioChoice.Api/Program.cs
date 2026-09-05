@@ -30,6 +30,12 @@ var narrationOptions = builder.Configuration
     .GetSection("AudioChoice:Narration")
     .Get<NarrationOptions>() ?? new NarrationOptions();
 builder.Services.AddSingleton(narrationOptions);
+var purchaseOptions = builder.Configuration
+    .GetSection("AudioChoice:Purchases")
+    .Get<PurchaseOptions>() ?? new PurchaseOptions();
+builder.Services.AddSingleton(purchaseOptions);
+builder.Services.AddHttpClient<GooglePlayClient>();
+builder.Services.AddSingleton<PurchaseVerifier>();
 // Fatal on purpose. Narration synthesis sharing the transcription GPU would slow every
 // audiobook scan, and it would look like load rather than like a misconfiguration, so refusing
 // to start is the only failure mode that cannot be ignored.
@@ -153,6 +159,7 @@ if (databaseOptions.Enabled)
     builder.Services.AddSingleton<IAccountStore, PostgresAccountStore>();
     builder.Services.AddSingleton<IEntitlementStore, PostgresEntitlementStore>();
     builder.Services.AddSingleton<ICompanionTransferStore, PostgresCompanionTransferStore>();
+    builder.Services.AddSingleton<IAffiliateStore, PostgresAffiliateStore>();
 #endif
 }
 else
@@ -163,6 +170,8 @@ else
         new FileEntitlementStore(dataPaths));
     builder.Services.AddSingleton<ICompanionTransferStore>(
         new FileCompanionTransferStore(dataPaths));
+    builder.Services.AddSingleton<IAffiliateStore>(
+        new FileAffiliateStore(dataPaths));
 }
 if (databaseOptions.Enabled)
 {
@@ -250,6 +259,17 @@ builder.Services.AddRateLimiter(options =>
             {
                 PermitLimit = 5,
                 Window = TimeSpan.FromMinutes(10),
+                QueueLimit = 0
+            }));
+    // Codes are eight random characters, so guessing one outright is not a realistic risk. This
+    // limits how fast the sign-up screen's "Apply" button can be hammered, nothing more.
+    options.AddPolicy("referral-check", context =>
+        RateLimitPartition.GetFixedWindowLimiter(
+            context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+            _ => new FixedWindowRateLimiterOptions
+            {
+                PermitLimit = 20,
+                Window = TimeSpan.FromMinutes(1),
                 QueueLimit = 0
             }));
 });
@@ -552,7 +572,10 @@ app.Use(async (context, next) =>
         path == "/v1/auth/verify-email" ||
         path == "/v1/auth/password-reset/request" ||
         path == "/v1/auth/password-reset/confirm" ||
-        path == "/v1/auth/external";
+        path == "/v1/auth/external" ||
+        path == "/v1/referrals/check" ||
+        path == "/v1/purchases/apple/notifications" ||
+        path == "/v1/purchases/google/notifications";
 
     if (context.Request.Path == "/health" ||
         anonymousAuthenticationPath ||
@@ -596,6 +619,7 @@ app.MapGet("/health", () => Results.Ok(new { status = "ok" }));
 app.MapPost("/v1/auth/register", async (
     RegisterRequest request,
     IAccountStore accounts,
+    IAffiliateStore affiliates,
     ITransactionalEmailSender emailSender,
     CancellationToken cancellationToken) =>
 {
@@ -606,6 +630,26 @@ app.MapPost("/v1/auth/register", async (
         {
             error = "Use a valid email and a password of at least 12 characters. The email may already be registered."
         });
+    }
+
+    // Best-effort and after the account exists: an unknown or mistyped referral code must never be
+    // the reason a signup fails, and CodeIsValid is not checked first because that would be a second
+    // silent failure mode -- the code either attributes or it quietly does not, with nothing about
+    // account creation depending on it either way.
+    if (!string.IsNullOrWhiteSpace(request.ReferralCode))
+    {
+        try
+        {
+            affiliates.Attribute(
+                registration.Response.User.ID,
+                request.ReferralCode,
+                registration.Response.User.Email,
+                registration.Response.User.DisplayName);
+        }
+        catch (Exception error)
+        {
+            app.Logger.LogError(error, "Registration succeeded but referral attribution failed.");
+        }
     }
 
     // Off by default. Nothing requires a verified address -- sign-in does not check it -- so the
@@ -827,6 +871,162 @@ app.MapPost("/v1/admin/founders", (
         ExpiresAt: null,
         ExternalReference: null));
     return Results.Ok(granted);
+});
+
+// Public and unauthenticated, like /v1/faq just above: a listener typing a referral code has not
+// signed in yet, and the sign-up screen needs to say whether it was accepted before the account is
+// created. Answers only true/false -- nothing here identifies which affiliate a code belongs to.
+app.MapGet("/v1/referrals/check", (string code, IAffiliateStore affiliates) =>
+    Results.Ok(new ReferralCodeCheck(affiliates.CodeIsValid(code))))
+    .RequireRateLimiting("referral-check");
+
+app.MapGet("/v1/internal/admin/affiliates", (HttpContext context, IInternalAuditStore audits, IAffiliateStore affiliates) =>
+{
+    var access = InternalAccessFor(context, audits);
+    return access?.Role == "admin" ? Results.Ok(affiliates.List()) : Results.Forbid();
+});
+
+app.MapGet("/v1/internal/admin/affiliates/{affiliateID:guid}", (Guid affiliateID, HttpContext context, IInternalAuditStore audits, IAffiliateStore affiliates) =>
+{
+    var access = InternalAccessFor(context, audits);
+    if (access?.Role != "admin") return Results.Forbid();
+    var detail = affiliates.Detail(affiliateID);
+    return detail is null ? Results.NotFound() : Results.Ok(detail);
+});
+
+app.MapPost("/v1/internal/admin/affiliates", (CreateAffiliateRequest request, HttpContext context, IInternalAuditStore audits, IAffiliateStore affiliates) =>
+{
+    var access = InternalAccessFor(context, audits);
+    if (access?.Role != "admin") return Results.Forbid();
+    try { return Results.Ok(affiliates.Create(request)); }
+    catch (ArgumentException error) { return Results.BadRequest(new { error = error.Message }); }
+});
+
+app.MapPut("/v1/internal/admin/affiliates/{affiliateID:guid}/active", (Guid affiliateID, AffiliateActiveRequest request, HttpContext context, IInternalAuditStore audits, IAffiliateStore affiliates) =>
+{
+    var access = InternalAccessFor(context, audits);
+    if (access?.Role != "admin") return Results.Forbid();
+    return affiliates.SetActive(affiliateID, request.Active) ? Results.NoContent() : Results.NotFound();
+});
+
+app.MapPost("/v1/purchases/apple", async (
+    AppleTransactionRequest request,
+    HttpContext context,
+    PurchaseVerifier verifier,
+    CancellationToken cancellationToken) =>
+{
+    var user = CurrentUser(context);
+    if (user is null) return Results.Unauthorized();
+    var result = await verifier.VerifyApple(user.ID, request, cancellationToken);
+    return result.Verified ? Results.Ok(result.Access) : Results.BadRequest(new { error = result.Error });
+});
+
+app.MapPost("/v1/purchases/google", async (
+    GooglePurchaseRequest request,
+    HttpContext context,
+    PurchaseVerifier verifier,
+    CancellationToken cancellationToken) =>
+{
+    var user = CurrentUser(context);
+    if (user is null) return Results.Unauthorized();
+    var result = await verifier.VerifyGoogle(user.ID, request, cancellationToken);
+    return result.Verified ? Results.Ok(result.Access) : Results.BadRequest(new { error = result.Error });
+});
+
+// Apple calls this directly -- no AudioChoice session exists on this request, so it is exempt from
+// the standard bearer-token middleware below (added to anonymousAuthenticationPath) and instead
+// checks its own shared secret plus the payload's own signature.
+app.MapPost("/v1/purchases/apple/notifications", async (
+    HttpContext context,
+    PurchaseOptions purchaseOptions,
+    IEntitlementStore entitlements,
+    ILogger<Program> logger) =>
+{
+    if (string.IsNullOrEmpty(purchaseOptions.AppleNotificationToken) ||
+        context.Request.Query["token"] != purchaseOptions.AppleNotificationToken)
+    {
+        return Results.Unauthorized();
+    }
+
+    using var reader = new StreamReader(context.Request.Body);
+    var body = await reader.ReadToEndAsync();
+    AppleServerNotification? envelope;
+    try { envelope = JsonSerializer.Deserialize<AppleServerNotification>(body); }
+    catch (JsonException) { return Results.BadRequest(); }
+
+    using var payload = AppleJWS.VerifyAndDecode(envelope?.SignedPayload);
+    if (payload is null)
+    {
+        logger.LogWarning("Rejected an Apple server notification whose signature did not verify.");
+        return Results.Ok(); // Acknowledged regardless, so Apple does not retry a forged payload forever.
+    }
+
+    var notification = JsonSerializer.Deserialize<AppleNotificationPayload>(payload.RootElement.GetRawText());
+    var signedTransaction = notification?.Data?.SignedTransactionInfo;
+    using var transactionPayload = AppleJWS.VerifyAndDecode(signedTransaction);
+    if (transactionPayload is null) return Results.Ok();
+
+    var transaction = JsonSerializer.Deserialize<AppleNotificationTransaction>(transactionPayload.RootElement.GetRawText());
+    if (transaction?.OriginalTransactionID is null) return Results.Ok();
+
+    // REFUND and other revocation-style notifications end access immediately; everything else
+    // (renewal, plan change, etc.) is handled the next time the client calls /v1/purchases/apple,
+    // which re-derives the correct expiry from Apple directly rather than trying to interpret every
+    // notification type here.
+    if (notification?.NotificationType is "REFUND" or "REVOKE" or "CONSUMPTION_REQUEST")
+    {
+        entitlements.Revoke("apple", transaction.OriginalTransactionID);
+    }
+    return Results.Ok();
+});
+
+// Google calls this directly via its Pub/Sub push subscription -- no AudioChoice session exists on
+// this request, checked with the same query-string shared-secret pattern as the Apple notification
+// endpoint above.
+//
+// Scope note: this only ever revokes early (a refund, cancellation, or expiry Google reports before
+// this server would otherwise notice), never grants. Granting requires knowing which AudioChoice
+// user id the purchase belongs to, and a Real-time Developer Notification carries only Google's own
+// purchase token -- not that mapping. A renewal is instead picked up the ordinary way: the client
+// calls /v1/purchases/google again (or /v1/account/access, refreshed periodically by
+// NarrationTierStore) and this server re-derives the correct expiry from Google directly.
+app.MapPost("/v1/purchases/google/notifications", async (
+    HttpContext context,
+    PurchaseOptions purchaseOptions,
+    IEntitlementStore entitlements,
+    GooglePlayClient googlePlay,
+    ILogger<Program> logger,
+    CancellationToken cancellationToken) =>
+{
+    if (string.IsNullOrEmpty(purchaseOptions.GoogleNotificationToken) ||
+        context.Request.Query["token"] != purchaseOptions.GoogleNotificationToken)
+    {
+        return Results.Unauthorized();
+    }
+
+    using var reader = new StreamReader(context.Request.Body);
+    var body = await reader.ReadToEndAsync(cancellationToken);
+    GooglePubSubEnvelope? envelope;
+    try { envelope = JsonSerializer.Deserialize<GooglePubSubEnvelope>(body); }
+    catch (JsonException) { return Results.Ok(); }
+
+    var encoded = envelope?.Message?.Data;
+    if (string.IsNullOrWhiteSpace(encoded)) return Results.Ok();
+
+    GoogleRealtimeNotification? notification;
+    try { notification = JsonSerializer.Deserialize<GoogleRealtimeNotification>(Convert.FromBase64String(encoded)); }
+    catch (Exception error) when (error is FormatException or JsonException) { return Results.Ok(); }
+
+    var purchaseToken = notification?.SubscriptionNotification?.PurchaseToken;
+    if (string.IsNullOrWhiteSpace(purchaseToken)) return Results.Ok();
+
+    var subscription = await googlePlay.GetSubscription(purchaseToken, cancellationToken);
+    if (subscription is null || subscription.OrderID is null) return Results.Ok();
+
+    var stillGrantable = subscription.State is "SUBSCRIPTION_STATE_ACTIVE" or "SUBSCRIPTION_STATE_IN_GRACE_PERIOD" &&
+        subscription.ExpiresAt > DateTimeOffset.UtcNow;
+    if (!stillGrantable) entitlements.Revoke("google", subscription.OrderID);
+    return Results.Ok();
 });
 
 app.MapPost("/v1/companion/transfers", async (

@@ -49,6 +49,14 @@ class AudioChoiceApi(private val json: Json) {
     suspend fun register(request: RegisterRequest): AuthResponse = post("/v1/auth/register", request)
     suspend fun login(request: LoginRequest): AuthResponse = post("/v1/auth/login", request)
 
+    /** Whether a referral code is currently accepted, checked before an account is created. */
+    suspend fun checkReferralCode(code: String): ReferralCodeCheck = request(
+        "GET",
+        appendQuery("/v1/referrals/check", "code=${URLEncoder.encode(code, Charsets.UTF_8.name())}"),
+        null,
+        null,
+    )
+
     /**
      * Asks for a reset code to be emailed.
      *
@@ -288,6 +296,15 @@ class AudioChoiceApi(private val json: Json) {
 
     suspend fun accountAccess(accessToken: String): AccountAccessResponse =
         request("GET", "/v1/account/access", null, accessToken)
+
+    /**
+     * Submits an acknowledged Play Billing purchase for server-side verification.
+     *
+     * The server looks the token up against the Play Developer API -- Google's own record of the
+     * purchase -- rather than trusting anything claimed here.
+     */
+    suspend fun submitGooglePurchase(accessToken: String, request: GooglePurchaseRequest): AccountAccessResponse =
+        post("/v1/purchases/google", request, accessToken)
 
     /** Voices the server offers, with the premium synthesis agreement. */
     suspend fun narrationVoices(accessToken: String): NarrationVoicesResponse =

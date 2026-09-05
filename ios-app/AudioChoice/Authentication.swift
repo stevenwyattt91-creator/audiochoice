@@ -14,6 +14,15 @@ struct AuthResponse: Codable {
     let user: AuthUser
 }
 
+/// Whether a referral code names an active affiliate, checked from the sign-up screen before an
+/// account is created.
+///
+/// Deliberately thin -- true or false only. Nothing here identifies which affiliate a code belongs
+/// to, so entering a stranger's code cannot be used to learn anything about them.
+struct ReferralCodeCheck: Codable {
+    let valid: Bool
+}
+
 enum AuthenticationError: LocalizedError {
     case missingServer
     case rejected(String)
@@ -53,8 +62,27 @@ struct AuthenticationClient {
     ///
     /// No display name is sent. The server treats it as optional and derives one from the address, so
     /// sending an empty string would store a blank name where a derived one is better.
-    func register(email: String, password: String) async throws -> AuthResponse {
-        try await post(["email": email, "password": password], path: "v1/auth/register")
+    ///
+    /// An unknown or mistyped referral code is never rejected here or on the server -- it attributes
+    /// what it can and otherwise silently ignores it, so a typo in an optional field is never the
+    /// reason an account fails to create.
+    func register(email: String, password: String, referralCode: String = "") async throws -> AuthResponse {
+        let trimmedCode = referralCode.trimmingCharacters(in: .whitespacesAndNewlines)
+        var fields: [String: String] = ["email": email, "password": password]
+        if !trimmedCode.isEmpty { fields["referralCode"] = trimmedCode }
+        return try await post(fields, path: "v1/auth/register")
+    }
+
+    /// Whether a referral code is currently accepted, checked before an account is created.
+    func checkReferralCode(_ code: String) async throws -> ReferralCodeCheck {
+        var request = URLRequest(url: url(for: "v1/referrals/check")
+            .appending(queryItems: [URLQueryItem(name: "code", value: code)]))
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+            return ReferralCodeCheck(valid: false)
+        }
+        return (try? JSONDecoder().decode(ReferralCodeCheck.self, from: data)) ?? ReferralCodeCheck(valid: false)
     }
 
     /// Asks for a reset code to be emailed.

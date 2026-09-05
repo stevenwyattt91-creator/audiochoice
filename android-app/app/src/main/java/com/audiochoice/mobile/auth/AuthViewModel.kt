@@ -54,11 +54,15 @@ class AuthViewModel(
 
     fun login(email: String, password: String) = authenticate { api.login(LoginRequest(email.trim(), password)) }
 
-    fun register(email: String, password: String) = authenticate {
+    fun register(email: String, password: String, referralCode: String = "") = authenticate {
         require(password.length >= 12) { "Use at least 12 characters for your password." }
         // No display name is sent. The server treats it as optional and derives one from the
         // address, so sending a blank would store a blank where a derived name is better.
-        api.register(RegisterRequest(email.trim(), password))
+        //
+        // An unknown or mistyped referral code is never rejected here -- the server attributes what
+        // it can and otherwise silently ignores it, so a typo in an optional field is never the
+        // reason an account fails to create.
+        api.register(RegisterRequest(email.trim(), password, referralCode = referralCode.trim().ifBlank { null }))
     }
 
     fun googleSignIn() = authenticate { api.googleSignIn(google.requestIdToken()) }

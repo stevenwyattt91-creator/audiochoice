@@ -1,6 +1,6 @@
 namespace AudioChoice.Api.Contracts;
 
-public sealed record RegisterRequest(string Email, string Password, string? DisplayName);
+public sealed record RegisterRequest(string Email, string Password, string? DisplayName, string? ReferralCode = null);
 public sealed record LoginRequest(string Email, string Password);
 public sealed record PasswordResetRequest(string Email);
 public sealed record PasswordResetConfirmRequest(string Token, string NewPassword);

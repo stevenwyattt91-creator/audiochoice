@@ -177,6 +177,7 @@ dependencies {
     implementation(libs.androidx.media3.ui)
     implementation(libs.androidx.work.runtime.ktx)
     implementation(libs.androidx.documentfile)
+    implementation(libs.billing.ktx)
     testImplementation(libs.junit)
     testImplementation(libs.kotlinx.coroutines.test)
     // Several narration requirements are stated as properties over all inputs
