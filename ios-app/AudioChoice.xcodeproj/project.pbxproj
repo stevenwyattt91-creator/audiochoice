@@ -198,7 +198,7 @@
 				GOOGLE_IOS_CLIENT_ID = "105248861745-hikuiqttbh10okeksf972rk5osdf4d0c.apps.googleusercontent.com";
 				GOOGLE_REVERSED_CLIENT_ID = "com.googleusercontent.apps.105248861745-hikuiqttbh10okeksf972rk5osdf4d0c";
 				INFOPLIST_FILE = AudioChoice/AppInfo.plist;
-				INFOPLIST_KEY_CFBundleDisplayName = "AudioChoice Beta";
+				INFOPLIST_KEY_CFBundleDisplayName = AudioChoice;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.books";
 				INFOPLIST_KEY_NSAppTransportSecurity_NSAllowsLocalNetworking = YES;
 				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "AudioChoice connects to your private scan server on your local network.";
@@ -230,7 +230,7 @@
 				GOOGLE_IOS_CLIENT_ID = "105248861745-hikuiqttbh10okeksf972rk5osdf4d0c.apps.googleusercontent.com";
 				GOOGLE_REVERSED_CLIENT_ID = "com.googleusercontent.apps.105248861745-hikuiqttbh10okeksf972rk5osdf4d0c";
 				INFOPLIST_FILE = AudioChoice/AppInfo.plist;
-				INFOPLIST_KEY_CFBundleDisplayName = "AudioChoice Beta";
+				INFOPLIST_KEY_CFBundleDisplayName = AudioChoice;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.books";
 				INFOPLIST_KEY_NSAppTransportSecurity_NSAllowsLocalNetworking = YES;
 				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "AudioChoice connects to your private scan server on your local network.";

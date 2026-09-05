@@ -71,12 +71,6 @@ struct ProfileScreen: View {
                     Divider().overlay(ACTheme.secondaryText.opacity(0.25))
                     profileLink("Support", "Send a message to the AudioChoice team", "headphones", SupportFormScreen())
                 } }
-                Text("Feedback").font(.title3.bold()).foregroundStyle(ACTheme.secondaryText)
-                ACCard { VStack(spacing: 0) {
-                    profileLink("Open Discord Community", "Join the AudioChoice beta community", "message", BetaFeedbackScreen(destination: .discord))
-                    Divider().overlay(ACTheme.secondaryText.opacity(0.25))
-                    profileLink("Submit Feedback", "Report filter timing, playback, or app issues", "square.and.pencil", BetaFeedbackScreen(destination: .feedback))
-                } }
                 NavigationLink { CloudConnectionScreen() } label: { Label("Cloud connection", systemImage: "network").font(.footnote).foregroundStyle(ACTheme.secondaryText) }
                 .padding(.horizontal, 8)
             }.padding().padding(.bottom, 24)
