@@ -290,13 +290,6 @@ class AudioChoiceApi(private val json: Json) {
         post("/v1/scans/requests", CloudScanRequest(fingerprint, signature = signature), accessToken, scanChannel())
 
     /**
-     * What this account is entitled to.
-     *
-     * A GET, so the shared retry in [request] already covers a flaky connection. That is why
-     * the narration tier store adds none of its own: a failure here is answered by the grace
-     * period, not by asking again immediately.
-     */
-    /**
      * The served help content.
      *
      * Unauthenticated, because the help screen has to work before a listener can sign in as much as
@@ -315,47 +308,6 @@ class AudioChoiceApi(private val json: Json) {
      */
     suspend fun submitGooglePurchase(accessToken: String, request: GooglePurchaseRequest): AccountAccessResponse =
         post("/v1/purchases/google", request, accessToken)
-
-    /** Voices the server offers, with the premium synthesis agreement. */
-    suspend fun narrationVoices(accessToken: String): NarrationVoicesResponse =
-        request("GET", "/v1/narration/voices", null, accessToken)
-
-    /** Records the listener's acceptance of the premium synthesis agreement. */
-    suspend fun acceptNarrationAgreement(
-        accessToken: String,
-        request: NarrationAcknowledgementRequest,
-    ): NarrationAcknowledgementResponse =
-        post("/v1/narration/acknowledgements", request, accessToken)
-
-    /**
-     * Submits one chapter for premium synthesis.
-     *
-     * Returns immediately with a job to poll. A chapter can hold twenty thousand characters, which
-     * is minutes of work, so holding an HTTP request open for it would exceed every sensible
-     * timeout on the way.
-     */
-    suspend fun submitNarrationChapter(
-        accessToken: String,
-        request: NarrationChapterRequest,
-    ): NarrationChapterAccepted =
-        post("/v1/narration/chapters", request, accessToken)
-
-    /** Polls one chapter job. Carries the audio once it is finished. */
-    suspend fun narrationChapter(accessToken: String, jobID: String): NarrationChapterStatus =
-        request("GET", "/v1/narration/chapters/$jobID", null, accessToken)
-
-    /**
-     * Asks the server to find filterable content in an EPUB's text.
-     *
-     * Reaches the network at most once per book: the caller reuses a stored scan while the
-     * text is unchanged. Not retried here, in line with every other POST on this class --
-     * the retry that this endpoint does need is in `TextScanClient`, where it can tell a
-     * timeout worth repeating from a refusal that never will be.
-     */
-    suspend fun narrationTextScan(
-        accessToken: String,
-        request: NarrationTextScanRequest,
-    ): NarrationTextScanResponse = post("/v1/narration/text-scans", request, accessToken)
 
     suspend fun createReaderAlignment(
         accessToken: String,

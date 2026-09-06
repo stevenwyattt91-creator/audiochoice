@@ -20,15 +20,6 @@ data class LibraryUiState(
     val exploreBooks: List<ExploreCatalogBook> = emptyList(),
     val coverPaths: Map<String, String> = emptyMap(),
     /**
-     * Ebooks with no filter results, by lowercase sha256.
-     *
-     * Surfaced in the list because a book that cannot be filtered is a book the listener has a
-     * decision to make about, and finding that out only after opening it and pressing Read aloud
-     * wastes the trip. Excludes books whose owner already chose to continue without results: they
-     * have made the decision, and repeating it reads as nagging.
-     */
-    val ebooksWithoutFilterResults: Set<String> = emptySet(),
-    /**
      * The account's plan, or null before it is known.
      *
      * Loaded here because this is the one place that already runs on sign-in with the account's
@@ -101,40 +92,10 @@ class LibraryViewModel(
 
     fun delete(accessToken: String, book: LibraryBook, onComplete: () -> Unit = {}) {
         viewModelScope.launch {
-            // A narrated book is held on the device, so deleting one has to remove its narration
-            // directory too. Without this its local library row survives the deletion and the next
-            // refresh puts the book back on the shelf, which reads as a deletion that did not work.
-            val narrated = com.audiochoice.mobile.narration.NarrationConfig.enabled &&
-                com.audiochoice.mobile.library.LibraryShelves.shelfFor(book) ==
-                com.audiochoice.mobile.library.LibraryShelf.EBOOKS
-
-            if (!narrated) {
-                // Unchanged for an audiobook, which is every book in a beta or release build.
-                runCatching {
-                    api.deleteBook(accessToken, book.id)
-                    localAudio.remove(book.fingerprint.sha256)
-                }.onSuccess {
-                    mutableState.value = mutableState.value.copy(
-                        books = mutableState.value.books.filterNot { it.id == book.id },
-                    )
-                    onComplete()
-                }.onFailure { error ->
-                    mutableState.value = mutableState.value.copy(error = error.message)
-                }
-                return@launch
-            }
-
-            // The device is the authority for a narrated book, in deletion as in import. The server
-            // is told, but its answer cannot decide the outcome: a book that never registered has an
-            // identifier the server has never seen, so requiring the call to succeed would make
-            // exactly those books impossible to delete.
-            runCatching { api.deleteBook(accessToken, book.id) }
-            val removed = runCatching {
+            runCatching {
+                api.deleteBook(accessToken, book.id)
                 localAudio.remove(book.fingerprint.sha256)
-                com.audiochoice.mobile.narration.NarrationStore(context.filesDir)
-                    .deleteBook(book.fingerprint.sha256)
-            }
-            removed.onSuccess {
+            }.onSuccess {
                 mutableState.value = mutableState.value.copy(
                     books = mutableState.value.books.filterNot { it.id == book.id },
                 )
@@ -150,7 +111,7 @@ class LibraryViewModel(
         loadedForToken = accessToken
         viewModelScope.launch {
             mutableState.value = mutableState.value.copy(loading = true, error = null)
-            val cachedBooks = withNarratedBooks(localAudio.librarySnapshot(accountID))
+            val cachedBooks = localAudio.librarySnapshot(accountID)
             if (cachedBooks.isNotEmpty()) {
                 mutableState.value = mutableState.value.copy(
                     loading = true,
@@ -238,10 +199,7 @@ class LibraryViewModel(
                     }
                 }
                 localAudio.saveLibrarySnapshot(accountID, enriched)
-                // Narrated books are added after the snapshot is written, not before. The snapshot
-                // mirrors what the server holds; a locally-held book is not part of that and writing
-                // it there would make the two indistinguishable.
-                Triple(withNarratedBooks(enriched), explore, covers.toMap())
+                Triple(enriched, explore, covers.toMap())
             }.onSuccess {
                 mutableState.value = LibraryUiState(
                     loaded = true,
@@ -249,10 +207,6 @@ class LibraryViewModel(
                     exploreBooks = it.second,
                     coverPaths = it.third,
                 )
-                // After the list, not as part of it. A book's filter state is worth showing but not
-                // worth delaying the whole library for, and a failure to read it must leave the
-                // library intact rather than empty.
-                refreshEbookFilterState(it.first)
                 refreshAccountPlan(accessToken)
             }
                 .onFailure {
@@ -266,32 +220,6 @@ class LibraryViewModel(
     }
 
     /**
-     * Adds narrated books the device holds but the server has not returned.
-     *
-     * A narrated book is entirely local -- the file, its extracted text, its rendered audio -- and its
-     * library row is written by the import without needing the network. So the shelf works whether or
-     * not the server knows about the book, which it may not: registration can fail, the row can be
-     * lost, and the narration endpoints are not yet served at all.
-     *
-     * The server's copy wins where both exist. It carries the identifier and the reading position that
-     * sync between a listener's devices, and the local row is a placeholder for exactly as long as the
-     * server has not answered.
-     *
-     * Returns the list untouched outside the experimental build, where narration does not exist and no
-     * narrated book can have been created.
-     */
-    private suspend fun withNarratedBooks(books: List<LibraryBook>): List<LibraryBook> {
-        if (!com.audiochoice.mobile.narration.NarrationConfig.enabled) return books
-        val narrated = runCatching {
-            com.audiochoice.mobile.narration.NarrationStore(context.filesDir).narratedBooks()
-        }.getOrElse { return books }
-        if (narrated.isEmpty()) return books
-
-        val known = books.map { it.fingerprint.sha256.lowercase() }.toSet()
-        return books + narrated.filter { it.fingerprint.sha256.lowercase() !in known }
-    }
-
-    /**
      * Reads the account's plan, for display only.
      *
      * Best-effort and after the library is published: a listener's books must not be withheld because
@@ -301,33 +229,6 @@ class LibraryViewModel(
         viewModelScope.launch {
             val plan = runCatching { api.accountAccess(accessToken).plan }.getOrNull() ?: return@launch
             mutableState.value = mutableState.value.copy(accountPlan = plan)
-        }
-    }
-
-    /**
-     * Reads which ebooks have no filter results yet.
-     *
-     * Only ebooks are examined. An audiobook's filter state already has its own presentation, and
-     * scanning every audiobook's directory for a file that is never there would be work for nothing.
-     */
-    private fun refreshEbookFilterState(books: List<LibraryBook>) {
-        viewModelScope.launch {
-            val store = com.audiochoice.mobile.narration.NarrationStore(context.filesDir)
-            val missing = books
-                .filter {
-                    com.audiochoice.mobile.library.LibraryShelves.shelfFor(it) ==
-                        com.audiochoice.mobile.library.LibraryShelf.EBOOKS
-                }
-                .filter { book ->
-                    val sha = book.fingerprint.sha256
-                    // A stored scan means results exist. Continuing without them is a decision
-                    // already taken, so it is not reported as something outstanding.
-                    store.textScan(sha) == null &&
-                        !localAudio.narrationFlags(sha).continuedWithoutFilterResults
-                }
-                .map { it.fingerprint.sha256.lowercase() }
-                .toSet()
-            mutableState.value = mutableState.value.copy(ebooksWithoutFilterResults = missing)
         }
     }
 

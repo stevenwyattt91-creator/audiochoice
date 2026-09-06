@@ -80,7 +80,7 @@ private struct PaywallScreen: View {
                 ACCard {
                     VStack(alignment: .leading, spacing: 16) {
                         featureRow("checkmark.shield", "Filter sensitive content by category, not all-or-nothing")
-                        featureRow("book", "Follow along with an EPUB while you listen, or have it read aloud")
+                        featureRow("book", "Attach an EPUB to follow along word for word as you listen")
                         featureRow("lock", "Protect your filter choices with a parental PIN")
                         featureRow("iphone", "Your audio stays in private storage on this device")
                     }
