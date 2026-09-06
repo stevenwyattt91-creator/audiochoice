@@ -31,10 +31,10 @@ struct OnboardingScreen: View {
                 + "like."),
         OnboardingPage(
             icon: "book",
-            title: "Read along, or be read to",
-            detail: "Import an EPUB and it lands on the Ebooks shelf, opening in the reader "
-                + "instead of the player. Adjust the text, follow along while it is read aloud, or "
-                + "attach it to an audiobook you already own to read and listen together."),
+            title: "Read along as you listen",
+            detail: "Attach an EPUB to an audiobook you already own, and it lines up word for "
+                + "word with the narration. Filtered passages are hidden from the text too, and "
+                + "turning a filter off brings the words right back."),
     ]
 
     var body: some View {

@@ -14,6 +14,9 @@ struct ReadingEditionScreen: View {
     @State private var showSettings = false
     @State private var narratedIndex: Int?
     @State private var restoredPosition = false
+    /// The paragraph nearest the top of the viewport, tracked continuously so the jump
+    /// button below knows whether the narrated paragraph is already on screen.
+    @State private var topVisibleIndex: Int?
 
     private static let scrollSpace = "readingEditionScroll"
 
@@ -123,9 +126,10 @@ struct ReadingEditionScreen: View {
             }
             .coordinateSpace(name: Self.scrollSpace)
             // Records the paragraph nearest the top edge so the reading place survives
-            // leaving the reader. Only a changed index is persisted, so a scroll does not
-            // write on every frame.
+            // leaving the reader, and tracks it for the jump button's own visibility.
+            // Only a changed index is persisted, so a scroll does not write on every frame.
             .onPreferenceChange(ReaderTopParagraphKey.self) { top in
+                topVisibleIndex = top?.index
                 guard let top, restoredPosition else { return }
                 reader.savePosition(paragraphIndex: top.index, fraction: 0)
             }
@@ -168,15 +172,48 @@ struct ReadingEditionScreen: View {
                 withAnimation(.easeInOut(duration: 0.35)) { proxy.scrollTo(index, anchor: .center) }
             }
             .onChange(of: playback.position) { _, seconds in
-                guard reader.settings.followAudio, !reader.timings.isEmpty else { return }
+                // Tracked unconditionally, not only while follow-audio is on: the jump
+                // button below needs a target even when auto-follow is off, which is
+                // exactly the situation a listener reaches for it in -- they scrolled away
+                // from the audio on purpose and want a way back without re-enabling a
+                // setting that would immediately drag them along again.
+                guard !reader.timings.isEmpty else { return }
                 // A gap in coverage keeps the previous highlight rather than snapping the
                 // reader back to the start of the book.
                 guard let character = ReaderSync.character(at: seconds, in: reader.timings),
                       let index = reader.displayParagraphs.map(\.paragraph).indexOfCharacter(character),
                       index != narratedIndex else { return }
                 narratedIndex = index
-                reader.savePosition(paragraphIndex: index, fraction: 0)
+                if reader.settings.followAudio { reader.savePosition(paragraphIndex: index, fraction: 0) }
             }
+            .overlay(alignment: .bottom) { jumpToListeningButton(proxy: proxy) }
+        }
+    }
+
+    /// Re-triggerable any time, not just once when the reader first opens. A listener who
+    /// scrolled ahead to read, or fell behind while listening with the reader closed, has no
+    /// other way back to the passage currently playing than scrolling by hand -- which for a
+    /// book heard through chapter 30 but last read at chapter 3 means scrolling past
+    /// everything in between. Shown only when there is somewhere to jump to and the reader
+    /// is not already there.
+    @ViewBuilder
+    private func jumpToListeningButton(proxy: ScrollViewProxy) -> some View {
+        if let narratedIndex, narratedIndex != topVisibleIndex {
+            Button {
+                withAnimation(.easeInOut(duration: 0.35)) { proxy.scrollTo(narratedIndex, anchor: .center) }
+            } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: "location.fill")
+                    Text("Jump to where you're listening")
+                }
+                .font(.footnote.weight(.semibold))
+                .padding(.horizontal, 14)
+                .padding(.vertical, 10)
+                .background(ACTheme.accent, in: Capsule())
+                .foregroundStyle(.black)
+            }
+            .padding(.bottom, 12)
+            .transition(.opacity)
         }
     }
 

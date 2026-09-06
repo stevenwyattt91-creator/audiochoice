@@ -1,4 +1,4 @@
-package com.audiochoice.mobile.narration
+package com.audiochoice.mobile.player
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue

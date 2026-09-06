@@ -38,7 +38,6 @@ android {
         buildConfigField("String", "API_BASE_URL", "\"${privateValue("audiochoice.apiBaseUrl")}\"")
         buildConfigField("String", "GOOGLE_SERVER_CLIENT_ID", "\"${privateValue("audiochoice.googleServerClientId")}\"")
         buildConfigField("boolean", "BETA_BUILD", "false")
-        buildConfigField("boolean", "EXPERIMENTAL_BUILD", "false")
         buildConfigField("String", "BETA_VERSION", "\"\"")
         buildConfigField("String", "BETA_DISCORD_URL", "\"\"")
         buildConfigField("String", "BETA_FEEDBACK_FORM_URL", "\"\"")
@@ -107,25 +106,6 @@ android {
                     ?.let { serviceCredentialsFile = it }
             }
         }
-        create("experimental") {
-            initWith(getByName("beta"))
-            matchingFallbacks += listOf("beta", "release")
-            applicationIdSuffix = ".experimental"
-            versionNameSuffix = "-experimental"
-            resValue("string", "app_name", "AudioChoice Experimental")
-            // Advanced for the EPUB narration cycle. The experimental type is
-            // created with initWith(beta), so it already tracks the current beta
-            // configuration; only the cycle identifier changes here. No new
-            // build type and no product flavour is introduced.
-            buildConfigField("String", "BETA_VERSION", "\"Experimental 2\"")
-            buildConfigField("boolean", "EXPERIMENTAL_BUILD", "true")
-            manifestPlaceholders["companionTransferScheme"] = "audiochoice-experimental"
-            // Same reasoning as beta. Its applicationId differs, so signature
-            // compatibility is tracked independently, but testers still update
-            // in place.
-            signingConfig = signingConfigs.findByName("betaSigning")
-                ?: signingConfigs.getByName("debug")
-        }
         release {
             optimization {
                 enable = false
@@ -180,10 +160,9 @@ dependencies {
     implementation(libs.billing.ktx)
     testImplementation(libs.junit)
     testImplementation(libs.kotlinx.coroutines.test)
-    // Several narration requirements are stated as properties over all inputs
-    // (plan and timeline round-trips, plan idempotence, filter monotonicity), so
-    // they are tested as properties rather than examples. Test-only: nothing here
-    // reaches the APK.
+    // Several playback timeline requirements are stated as properties over all
+    // inputs (position/seek round-trips), so they are tested as properties rather
+    // than examples. Test-only: nothing here reaches the APK.
     testImplementation(libs.kotest.property)
     androidTestImplementation(platform(libs.androidx.compose.bom))
     androidTestImplementation(libs.androidx.compose.ui.test.junit4)

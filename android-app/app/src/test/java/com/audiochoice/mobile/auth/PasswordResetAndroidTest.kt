@@ -1,4 +1,4 @@
-package com.audiochoice.mobile.narration
+package com.audiochoice.mobile.auth
 
 import com.audiochoice.mobile.data.PasswordResetConfirmRequest
 import com.audiochoice.mobile.data.PasswordResetRequest

@@ -19,7 +19,7 @@ public static class FaqContent
     /// Lets a client tell a served copy from its own bundled fallback and prefer the newer one, so an
     /// app that has not been updated in a while still shows the better answers.
     /// </remarks>
-    public const int Version = 3;
+    public const int Version = 4;
 
     public static FaqResponse Current { get; } = new(Version, new[]
     {
@@ -37,8 +37,7 @@ public static class FaqContent
             new FaqEntry(
                 "Which file types work?",
                 "MP3 and M4B are the usual ones. Audible AAX files can be converted on the device " +
-                "using the activation from your own account. EPUB files are imported as reading " +
-                "editions rather than audiobooks."),
+                "using the activation from your own account."),
             new FaqEntry(
                 "What is the transfer tool for?",
                 "Some audiobooks are easiest to download on a computer. The transfer tool lets you " +
@@ -97,29 +96,22 @@ public static class FaqContent
                 "removed it, and never includes the audio or a transcript."),
         }),
 
-        new FaqSection("Reading editions and the voice", new[]
+        new FaqSection("Reading along", new[]
         {
             new FaqEntry(
-                "What happens when I import an EPUB?",
-                "It goes to the Ebooks shelf in your library, separate from your audiobooks, and " +
-                "opens in the reader rather than the player. You can read it, or have it read aloud."),
-            new FaqEntry(
-                "What is the difference between the two voices?",
-                "Your phone's own voice is included and works without a network. The premium voice is " +
-                "produced on our servers and sounds closer to a person reading. The passages sent for " +
-                "the premium voice are covered by a statement you accept before it is used."),
-            new FaqEntry(
-                "Why does making the audio take a while?",
-                "A chapter is produced in full before it plays, so the first one takes a moment. " +
-                "Later chapters are prepared ahead of where you are listening."),
-            new FaqEntry(
-                "Do my filters apply when a book is read aloud?",
-                "Yes. The text is scanned the same way an audiobook is, and anything you filter is " +
-                "removed before the voice ever sees it."),
-            new FaqEntry(
                 "Can I attach an ebook to an audiobook I already have?",
-                "Yes, and it stays on your Audiobooks shelf. The reading edition follows along with " +
-                "the narration so you can read while you listen."),
+                "Yes. Open the audiobook and attach its EPUB. It lines up word for word with the " +
+                "narration, so the reader can highlight and scroll to the passage you are hearing."),
+            new FaqEntry(
+                "Do my filters apply to the text too?",
+                "Yes. Whatever a filter removes from the audio is also hidden from the attached " +
+                "text. Turning that filter off brings the words back."),
+            new FaqEntry(
+                "The reader lost track of where I am. What happened?",
+                "The alignment between the text and the audio can have small gaps. The reader keeps " +
+                "showing your last known position rather than guessing, and it catches up once the " +
+                "audio reaches text it can match again. If you have moved far ahead of the reader, " +
+                "look for the button that jumps it straight to where you are listening."),
         }),
 
         new FaqSection("Your account", new[]
@@ -154,10 +146,6 @@ public static class FaqContent
                 "The audio file itself stays on the device you imported it to; it is never copied to " +
                 "our servers. Your library, filters and progress follow your account, so importing " +
                 "the same file on a second device picks up where you were."),
-            new FaqEntry(
-                "How much space does a read-aloud book use?",
-                "About a megabyte for every two minutes of audio. The reader shows how much a book is " +
-                "using and lets you reclaim it; your place, filters and pronunciations are kept."),
         }),
     });
 }
