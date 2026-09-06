@@ -39,3 +39,11 @@ local.properties
 # tracked here; the release-notes file the distribution task actually reads lives at
 # app/beta-release-notes.txt, outside this directory.
 android-app/app/beta/
+
+# Real recipient lists and rendered per-person email previews. Both contain the names and
+# addresses of actual people, so only the *.example.csv template belongs in the repository.
+docs/email-templates/founder-recipients.csv
+docs/email-templates/previews/
+
+# Python bytecode cache from the scripts/ helpers.
+__pycache__/

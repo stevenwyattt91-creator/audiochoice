@@ -8,14 +8,14 @@ export const metadata: Metadata = {
   icons: { icon: "/favicon.png", shortcut: "/favicon.png" },
   openGraph: {
     title: "AudioChoice — Listen Your Way",
-    description: "Your audiobooks. Your boundaries. Coming soon to Android and Apple.",
+    description: "Your audiobooks. Your boundaries. Find sensitive content and decide what to hear, mute, or skip.",
     type: "website",
     images: [{ url: "/og.png", width: 1200, height: 630, alt: "AudioChoice — Listen Your Way" }],
   },
   twitter: {
     card: "summary_large_image",
     title: "AudioChoice — Listen Your Way",
-    description: "Your audiobooks. Your boundaries. Coming soon to Android and Apple.",
+    description: "Your audiobooks. Your boundaries. Find sensitive content and decide what to hear, mute, or skip.",
     images: ["/og.png"],
   },
 };

@@ -107,3 +107,50 @@ footer { min-height:105px;border-top:1px solid var(--line);display:flex;align-it
 .auditor-page{min-height:100vh;background:radial-gradient(circle at 74% 10%,rgba(126,226,52,.12),transparent 30%),#030604}.auditor-hero{display:grid;grid-template-columns:1.2fr .8fr;gap:80px;align-items:center;min-height:610px;padding-block:95px}.auditor-hero h1{font-size:clamp(54px,6.8vw,88px);line-height:.94;letter-spacing:-.065em;margin:22px 0}.auditor-hero h1 em{color:var(--green);font-style:normal}.auditor-hero>div>p{max-width:650px;color:#abb4ac;font-size:18px;line-height:1.7}.auditor-hero-card{padding:30px;border:1px solid #354139;border-radius:22px;background:linear-gradient(145deg,#101811,#080c09);box-shadow:0 30px 75px #000}.auditor-hero-card>span{color:var(--green);font-size:10px;font-weight:900;letter-spacing:.16em}.auditor-hero-card p{padding:16px 0;margin:0;border-bottom:1px solid #273028;color:#aeb7af;line-height:1.6}.auditor-hero-card p:last-child{border:0}.auditor-hero-card b{color:white}.auditor-process{padding:85px 0 110px}.auditor-process>div{display:grid;grid-template-columns:repeat(4,1fr);margin-top:28px;border:1px solid #2d362f;border-radius:18px;overflow:hidden}.auditor-process article{min-height:200px;padding:29px;border-right:1px solid #2d362f;background:#09100a}.auditor-process article:last-child{border:0}.auditor-process article>b{color:var(--green);font:800 12px ui-monospace,monospace}.auditor-process h2{font-size:22px;margin:38px 0 9px}.auditor-process p{color:#909a91;font-size:13px;line-height:1.6;margin:0}.auditor-expectations{display:grid;grid-template-columns:1fr 1fr;gap:100px;align-items:center;padding-bottom:120px}.auditor-expectations h2,.auditor-form-side h2{font-size:clamp(38px,4.5vw,60px);line-height:1;letter-spacing:-.055em;margin:13px 0 18px}.auditor-expectations p,.auditor-form-side>p{color:#a6afa7;line-height:1.75}.auditor-expectations ul{display:grid;gap:13px;padding:0;margin:0;list-style:none}.auditor-expectations li{display:flex;gap:11px;padding:16px;border:1px solid #2d382f;border-radius:12px;background:#091009;color:#d8ddd8;line-height:1.45}.auditor-expectations li span{color:var(--green);font-weight:900}.auditor-form-section{padding:110px 0;background:#091009;border-block:1px solid #29342b}.auditor-form-layout{display:grid;grid-template-columns:.75fr 1.25fr;gap:85px;align-items:start}.auditor-note{margin-top:30px;padding:20px;border:1px solid #40513e;border-radius:14px;background:#132012}.auditor-note b{color:var(--green)}.auditor-note p{margin:8px 0 0;color:#bdc7bd;font-size:13px;line-height:1.65}.auditor-form-card{padding:34px;border:1px solid #3a493d;border-radius:20px;background:#040705}.auditor-form-card form{display:grid;gap:24px}.auditor-form-card fieldset{min-width:0;border:0;border-top:1px solid #29342b;margin:0;padding:25px 0 0}.auditor-form-card fieldset:first-child{border-top:0;padding-top:0}.auditor-form-card legend{padding:0 8px 0 0;color:#eef2ee;font-size:18px;font-weight:800}.auditor-fields{display:grid;gap:14px;margin-top:18px}.two-columns{grid-template-columns:1fr 1fr}.auditor-fields label,.auditor-full-field{display:grid;gap:8px;color:#dce1dd;font-size:12px;font-weight:800}.auditor-fields input,.auditor-fields select,.auditor-full-field textarea{width:100%;border:1px solid #3a473d;border-radius:9px;background:#0a0f0b;color:white;font:inherit;outline:none}.auditor-fields input,.auditor-fields select{height:50px;padding:0 14px}.auditor-full-field textarea{padding:13px 14px;resize:vertical}.auditor-fields input:focus,.auditor-fields select:focus,.auditor-full-field textarea:focus{border-color:var(--green);box-shadow:0 0 0 3px rgba(126,226,52,.1)}.compact-fields{margin-top:17px}.auditor-full-field{margin-top:17px}.auditor-full-field i{color:#89928a;font-style:normal;font-weight:500}.auditor-choice-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:18px}.auditor-choice-grid label,.auditor-check{display:flex;gap:10px;align-items:flex-start;color:#bcc4bd;font-size:13px;line-height:1.45}.auditor-choice-grid label{padding:12px;border:1px solid #2c362e;border-radius:9px;background:#090e0a}.auditor-choice-grid input,.auditor-check input,.auditor-radio-group input{accent-color:var(--green);width:17px;height:17px;flex:0 0 auto;margin:1px 0 0}.auditor-radio-group{display:grid;gap:10px;margin-top:18px;margin-bottom:21px;color:#c4cbc5;font-size:13px}.auditor-radio-group>span{font-weight:800;color:#e1e6e1}.auditor-check{margin:12px 0}.auditor-form-card .primary{width:100%;margin-top:2px}.auditor-form-card .primary:disabled{opacity:.65;cursor:wait}
 @media(max-width:900px){.auditor-hero,.auditor-expectations,.auditor-form-layout{grid-template-columns:1fr;gap:55px}.auditor-hero{min-height:auto;padding-block:70px}.auditor-process>div{grid-template-columns:1fr 1fr}.auditor-process article:nth-child(2){border-right:0}.auditor-process article:nth-child(-n+2){border-bottom:1px solid #2d362f}}
 @media(max-width:560px){.auditor-hero{padding-block:55px}.auditor-hero h1{font-size:48px}.auditor-process{padding-block:70px}.auditor-process>div{grid-template-columns:1fr}.auditor-process article,.auditor-process article:nth-child(2){border-right:0;border-bottom:1px solid #2d362f}.auditor-process article:last-child{border-bottom:0}.auditor-expectations{padding-bottom:85px}.auditor-form-section{padding-block:75px}.auditor-form-card{padding:24px 18px}.two-columns,.auditor-choice-grid{grid-template-columns:1fr}}
+
+/* Launch download CTAs.
+   The live state reuses .primary so a download button is visually identical to every other
+   primary action on the site. The pending state borrows the flat outlined treatment already
+   used by .download-grid .coming-soon on the companion page, so a platform that has not
+   shipped reads as a date rather than as a button someone should press. */
+.store-actions{margin-top:36px;display:flex;flex-wrap:wrap;gap:13px;align-items:center}
+.store-pending{display:inline-flex;align-items:center;justify-content:center;padding:15px 21px;border:1px solid #455148;border-radius:10px;background:#111712;color:#b9c3ba;font-size:14px;font-weight:750;cursor:default}
+.final-cta .store-actions{justify-content:center}
+.cta-microcopy{margin-top:22px!important;text-align:center}
+/* A text-styled trigger for the updates dialog. It is a real button for keyboard and
+   screen-reader users, since the dialog cannot be reached by navigating to a URL. */
+.link-button{border:0;padding:0;background:none;font:inherit;color:var(--green);text-decoration:underline;cursor:pointer}
+.link-button:hover{color:var(--green-soft)}
+@media(max-width:560px){.store-actions{flex-direction:column;align-items:stretch}.store-actions>*{width:100%}}
+
+/* Beta-closed panel. Borrows the centred confirmation layout from .beta-success so the
+   closed state reads as a resolved outcome rather than an error. */
+.beta-closed{text-align:center}
+.beta-closed>span{display:grid;place-items:center;width:56px;height:56px;margin:0 auto 18px;border-radius:50%;background:#172914;color:var(--green);font-size:25px}
+.beta-closed h3{font-size:22px;letter-spacing:-.03em;margin:0 0 10px}
+.beta-closed p{color:#a8b1a9;line-height:1.65;margin:0 0 22px}
+.beta-closed .primary{margin:0 auto}
+.beta-closed>small{display:block;margin-top:18px;color:#717972;line-height:1.5}
+
+/* Legal pages. Long-form reading rather than marketing layout: one narrow column, larger
+   line height, and headings that separate sections without competing with the hero. */
+.legal-page{min-height:100vh;background:radial-gradient(circle at 78% 4%,rgba(126,226,52,.08),transparent 30%),var(--bg)}
+.legal-hero{padding-block:64px 34px;border-bottom:1px solid var(--line)}
+.legal-hero h1{font-size:clamp(40px,5vw,62px);line-height:1.02;letter-spacing:-.05em;margin:14px 0 12px}
+.legal-effective{color:#7e867f;font-size:13px;margin:0}
+.legal-body{max-width:760px;padding-block:44px 96px}
+.legal-body section{margin-bottom:38px}
+.legal-body h2{font-size:23px;letter-spacing:-.03em;margin:0 0 14px;color:var(--ink)}
+.legal-body p{color:#aab2ab;line-height:1.75;margin:0 0 14px;font-size:15px}
+.legal-body a{color:var(--green);text-decoration:underline}
+.legal-body a:hover{color:var(--green-soft)}
+.legal-list{margin:0 0 14px;padding-left:20px;color:#aab2ab;line-height:1.75;font-size:15px}
+.legal-list li{margin:6px 0}
+/* The summary is the part most people actually read, so it gets the panel treatment. */
+.legal-summary{padding:28px 30px;border:1px solid #2d3a30;border-radius:18px;background:linear-gradient(145deg,#101711,#080c09)}
+.legal-summary h2{margin-bottom:16px}
+.legal-summary ul{list-style:none;margin:0 0 16px;padding:0}
+.legal-summary li{display:flex;gap:12px;margin:11px 0;color:#c9cfca;line-height:1.6;font-size:15px}
+.legal-summary li>span{flex:0 0 21px;height:21px;display:grid;place-items:center;border-radius:50%;background:#182814;color:var(--green);font-size:11px}
+.legal-note{margin:0!important;padding-top:15px;border-top:1px solid #232b25;color:#8b938c!important;font-size:13.5px!important}
+@media(max-width:560px){.legal-hero{padding-block:44px 26px}.legal-body{padding-block:32px 70px}.legal-summary{padding:22px 20px}}
