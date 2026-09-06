@@ -17,10 +17,16 @@ public sealed class OpenAIContentAnalysisProvider(
     : IContentAnalysisProvider, ITextContentAnalysisProvider
 {
     // Bump this whenever the baseline classification policy changes so cached batch
-    // answers cannot silently reintroduce events produced under an older policy.
-    private const string BaseAnalysisPromptVersion = "4.0-word-anchored";
-    private const string SceneVerificationVersion = "4.0-word-anchored";
-    private const string SceneEscalationVersion = "4.0-word-anchored";
+    // answers cannot silently reintroduce events produced under an older policy. Bumped for
+    // this pipeline overhaul: Luna no longer proposes profanity labels, batches are
+    // paragraph/sentence-aligned with 15% (not 50%) overlap, Terra's context window is
+    // sentence-bounded rather than a flat ±20s, its entry gate now excludes lone weak
+    // singletons, Sol's boundary is quote-confirmed-and-word-snapped rather than clamped to
+    // ±30s, Sol is only invoked for ambiguous/low-confidence Terra results, and scene merging
+    // is sentence-boundary-based rather than a flat 45s gap.
+    private const string BaseAnalysisPromptVersion = "5.0-word-snapped";
+    private const string SceneVerificationVersion = "5.0-word-snapped";
+    private const string SceneEscalationVersion = "5.0-word-snapped";
     private readonly string _checkpointFolder = dataPaths.AnalysisCheckpoints;
     public string ScannerVersion => options.ScannerVersion;
 
@@ -111,17 +117,9 @@ public sealed class OpenAIContentAnalysisProvider(
         }
 
         var batchSize = Math.Max(1, options.MaximumSegmentsPerAnalysisRequest);
-        // Scene boundaries often cross request boundaries. A 50% overlap gives the model
-        // enough preceding and following narrative context, while per-batch checkpoints
-        // ensure an interrupted reanalysis resumes without paying for completed requests.
-        var overlap = Math.Max(0, batchSize / 2);
-        var step = Math.Max(1, batchSize - overlap);
         IReadOnlyList<(int StartIndex, int EndExclusive)> batchRanges = options.LocalCandidateFunnelEnabled
             ? DeterministicContentDetector.CandidateWindows(segments)
-            : Enumerable.Range(0, (int)Math.Ceiling(segments.Count / (double)step))
-                .Select(index => (StartIndex: index * step,
-                    EndExclusive: Math.Min(segments.Count, index * step + batchSize)))
-                .ToArray();
+            : ComputeAnalysisBatchRanges(segments, batchSize);
 
         if (options.LocalCandidateFunnelEnabled)
         {
@@ -276,6 +274,88 @@ public sealed class OpenAIContentAnalysisProvider(
         return UserFacingEventPostProcessor.Process(uniqueEvents);
     }
 
+    /// <summary>
+    /// The overlap between consecutive batches, as a fraction of the batch size.
+    /// </summary>
+    /// <remarks>
+    /// Reduced from 50%. Every segment inside a 50% overlap was classified twice, at twice
+    /// the cost, for coverage a paragraph-aligned boundary (see
+    /// <see cref="ComputeAnalysisBatchRanges"/>) already protects more directly: a scene is
+    /// far less likely to be cut in half by a batch boundary that already falls on a
+    /// paragraph break than by one that falls at a fixed segment count. 15% keeps a smaller
+    /// safety margin for the rarer case a scene still spans a chosen break, without paying to
+    /// reclassify most of the book a second time.
+    /// </remarks>
+    private const double AnalysisBatchOverlapFraction = .15;
+
+    /// <summary>
+    /// Splits the transcript into Luna's review batches, preferring a paragraph or chapter
+    /// break near each target boundary over a fixed segment count.
+    /// </summary>
+    /// <remarks>
+    /// A fixed-size window can end mid-scene regardless of overlap; a boundary chosen at a
+    /// natural break in the narrative is far less likely to. This looks for a segment whose
+    /// own text ends a sentence, and beyond that a blank/short segment (the closest a
+    /// transcript's own text comes to a paragraph or scene break, since spoken narration
+    /// carries no chapter markers of its own) within a search window around the fixed target,
+    /// falling back to the fixed boundary itself when nothing better is found nearby -- so a
+    /// transcript with no punctuation at all still batches, just without the benefit.
+    /// </remarks>
+    internal static IReadOnlyList<(int StartIndex, int EndExclusive)> ComputeAnalysisBatchRanges(
+        IReadOnlyList<TranscriptSegment> segments,
+        int batchSize)
+    {
+        if (segments.Count == 0) return [];
+
+        var overlap = Math.Max(0, (int)Math.Round(batchSize * AnalysisBatchOverlapFraction));
+        var step = Math.Max(1, batchSize - overlap);
+        // How far from the fixed target boundary a natural break may be adopted instead.
+        var searchRadius = Math.Max(1, step / 4);
+
+        var ranges = new List<(int StartIndex, int EndExclusive)>();
+        var start = 0;
+        while (start < segments.Count)
+        {
+            var target = Math.Min(segments.Count, start + batchSize);
+            var end = target >= segments.Count
+                ? segments.Count
+                : NearestNaturalBreak(segments, target, searchRadius, start);
+            ranges.Add((start, end));
+            if (end >= segments.Count) break;
+            start = Math.Max(start + 1, end - overlap);
+        }
+        return ranges;
+    }
+
+    /// <summary>
+    /// The segment boundary nearest <paramref name="target"/>, within
+    /// <paramref name="searchRadius"/> segments, that ends a sentence -- the closest a
+    /// spoken transcript's own text comes to a paragraph break. Falls back to the fixed
+    /// target itself when no such boundary exists nearby.
+    /// </summary>
+    private static int NearestNaturalBreak(
+        IReadOnlyList<TranscriptSegment> segments, int target, int searchRadius, int rangeStart)
+    {
+        var low = Math.Max(rangeStart + 1, target - searchRadius);
+        var high = Math.Min(segments.Count, target + searchRadius);
+        for (var offset = 0; offset <= searchRadius; offset += 1)
+        {
+            var after = target + offset;
+            if (after >= low && after <= high && after < segments.Count &&
+                TranscriptSentenceBoundaries.EndsWithSentenceEnd(segments[after].Text))
+            {
+                return after + 1;
+            }
+            var before = target - offset;
+            if (before >= low && before <= high && before > rangeStart && before - 1 >= 0 &&
+                TranscriptSentenceBoundaries.EndsWithSentenceEnd(segments[before - 1].Text))
+            {
+                return before;
+            }
+        }
+        return Math.Min(segments.Count, target);
+    }
+
     private async Task<IReadOnlyList<ContentBatchResult>> RunContentBatches(
         IReadOnlyList<(int StartIndex, int EndExclusive)> ranges,
         IReadOnlyList<TranscriptSegment> segments,
@@ -425,6 +505,78 @@ public sealed class OpenAIContentAnalysisProvider(
                 output, payload, cancellationToken: cancellationToken);
         }
         File.Move(temporary, path, overwrite: true);
+    }
+
+    /// <summary>
+    /// The furthest a Terra context window may expand on each side, in seconds, once it has
+    /// reached a sentence boundary.
+    /// </summary>
+    /// <remarks>
+    /// A ceiling on the expansion itself, not a target: most windows stop earlier, right at
+    /// the nearest sentence break, and only a passage with unusually long sentences (or none
+    /// at all, in an unpunctuated transcript) would ever reach this. Exists so a chapter
+    /// cannot be read to Terra whole just because no sentence terminator appeared for a long
+    /// stretch.
+    /// </remarks>
+    private const double MaximumContextExpansionSeconds = 60;
+
+    /// <summary>
+    /// The transcript segments Terra is shown for one candidate: the segments the candidate
+    /// itself spans, expanded outward to the nearest sentence boundary on each side.
+    /// </summary>
+    /// <remarks>
+    /// Replaces a flat ±20-second window. Terra genuinely needs surrounding narrative to
+    /// judge context -- that requirement does not go away -- but a flat number of seconds
+    /// could start or end its reading mid-sentence, handing the model half a thought on
+    /// either edge. Expanding to where a sentence actually ends or begins gives it the same
+    /// kind of context on cleaner terms, at no extra model cost: this is read purely from the
+    /// transcript's own punctuation, the same way <see cref="SceneEventPostProcessor"/>'s
+    /// merge decision is. This window is context for the model call only and must never
+    /// become the stored event's boundary -- that is decided separately, by word-snapping
+    /// Sol's (or Terra's own) refined range against the transcript's actual words.
+    /// </remarks>
+    internal static IReadOnlyList<TranscriptSegment> SentenceBoundedContext(
+        double start,
+        double end,
+        IReadOnlyList<TranscriptSegment> segments)
+    {
+        var ordered = segments.OrderBy(segment => segment.StartTime).ToArray();
+        var coreIndices = ordered
+            .Select((segment, index) => (segment, index))
+            .Where(item => item.segment.EndTime >= start && item.segment.StartTime <= end)
+            .Select(item => item.index)
+            .ToArray();
+        if (coreIndices.Length == 0) return [];
+
+        var lowIndex = coreIndices.Min();
+        var highIndex = coreIndices.Max();
+
+        var firstIndex = lowIndex;
+        while (firstIndex > 0)
+        {
+            var candidate = ordered[firstIndex - 1];
+            // Measured against the candidate's own original boundary, not the enclosing
+            // segment's -- the cap is a promise about how far past the actual event this
+            // window may reach, not about the segment grid it happens to be sliced into.
+            if (start - candidate.StartTime > MaximumContextExpansionSeconds) break;
+            firstIndex -= 1;
+            // This segment itself closes a sentence, so the window now begins at the start
+            // of a new one -- a natural place to stop expanding backward.
+            if (TranscriptSentenceBoundaries.EndsWithSentenceEnd(candidate.Text)) break;
+        }
+
+        var lastIndex = highIndex;
+        while (lastIndex < ordered.Length - 1)
+        {
+            var candidate = ordered[lastIndex + 1];
+            if (candidate.EndTime - end > MaximumContextExpansionSeconds) break;
+            lastIndex += 1;
+            // This newly included segment itself closes a sentence, so the window now ends
+            // at a natural break rather than mid-thought.
+            if (TranscriptSentenceBoundaries.EndsWithSentenceEnd(candidate.Text)) break;
+        }
+
+        return ordered[firstIndex..(lastIndex + 1)];
     }
 
     /// <summary>
@@ -936,16 +1088,24 @@ Candidates:
             "sexual_suggestive_dialogue", "sexual_references", "sexual_nudity",
             "sexual_implied_activity", "sexual_explicit_activity", "sexual_complete_scene"
         }.Select(label => ContentTaxonomy.Mappings[label].EventID).ToHashSet();
-        var candidates = events
+        var sexualCandidateEvents = events
             .Where(item => sexualEventIDs.Contains(item.EventID))
             .OrderBy(item => item.StartTime)
+            .ToArray();
+        var terraEntryEvents = ExcludeLoneWeakSingletons(sexualCandidateEvents, segments);
+        if (terraEntryEvents.Count != sexualCandidateEvents.Length)
+        {
+            logger.LogInformation(
+                "Terra entry gate excluded {ExcludedCount} of {TotalCount} sexual candidates " +
+                "as isolated weak references not part of a scene or a dense cluster.",
+                sexualCandidateEvents.Length - terraEntryEvents.Count, sexualCandidateEvents.Length);
+        }
+        var candidates = terraEntryEvents
             .Select(item => new SceneVerificationCandidate(
                 item.StableKey,
                 item.StartTime,
                 item.EndTime,
-                segments.Where(segment =>
-                    segment.EndTime >= item.StartTime - 20 &&
-                    segment.StartTime <= item.EndTime + 20).ToArray()))
+                SentenceBoundedContext(item.StartTime, item.EndTime, segments)))
             .ToArray();
 
         var retained = events.Where(item => item.EventID != mapping.EventID).ToList();
@@ -990,8 +1150,12 @@ Candidates:
             .SelectMany(result => result.Payload.Candidates.Select(decision =>
                 (TerraIndex: result.Index, Decision: decision)))
             .ToArray();
+        // Only what is genuinely ambiguous or borderline reaches Sol: Terra's own
+        // needsEscalation flag, or an accepted scene whose confidence fell short of
+        // SolEscalationConfidenceThreshold. A confident accept is not re-paid-for at Sol --
+        // see NeedsSolReview's remarks for why that does not mean it goes unconfirmed.
         var escalationCandidates = terraDecisions
-            .Where(item => item.Decision.Accepted || item.Decision.NeedsEscalation)
+            .Where(item => NeedsSolReview(item.Decision))
             .Select(item => sourceCandidates.TryGetValue(
                     item.Decision.CandidateKey, out var source)
                 ? new SolEscalationCandidate(item.TerraIndex, source)
@@ -1000,6 +1164,9 @@ Candidates:
             .Select(item => item!)
             .DistinctBy(item => item.Source.CandidateKey)
             .ToArray();
+        var escalatedKeys = escalationCandidates
+            .Select(item => item.Source.CandidateKey)
+            .ToHashSet(StringComparer.Ordinal);
 
         // Fails rather than truncating. This used to `.Take()` the cap, so scenes past it
         // silently fell back to their Terra decision and the ambiguous ones were dropped
@@ -1014,10 +1181,14 @@ Candidates:
                 "The job was stopped rather than scanning part of the audiobook.");
         }
 
+        var confidentAcceptsSkippingSol = terraDecisions
+            .Count(item => item.Decision.Accepted && !escalatedKeys.Contains(item.Decision.CandidateKey));
         logger.LogInformation(
-            "Sol escalation planned: {SolCandidateCount} confirmed or ambiguous scene candidates " +
-            "from {TerraCandidateCount} Terra decisions; concurrency {SolConcurrency}.",
-            escalationCandidates.Length, terraDecisions.Length,
+            "Sol escalation planned: {SolCandidateCount} ambiguous or borderline scene " +
+            "candidates from {TerraCandidateCount} Terra decisions will reach Sol; " +
+            "{SkippedCount} confident Terra accept(s) finalize without Sol; concurrency " +
+            "{SolConcurrency}.",
+            escalationCandidates.Length, terraDecisions.Length, confidentAcceptsSkippingSol,
             Math.Max(1, options.SceneEscalationConcurrency));
 
         var solDecisions = await RunSolEscalations(
@@ -1035,50 +1206,50 @@ Candidates:
                 group => group.OrderByDescending(item => item.Confidence).First(),
                 StringComparer.Ordinal);
 
+        var rejectedForUnconfirmedQuote = 0;
         foreach (var (_, terraDecision) in terraDecisions)
         {
             var verification = solByCandidate.GetValueOrDefault(
                 terraDecision.CandidateKey, terraDecision);
             if (!verification.Accepted || !verification.DirectSexualActEvidence ||
                 !verification.SustainedBeyondKissing || verification.Confidence < .85 ||
-                !sourceRanges.TryGetValue(verification.CandidateKey, out var sourceRange))
+                !sourceRanges.TryGetValue(verification.CandidateKey, out _) ||
+                !sourceCandidates.TryGetValue(verification.CandidateKey, out var sourceCandidate))
                 continue;
-            var start = Math.Clamp(verification.StartTime,
-                sourceRange.ProposedStartTime - 30, sourceRange.ProposedEndTime);
-            var end = Math.Clamp(verification.EndTime,
-                start, sourceRange.ProposedEndTime + 30);
 
-            // The refined start is a second model-invented number, one call further from the
-            // transcript than the first pass's own proposal. Confirmed the same way: locate
-            // the quote the verifier says begins the activity, and if it exists nowhere near
-            // the refined start, that refinement is not trusted -- the proposal that already
-            // passed AddEvent's own anchoring is kept instead of an unconfirmed narrowing of it.
-            if (!string.IsNullOrWhiteSpace(verification.Quote) &&
-                sourceCandidates.TryGetValue(verification.CandidateKey, out var sourceCandidate))
+            // The refined start is a model-invented number, one call further from the
+            // transcript than the first pass's own proposal, and it is the only thing here
+            // with independent confirmation available: the verifier's quote. No flat ±30s
+            // clamp any more -- a claim whose quote cannot be found in the transcript at all
+            // is rejected outright rather than falling back to some other range, because a
+            // finalized scene boundary this pipeline no longer trusts by proximity alone must
+            // not reach a listener as if it had been confirmed.
+            var confirmed = TryConfirmSceneBoundary(
+                verification.Quote, verification.EndTime, sourceCandidate.Segments);
+            if (confirmed is null)
             {
-                var located = TranscriptWordLocator.FindPhraseInSegments(
-                    sourceCandidate.Segments, verification.Quote);
-                if (located is not null &&
-                    Math.Abs(located.StartTime - start) <= QuoteProximitySeconds)
-                {
-                    start = located.StartTime;
-                }
-                else
-                {
-                    logger.LogInformation(
-                        "Terra/Sol's refined start for {CandidateKey} could not be confirmed " +
-                        "against the transcript; keeping the original proposed start.",
-                        verification.CandidateKey);
-                    start = sourceRange.ProposedStartTime;
-                    end = Math.Max(end, start);
-                }
+                rejectedForUnconfirmedQuote += 1;
+                logger.LogInformation(
+                    "Rejected Sol/Terra's accepted scene for {CandidateKey}: its boundary " +
+                    "could not be confirmed against the transcript's own words.",
+                    verification.CandidateKey);
+                continue;
             }
+
+            var (start, end) = confirmed.Value;
 
             retained.Add(new ScanEvent(
                 Guid.NewGuid(), start, end, mapping.CategoryID, mapping.GroupID,
                 mapping.EventID, verification.Confidence,
                 Hash($"verified-scene|{start:F1}|{end:F1}|{verification.CandidateKey}"),
                 SafeDescriptionForEvent("sexual_complete_scene", verification.SafeDescription)));
+        }
+        if (rejectedForUnconfirmedQuote > 0)
+        {
+            logger.LogInformation(
+                "Rejected {RejectedCount} accepted scene candidate(s) whose boundary could " +
+                "not be confirmed against the transcript's own words.",
+                rejectedForUnconfirmedQuote);
         }
 
         reportProgress?.Invoke(1);
@@ -1090,6 +1261,167 @@ Candidates:
             verificationCandidates.Count,
             escalationCandidates.Length);
         return retained;
+    }
+
+    /// <summary>The weak, non-committal sexual-content labels a lone mention of should not reach Terra.</summary>
+    private static readonly HashSet<Guid> WeakSexualEventIDs =
+        new[] { "sexual_suggestive_dialogue", "sexual_references" }
+            .Select(label => ContentTaxonomy.Mappings[label].EventID)
+            .ToHashSet();
+
+    /// <summary>
+    /// Excludes a lone weak sexual-content mention from reaching Terra at all, unless it is
+    /// part of a dense cluster of such mentions or co-occurs with a stronger label.
+    /// </summary>
+    /// <remarks>
+    /// A single isolated <c>suggestive_dialogue</c> or <c>sexual_references</c> event -- a
+    /// passing flirtation, one crude joke -- is not a scene candidate and never becomes one no
+    /// matter what Terra says about it; spending a Terra call on it is pure waste. What does
+    /// still deserve review: three or more weak mentions clustered together with no complete
+    /// sentence of ordinary narrative between them (reusing the exact same sentence-boundary
+    /// test <see cref="SceneEventPostProcessor"/> uses to decide whether two scene candidates
+    /// are part of one continuous passage), since a dense run of suggestive lines can itself
+    /// be building toward a scene; and any weak mention that shares a passage with a stronger
+    /// label (nudity, implied or explicit activity, or an already-flagged complete scene) --
+    /// a passing reference next to real activity is context for that activity, not noise.
+    /// </remarks>
+    internal static IReadOnlyList<ScanEvent> ExcludeLoneWeakSingletons(
+        IReadOnlyList<ScanEvent> candidates,
+        IReadOnlyList<TranscriptSegment> segments)
+    {
+        var strongEventIDs = new[]
+        {
+            "sexual_nudity", "sexual_implied_activity", "sexual_explicit_activity",
+            "sexual_complete_scene"
+        }.Select(label => ContentTaxonomy.Mappings[label].EventID).ToHashSet();
+
+        var ordered = candidates.OrderBy(item => item.StartTime).ToArray();
+        var weakIndices = ordered
+            .Select((item, index) => (item, index))
+            .Where(pair => WeakSexualEventIDs.Contains(pair.item.EventID))
+            .Select(pair => pair.index)
+            .ToArray();
+        if (weakIndices.Length == 0) return ordered;
+
+        // Group the weak mentions into clusters the same way scene candidates are grouped:
+        // consecutive weak mentions stay in one cluster unless a complete sentence of
+        // ordinary narrative separates them.
+        var clusters = new List<List<int>>();
+        var currentCluster = new List<int> { weakIndices[0] };
+        for (var position = 1; position < weakIndices.Length; position += 1)
+        {
+            var previousIndex = currentCluster[^1];
+            var index = weakIndices[position];
+            var clean = TranscriptSentenceBoundaries.HasClearSentenceBetween(
+                ordered[previousIndex].EndTime, ordered[index].StartTime, segments);
+            if (clean)
+            {
+                clusters.Add(currentCluster);
+                currentCluster = [index];
+            }
+            else
+            {
+                currentCluster.Add(index);
+            }
+        }
+        clusters.Add(currentCluster);
+
+        var excluded = new HashSet<int>();
+        foreach (var cluster in clusters)
+        {
+            if (cluster.Count >= 3) continue; // A dense cluster of weak mentions is kept.
+
+            // A weak mention next to a stronger label anywhere in the same unbroken passage
+            // is kept as context for that activity, checked the same way a cluster's own
+            // members are: no complete sentence separating them.
+            var coOccursWithStrongLabel = ordered.Any(other =>
+                strongEventIDs.Contains(other.EventID) &&
+                !SeparatedByClearSentence(ordered[cluster[0]], other, segments));
+            if (coOccursWithStrongLabel) continue;
+
+            foreach (var index in cluster) excluded.Add(index);
+        }
+
+        return ordered.Where((_, index) => !excluded.Contains(index)).ToArray();
+    }
+
+    /// <summary>
+    /// Whether a complete sentence separates two events, checked in whichever time order
+    /// they actually fall (the two are not assumed to already be ordered relative to each
+    /// other, unlike a cluster's own consecutive members).
+    /// </summary>
+    private static bool SeparatedByClearSentence(
+        ScanEvent first, ScanEvent second, IReadOnlyList<TranscriptSegment> segments)
+    {
+        var (earlier, later) = first.StartTime <= second.StartTime ? (first, second) : (second, first);
+        return TranscriptSentenceBoundaries.HasClearSentenceBetween(
+            earlier.EndTime, later.StartTime, segments);
+    }
+
+    /// <summary>
+    /// Whether a Terra decision needs Sol's second opinion at all.
+    /// </summary>
+    /// <remarks>
+    /// True for Terra's own <c>needsEscalation</c> flag, or for an accepted scene whose
+    /// confidence fell short of <paramref name="confidenceThreshold"/>. A rejected candidate
+    /// (neither accepted nor flagged for escalation) needs nothing further -- it was never
+    /// going to produce a scene event either way. A confident accept that skips Sol is not
+    /// skipping confirmation: the boundary confirmation against the transcript's own words in
+    /// <see cref="TryConfirmSceneBoundary"/> still runs for it, exactly as it does for a
+    /// Sol-reviewed candidate, using Terra's own reported quote.
+    /// </remarks>
+    internal static bool NeedsSolReview(VerifiedSceneCandidate decision, double confidenceThreshold) =>
+        decision.NeedsEscalation ||
+        (decision.Accepted && decision.Confidence < confidenceThreshold);
+
+    private bool NeedsSolReview(VerifiedSceneCandidate decision) =>
+        NeedsSolReview(decision, options.SolEscalationConfidenceThreshold);
+
+    /// <summary>
+    /// Finalizes a confirmed scene's boundary: the quote-confirmed start, a claimed end no
+    /// earlier than that start, then up to one second of allowance on each side snapped to
+    /// the nearest actual transcript word.
+    /// </summary>
+    /// <remarks>
+    /// Extracted so this exact rule -- Sol's "1 second each end, snap to nearest word" --
+    /// is directly testable on its own, independent of the full escalation pipeline around
+    /// it.
+    /// </remarks>
+    internal static (double Start, double End) ResolveConfirmedSceneBoundary(
+        double confirmedStart,
+        double claimedEndTime,
+        IReadOnlyList<TranscriptSegment> segments)
+    {
+        // The quote confirms where the activity begins; the claimed endTime has no quote of
+        // its own, so it is kept as the far bound but never allowed before the confirmed start.
+        var claimedEnd = Math.Max(confirmedStart, claimedEndTime);
+        return TranscriptWordLocator.ExpandAndSnap(
+            segments, confirmedStart, claimedEnd, maxExpansionSeconds: 1.0)
+            ?? (confirmedStart, claimedEnd);
+    }
+
+    /// <summary>
+    /// The full decision for one accepted scene: locate its supporting quote in the
+    /// transcript and finalize the boundary, or reject the scene outright when the quote
+    /// cannot be confirmed at all.
+    /// </summary>
+    /// <remarks>
+    /// No flat ±30s clamp any more. A previous version of this pipeline fell back to the
+    /// first pass's originally proposed range whenever the refined quote could not be
+    /// confirmed; that meant an accepted scene always produced some boundary. This version
+    /// rejects the scene outright instead -- a finalized boundary this pipeline cannot
+    /// confirm against the transcript's own words must not reach a listener presented as
+    /// confirmed, so "no usable evidence" now means no event rather than an unconfirmed one.
+    /// </remarks>
+    internal static (double Start, double End)? TryConfirmSceneBoundary(
+        string? quote,
+        double claimedEndTime,
+        IReadOnlyList<TranscriptSegment> segments)
+    {
+        if (string.IsNullOrWhiteSpace(quote)) return null;
+        var located = TranscriptWordLocator.FindPhraseInSegments(segments, quote);
+        if (located is null) return null;
+        return ResolveConfirmedSceneBoundary(located.StartTime, claimedEndTime, segments);
     }
 
     private async Task<IReadOnlyList<VerifiedSceneCandidate>> RunSolEscalations(
@@ -1394,10 +1726,10 @@ Candidates:
     {
         var builder = new StringBuilder();
         var lineLength = 0;
-        for (var index = 0; index < ContentTaxonomy.EnforcedLabels.Count; index += 1)
+        for (var index = 0; index < ContentTaxonomy.ModelEmittableLabels.Count; index += 1)
         {
-            var label = ContentTaxonomy.EnforcedLabels[index];
-            var last = index == ContentTaxonomy.EnforcedLabels.Count - 1;
+            var label = ContentTaxonomy.ModelEmittableLabels[index];
+            var last = index == ContentTaxonomy.ModelEmittableLabels.Count - 1;
             var token = label + (last ? "." : ",");
             if (lineLength > 0 && lineLength + token.Length + 1 > 78)
             {
@@ -1561,9 +1893,12 @@ Transcript segments:
                         ["label"] = new JsonObject
                         {
                             ["type"] = "string",
-                            // Derived from the taxonomy so the schema cannot
-                            // permit a label the taxonomy would then discard.
-                            ["enum"] = new JsonArray(ContentTaxonomy.EnforcedLabels
+                            // Derived from the taxonomy so the schema cannot permit a label
+                            // the taxonomy would then discard, and narrowed to the labels
+                            // Luna itself may propose -- profanity is excluded here even
+                            // though the app still offers its switches; see
+                            // ContentTaxonomy.ModelEmittableLabels.
+                            ["enum"] = new JsonArray(ContentTaxonomy.ModelEmittableLabels
                                 .Select(label => (JsonNode)JsonValue.Create(label)!)
                                 .ToArray())
                         },
@@ -1681,7 +2016,7 @@ Transcript segments:
         int TerraIndex,
         SceneVerificationCandidate Source);
 
-    private sealed record VerifiedSceneCandidate(
+    internal sealed record VerifiedSceneCandidate(
         [property: JsonPropertyName("candidateKey")] string CandidateKey,
         [property: JsonPropertyName("accepted")] bool Accepted,
         [property: JsonPropertyName("needsEscalation")] bool NeedsEscalation,

@@ -15,6 +15,11 @@ COMPUTE_TYPE = os.getenv("WHISPER_COMPUTE_TYPE", "float16")
 DEVICE = os.getenv("WHISPER_DEVICE", "cuda")
 WORKER_COUNT = max(1, int(os.getenv("WHISPER_WORKERS", "4")))
 CONCURRENCY_PER_WORKER = max(1, int(os.getenv("WHISPER_CONCURRENCY_PER_WORKER", "3")))
+# How long a request may sit queued behind the semaphore before it is worth a log line
+# saying so. This host is a dedicated A100 running only this workload, so a sustained
+# queue is the signal that CONCURRENCY_PER_WORKER is now the bottleneck rather than the
+# GPU itself -- the number to raise next, once this fires routinely.
+SATURATION_WARNING_SECONDS = float(os.getenv("WHISPER_SATURATION_WARNING_SECONDS", "5"))
 # WHISPER_WORKERS is the number of Uvicorn processes. Each process owns one
 # model instance and has its own bounded two-request queue.
 transcription_slots = asyncio.Semaphore(CONCURRENCY_PER_WORKER)
@@ -65,7 +70,15 @@ async def transcribe(
     queue_depth += 1
     queued_at = time.monotonic()
     await transcription_slots.acquire()
+    queue_wait_seconds = time.monotonic() - queued_at
     queue_depth -= 1
+    if queue_wait_seconds >= SATURATION_WARNING_SECONDS:
+        # Not an error -- the request still ran -- but a request that had to wait this
+        # long for a slot on a GPU with no other workload is the observable sign that
+        # CONCURRENCY_PER_WORKER is the limiting factor, not the hardware.
+        print({"event": "transcription_slot_saturated", "queueDepth": queue_depth,
+               "queueWaitSeconds": queue_wait_seconds,
+               "concurrencyPerWorker": CONCURRENCY_PER_WORKER}, flush=True)
     process_id = os.getpid()
     worker_id = process_id
     try:

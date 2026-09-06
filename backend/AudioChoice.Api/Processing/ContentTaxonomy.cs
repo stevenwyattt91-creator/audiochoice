@@ -63,18 +63,23 @@ public static class ContentTaxonomy
         };
 
     /// <summary>
-    /// The labels the analysis model is allowed to return.
+    /// The labels the app offers a listener a switch for, and that any detector -- model or
+    /// deterministic -- is allowed to produce an event under.
     /// </summary>
     /// <remarks>
-    /// The single source for both the response schema's enum and the allowed-labels list in
-    /// the prompt. Those were each written out by hand, so a label could be added to one and
-    /// not the others -- and a label the model emits that the taxonomy does not know is
-    /// dropped, previously without a word in the log.
+    /// The single source for the taxonomy contract's own "enforced" flag, which both mobile
+    /// clients assert their switch tables against. Those were each written out by hand, so a
+    /// label could be added to one and not the others -- and a label a detector emits that
+    /// the taxonomy does not know is dropped, previously without a word in the log.
     ///
     /// Excludes the three broad violence labels. They exist as mappings so scans made before
-    /// the narrow-violence policy still resolve, but the model must not produce new ones: the
+    /// the narrow-violence policy still resolve, but nothing must produce new ones: the
     /// Violence switch is reserved for graphic material, torture, and violence involving
     /// children or animals.
+    ///
+    /// Includes the four profanity labels, because the app's profanity switches must keep
+    /// working -- see <see cref="ModelEmittableLabels"/> for the separate, narrower question
+    /// of which of these labels Luna itself may propose.
     /// </remarks>
     public static readonly IReadOnlyList<string> EnforcedLabels =
     [
@@ -88,6 +93,25 @@ public static class ContentTaxonomy
         "self_harm_reference", "self_harm_suicidal_thoughts",
         "self_harm_suicide_attempt", "self_harm_depiction"
     ];
+
+    /// <summary>
+    /// Of <see cref="EnforcedLabels"/>, the ones Luna's own prompt and response schema may
+    /// actually propose.
+    /// </summary>
+    /// <remarks>
+    /// Excludes the four profanity labels. Profanity is matched deterministically, by exact
+    /// word, against the transcript's own text -- see
+    /// <see cref="DeterministicContentDetector.DetectProfanity"/> -- and always has been. A
+    /// model guessing at a literal word it either does or does not say is strictly worse than
+    /// exact matching, and every profanity event Luna could produce duplicated a detection
+    /// the deterministic pass already made at full confidence, at Luna's own model cost with
+    /// no benefit: the app's profanity switches (see <see cref="EnforcedLabels"/>, unchanged)
+    /// are populated by the deterministic pass regardless of whether Luna is ever asked about
+    /// them.
+    /// </remarks>
+    public static readonly IReadOnlyList<string> ModelEmittableLabels = EnforcedLabels
+        .Where(label => !label.StartsWith("profanity_", StringComparison.Ordinal))
+        .ToArray();
 
     /// <summary>Labels kept only so older scans still resolve; never emitted.</summary>
     public static readonly IReadOnlyList<string> LegacyLabels =

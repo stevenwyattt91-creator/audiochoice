@@ -586,11 +586,48 @@ final class AudioPlaybackManager: ObservableObject {
         // Duration is 0 until the asset finishes loading asynchronously, and clamping
         // against it in that window turned a skip into a jump to the start of the book.
         let target = matching.endTime + Self.filterExitPadding
-        setPosition(duration > 0 ? min(target, duration) : target)
+        seekAcrossFilterSkip(to: duration > 0 ? min(target, duration) : target)
     }
 
     /// Clears the flagged range before resuming, so its final moment is not replayed.
     private static let filterExitPadding: Double = 0.2
+
+    /// The in-flight fade around a filter skip, if one is running.
+    private var filterFadeTask: Task<Void, Never>?
+
+    /// Seeks across a word-snapped filter boundary with a short fade either side, instead
+    /// of an instant volume cut at the exact sample the boundary lands on.
+    ///
+    /// A word-snapped skip boundary lands exactly where the transcript's own word timing
+    /// says it should, which is not the same as landing on a silent sample: an abrupt
+    /// volume change there is audible as a click. Fading across the seek instead of cutting
+    /// at it trades that click for a fade too brief to notice as a fade -- 200ms sits in the
+    /// middle of the range this exists to stay under, since a longer one would itself
+    /// become audible as fading in and out.
+    private func seekAcrossFilterSkip(to target: Double) {
+        filterFadeTask?.cancel()
+        filterFadeTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            await self.fadeVolume(to: 0)
+            guard !Task.isCancelled else { return }
+            self.setPosition(target)
+            await self.fadeVolume(to: 1)
+        }
+    }
+
+    private static let filterFadeSteps = 8
+    private static let filterFadeStepNanoseconds: UInt64 = 25_000_000 // 8 * 25ms = 200ms.
+
+    private func fadeVolume(to targetVolume: Float) async {
+        guard let player else { return }
+        let startingVolume = player.volume
+        for step in 1...Self.filterFadeSteps {
+            if Task.isCancelled { return }
+            let fraction = Float(step) / Float(Self.filterFadeSteps)
+            player.volume = startingVolume + (targetVolume - startingVolume) * fraction
+            try? await Task.sleep(nanoseconds: Self.filterFadeStepNanoseconds)
+        }
+    }
 
     /// The ranges playback removes, in start order.
     ///

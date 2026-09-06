@@ -3,6 +3,8 @@ using System.Text.Json;
 using AudioChoice.Api.Contracts;
 using AudioChoice.Api.Processing;
 using AudioChoice.Api.Services;
+using Microsoft.AspNetCore.Hosting;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging.Abstractions;
 
 var googleAuth = new ExternalAuthOptions
@@ -465,12 +467,369 @@ var joinedSceneEvents = SceneEventPostProcessor.Process(
     ],
     [new TranscriptSegment(0, 600, "Test transcript")]);
 Assert(joinedSceneEvents.Count == 1, "Overlapping sexual scene ranges were not joined.");
-Assert(joinedSceneEvents[0].StartTime == 100 - 3 && joinedSceneEvents[0].EndTime == 260 + 3,
-    "A joined sexual scene did not get exactly three seconds of padding either side. " +
-    "Padding was reduced from eight seconds because sixteen seconds a scene was, across a " +
-    "book, one of the largest contributors to how much audio disappeared.");
+// No flat padding either side any more: with no word timing supplied here (a transcript
+// saved before word timings existed), the merge falls back to the cluster's own raw range
+// rather than inventing a pad. The word-snapped case, where a real boundary moves to the
+// nearest actual word instead of a flat number of seconds, is exercised separately below.
+Assert(joinedSceneEvents[0].StartTime == 100 && joinedSceneEvents[0].EndTime == 260,
+    "A joined sexual scene with no transcript word timing available did not fall back to " +
+    "its own unpadded raw range.");
 Assert(joinedSceneEvents[0].SafeDescription == "Sustained sexual activity",
     "Sexual scene safe description fallback was not applied.");
+
+// The word-snapped case: a merged scene's boundary moves to the transcript's own nearest
+// word rather than a flat number of seconds, and does so independently on each side.
+var snapWordedSegment = new TranscriptSegment(0, 600, "words around the scene", new[]
+{
+    new TranscriptWord("Before", 96.0, 96.8),
+    new TranscriptWord("the", 96.8, 97.0),
+    new TranscriptWord("scene", 97.0, 99.4), // spans the raw start of 100
+    new TranscriptWord("begins.", 99.4, 100.6),
+    new TranscriptWord("Afterward", 259.0, 261.5), // spans the raw end of 260
+    new TranscriptWord("she", 261.5, 262.0),
+    new TranscriptWord("left.", 262.0, 262.6),
+});
+var snappedSceneEvents = SceneEventPostProcessor.Process(
+    [
+        new ScanEvent(Guid.NewGuid(), 100, 180, completeSceneMapping.CategoryID,
+            completeSceneMapping.GroupID, completeSceneMapping.EventID, .91, "snap-scene-a"),
+        new ScanEvent(Guid.NewGuid(), 165, 260, completeSceneMapping.CategoryID,
+            completeSceneMapping.GroupID, completeSceneMapping.EventID, .95, "snap-scene-b")
+    ],
+    [snapWordedSegment]);
+Assert(snappedSceneEvents.Count == 1, "Overlapping sexual scene ranges were not joined.");
+// Nearest word start to the raw 100 is "begins."'s own start (99.4); nearest word end to
+// the raw 260 is "Afterward"'s own end (261.5).
+Assert(
+    snappedSceneEvents[0].StartTime == 99.4 && snappedSceneEvents[0].EndTime == 261.5,
+    $"A merged scene's boundary did not snap to the transcript's own nearest word on each " +
+    $"side (got {snappedSceneEvents[0].StartTime}-{snappedSceneEvents[0].EndTime}).");
+
+// Sentence-boundary merge: replaces a flat 45-second gap. Two candidates close in time but
+// separated by a complete, ordinary sentence must NOT merge -- this is the exact fault a
+// tester reported, two brief encounters swallowed into one long skip because they happened
+// to fall within a flat time window of each other.
+var cleanSentenceBetween = SceneEventPostProcessor.Process(
+    [
+        new ScanEvent(Guid.NewGuid(), 80, 110, completeSceneMapping.CategoryID,
+            completeSceneMapping.GroupID, completeSceneMapping.EventID, .91, "sentence-scene-a",
+            "Sustained intimate encounter"),
+        new ScanEvent(Guid.NewGuid(), 120, 140, completeSceneMapping.CategoryID,
+            completeSceneMapping.GroupID, completeSceneMapping.EventID, .95, "sentence-scene-b",
+            "Sustained intimate encounter")
+    ],
+    [new TranscriptSegment(0, 200, "surrounding narration"),
+        new TranscriptSegment(110, 120, "He left the room. Morning came quickly.")]);
+Assert(cleanSentenceBetween.Count == 2,
+    "Two scene candidates separated by a complete, unrelated sentence were merged into one " +
+    "skip despite being only ten seconds apart -- a flat time gap is driving the result " +
+    "instead of the transcript's own content.");
+
+// The same two candidates with only a trailing fragment between them -- no terminator at
+// all -- must still merge, because nothing in the gap is a complete sentence of its own.
+var fragmentBetween = SceneEventPostProcessor.Process(
+    [
+        new ScanEvent(Guid.NewGuid(), 80, 110, completeSceneMapping.CategoryID,
+            completeSceneMapping.GroupID, completeSceneMapping.EventID, .91, "fragment-scene-a",
+            "Sustained intimate encounter"),
+        new ScanEvent(Guid.NewGuid(), 120, 140, completeSceneMapping.CategoryID,
+            completeSceneMapping.GroupID, completeSceneMapping.EventID, .95, "fragment-scene-b",
+            "Sustained intimate encounter")
+    ],
+    [new TranscriptSegment(0, 200, "surrounding narration"),
+        new TranscriptSegment(110, 120, "and then, breathless--")]);
+Assert(fragmentBetween.Count == 1,
+    "Two scene candidates separated only by a trailing fragment with no sentence end were " +
+    "not merged, even though nothing complete separates them.");
+
+// Two candidates with no gap at all (back to back or overlapping) merge regardless -- there
+// is no transcript text between them to contain a sentence in the first place.
+var adjacentCandidates = SceneEventPostProcessor.Process(
+    [
+        new ScanEvent(Guid.NewGuid(), 100, 120, completeSceneMapping.CategoryID,
+            completeSceneMapping.GroupID, completeSceneMapping.EventID, .91, "adjacent-scene-a",
+            "Brief intimate encounter"),
+        new ScanEvent(Guid.NewGuid(), 120, 140, completeSceneMapping.CategoryID,
+            completeSceneMapping.GroupID, completeSceneMapping.EventID, .95, "adjacent-scene-b",
+            "Sustained intimate encounter")
+    ],
+    [new TranscriptSegment(0, 200, "continuous narration throughout")]);
+Assert(adjacentCandidates.Count == 1,
+    "Two immediately adjacent scene candidates with no transcript text between them were " +
+    "not merged.");
+
+// A sentence ending in an abbreviation or initial ("Mr. Adams") must not be mistaken for a
+// sentence break, or ordinary prose would fragment scenes that should stay merged.
+var abbreviationBetween = SceneEventPostProcessor.Process(
+    [
+        new ScanEvent(Guid.NewGuid(), 80, 110, completeSceneMapping.CategoryID,
+            completeSceneMapping.GroupID, completeSceneMapping.EventID, .91, "abbrev-scene-a",
+            "Sustained intimate encounter"),
+        new ScanEvent(Guid.NewGuid(), 120, 140, completeSceneMapping.CategoryID,
+            completeSceneMapping.GroupID, completeSceneMapping.EventID, .95, "abbrev-scene-b",
+            "Sustained intimate encounter")
+    ],
+    [new TranscriptSegment(0, 200, "surrounding narration"),
+        new TranscriptSegment(110, 120, "Mr. Adams knocked")]);
+Assert(abbreviationBetween.Count == 1,
+    "An abbreviation's full stop between two scene candidates was mistaken for a genuine " +
+    "sentence end, splitting a merge that should have held.");
+
+// Terra's model-input context window: sized by sentence structure, never a flat number of
+// seconds, and this window must never become a stored boundary -- only used to decide what
+// text the model reads.
+{
+    var contextSegments = new[]
+    {
+        new TranscriptSegment(0, 10, "Long before this, they had argued in the kitchen."),
+        new TranscriptSegment(10, 20, "That was over now."),
+        new TranscriptSegment(20, 30, "She crossed the room toward him"), // no terminator: mid-thought
+        new TranscriptSegment(30, 40, "and kissed him without a word."),
+        new TranscriptSegment(40, 50, "Later they lay together, breathing slowly."),
+        new TranscriptSegment(50, 60, "Morning came, and with it the ordinary day."),
+        new TranscriptSegment(60, 70, "He made coffee while she dressed."),
+    };
+
+    // The candidate spans 25-45, inside the "she crossed the room... breathing slowly"
+    // passage. Backward, the window must stop expanding once it reaches a segment that
+    // itself closes a sentence -- here, "That was over now." (10-20) -- rather than reading
+    // in the unrelated argument before it. Forward, it must stop at "Morning came..."
+    // (50-60), which itself closes a sentence, rather than continuing into the coffee line.
+    var context = OpenAIContentAnalysisProvider.SentenceBoundedContext(25, 45, contextSegments);
+    Assert(
+        context.Count > 0 && context[0].StartTime == 10,
+        $"Terra's context window did not stop expanding backward at the nearest sentence " +
+        $"boundary (started at {context.FirstOrDefault()?.StartTime}).");
+    Assert(
+        context[^1].EndTime == 60,
+        $"Terra's context window did not stop expanding forward at the nearest sentence " +
+        $"boundary (ended at {context[^1].EndTime}).");
+
+    // A candidate whose surrounding text has no sentence terminator at all within the cap
+    // must still stop at the cap rather than reading indefinitely.
+    var unpunctuated = Enumerable.Range(0, 20)
+        .Select(i => new TranscriptSegment(i * 10, i * 10 + 10, $"word{i} continues without end"))
+        .ToArray();
+    var cappedContext = OpenAIContentAnalysisProvider.SentenceBoundedContext(95, 105, unpunctuated);
+    Assert(
+        cappedContext[0].StartTime >= 95 - 60 && cappedContext[^1].EndTime <= 105 + 60,
+        "An unpunctuated passage's context window expanded past its capped ceiling.");
+    Assert(
+        cappedContext[0].StartTime > 95 - 60 - 10 && cappedContext[^1].EndTime < 105 + 60 + 10,
+        "An unpunctuated passage's context window did not reach its capped ceiling at all.");
+}
+
+// Sol's own boundary rule: a quote-confirmed start, a claimed end no earlier than that
+// start, then up to one second of allowance on each side snapped to the nearest actual word.
+{
+    var solWords = new TranscriptSegment(
+        500, 512, "She paused, then leaned in and kissed him slowly by the fire.", new[]
+        {
+            new TranscriptWord("She", 500.0, 500.3),
+            new TranscriptWord("paused,", 500.3, 500.8),
+            new TranscriptWord("then", 500.8, 501.0),
+            new TranscriptWord("leaned", 501.0, 501.4),
+            new TranscriptWord("in", 501.4, 501.6),
+            new TranscriptWord("and", 501.6, 501.8),
+            new TranscriptWord("kissed", 501.8, 502.3),
+            new TranscriptWord("him", 502.3, 502.5),
+            new TranscriptWord("slowly", 502.5, 503.0),
+            new TranscriptWord("by", 503.0, 503.2),
+            new TranscriptWord("the", 503.2, 503.4),
+            new TranscriptWord("fire.", 503.4, 503.9),
+        });
+
+    // A slightly imprecise proposed timestamp still resolves to the exact confirmed word
+    // boundary, expanded by at most one second and snapped to the nearest real word.
+    var resolved = OpenAIContentAnalysisProvider.ResolveConfirmedSceneBoundary(
+        501.0, 502.6, [solWords]);
+    Assert(
+        resolved.Start == 500.8, // one second back from 501.0 reaches "then" (500.8-501.0)
+        $"Sol's confirmed start did not expand by up to one second and snap to the nearest " +
+        $"word (got {resolved.Start}).");
+    Assert(
+        resolved.End == 503.0, // one second forward from 502.6 reaches "slowly"'s own end (503.0)
+        $"Sol's confirmed end did not expand by up to one second and snap to the nearest " +
+        $"word (got {resolved.End}).");
+
+    // A claimed end earlier than the confirmed start must never produce an inverted range.
+    var invertedGuard = OpenAIContentAnalysisProvider.ResolveConfirmedSceneBoundary(
+        502.3, 500.0, [solWords]);
+    Assert(
+        invertedGuard.End >= invertedGuard.Start,
+        "A claimed end earlier than the confirmed start produced an inverted final range.");
+
+    // The full decision, including rejection: a quote that actually exists in the
+    // transcript confirms and finalizes; an empty quote, or one that does not appear
+    // anywhere in the supplied transcript, is rejected outright rather than falling back
+    // to some other range -- a finalized boundary this pipeline cannot confirm must not
+    // reach a listener presented as confirmed.
+    var confirmedByQuote = OpenAIContentAnalysisProvider.TryConfirmSceneBoundary(
+        "leaned in and kissed him", 502.6, [solWords]);
+    Assert(
+        confirmedByQuote is not null,
+        "A quote that genuinely exists in the transcript was not confirmed.");
+
+    var rejectedForNoQuote = OpenAIContentAnalysisProvider.TryConfirmSceneBoundary(
+        "", 502.6, [solWords]);
+    Assert(
+        rejectedForNoQuote is null,
+        "An escalation with no supporting quote at all was confirmed instead of rejected.");
+
+    var rejectedForFabricatedQuote = OpenAIContentAnalysisProvider.TryConfirmSceneBoundary(
+        "words that never appear in this transcript at all", 502.6, [solWords]);
+    Assert(
+        rejectedForFabricatedQuote is null,
+        "A quote absent from the transcript entirely was confirmed instead of rejected -- " +
+        "this is exactly the fabricated-evidence case the rejection exists to catch.");
+}
+
+// Luna batching: reduced overlap and paragraph/sentence-aligned boundaries instead of a
+// fixed segment count.
+{
+    // A transcript with a clear sentence break near the fixed target boundary: the batch
+    // should land on that break rather than the arbitrary fixed count.
+    var sentenceAlignedSegments = Enumerable.Range(0, 20)
+        .Select(i => new TranscriptSegment(
+            i * 10, i * 10 + 10,
+            i == 7 ? "And that was the end of it." : $"Segment {i} continues the story"))
+        .ToArray();
+    var alignedRanges = OpenAIContentAnalysisProvider.ComputeAnalysisBatchRanges(
+        sentenceAlignedSegments, batchSize: 10);
+    Assert(
+        alignedRanges.Count > 0 && alignedRanges[0].EndExclusive == 8,
+        $"The first batch did not land on the nearby sentence boundary at segment index 7 " +
+        $"(got EndExclusive={alignedRanges.FirstOrDefault().EndExclusive}).");
+
+    // Total coverage: every segment must still be covered by at least one batch, even with
+    // natural-break adjustment.
+    var maxCovered = alignedRanges.Max(range => range.EndExclusive);
+    Assert(
+        maxCovered == sentenceAlignedSegments.Length,
+        $"Paragraph-aligned batching left segments uncovered (covered up to {maxCovered} of " +
+        $"{sentenceAlignedSegments.Length}).");
+
+    // Reduced overlap: two consecutive batches over a long, unpunctuated transcript (so no
+    // natural break shifts the boundary) share close to 15% of a batch, not 50%.
+    var unpunctuatedSegments = Enumerable.Range(0, 40)
+        .Select(i => new TranscriptSegment(i * 10, i * 10 + 10, $"word{i} continues without end"))
+        .ToArray();
+    var unpunctuatedRanges = OpenAIContentAnalysisProvider.ComputeAnalysisBatchRanges(
+        unpunctuatedSegments, batchSize: 10);
+    Assert(unpunctuatedRanges.Count >= 2, "Expected at least two batches over 40 segments.");
+    var firstBatchOverlap = unpunctuatedRanges[0].EndExclusive - unpunctuatedRanges[1].StartIndex;
+    Assert(
+        firstBatchOverlap is >= 0 and <= 3,
+        $"Batch overlap was {firstBatchOverlap} segments against a batch size of 10, which is " +
+        "no longer close to the intended 15% (roughly 1-2 segments), not the old 50%.");
+
+    // Empty transcript produces no batches rather than throwing.
+    Assert(
+        OpenAIContentAnalysisProvider.ComputeAnalysisBatchRanges([], batchSize: 10).Count == 0,
+        "An empty transcript produced a batch range instead of none.");
+}
+
+// Terra entry gate: a lone weak sexual-content mention never reaches Terra at all, but a
+// dense cluster of them, or one alongside a stronger label, still does.
+{
+    var weakDialogueMapping = ContentTaxonomy.Mappings["sexual_suggestive_dialogue"];
+    var weakReferenceMapping = ContentTaxonomy.Mappings["sexual_references"];
+    var explicitMapping = ContentTaxonomy.Mappings["sexual_explicit_activity"];
+    var wideNarrativeSegments = new[] { new TranscriptSegment(0, 1000, "surrounding narration") };
+
+    // A lone isolated flirtatious line, nothing else nearby: excluded.
+    var loneWeakMention = new[]
+    {
+        new ScanEvent(Guid.NewGuid(), 100, 105, weakDialogueMapping.CategoryID,
+            weakDialogueMapping.GroupID, weakDialogueMapping.EventID, .7, "lone-weak"),
+    };
+    Assert(
+        OpenAIContentAnalysisProvider.ExcludeLoneWeakSingletons(
+            loneWeakMention, wideNarrativeSegments).Count == 0,
+        "An isolated flirtatious line with nothing else nearby was still sent toward Terra.");
+
+    // Three weak mentions close together with nothing but continuous narration between
+    // them form a dense cluster and are kept.
+    var denseCluster = new[]
+    {
+        new ScanEvent(Guid.NewGuid(), 100, 105, weakDialogueMapping.CategoryID,
+            weakDialogueMapping.GroupID, weakDialogueMapping.EventID, .7, "cluster-1"),
+        new ScanEvent(Guid.NewGuid(), 106, 110, weakReferenceMapping.CategoryID,
+            weakReferenceMapping.GroupID, weakReferenceMapping.EventID, .7, "cluster-2"),
+        new ScanEvent(Guid.NewGuid(), 111, 115, weakDialogueMapping.CategoryID,
+            weakDialogueMapping.GroupID, weakDialogueMapping.EventID, .7, "cluster-3"),
+    };
+    Assert(
+        OpenAIContentAnalysisProvider.ExcludeLoneWeakSingletons(
+            denseCluster, wideNarrativeSegments).Count == 3,
+        "A dense cluster of three weak mentions with nothing separating them was excluded " +
+        "from reaching Terra.");
+
+    // Two weak mentions separated by a complete sentence of ordinary narrative do not form
+    // a cluster and are excluded individually.
+    var brokenCluster = new[]
+    {
+        new ScanEvent(Guid.NewGuid(), 100, 105, weakDialogueMapping.CategoryID,
+            weakDialogueMapping.GroupID, weakDialogueMapping.EventID, .7, "broken-1"),
+        new ScanEvent(Guid.NewGuid(), 200, 205, weakReferenceMapping.CategoryID,
+            weakReferenceMapping.GroupID, weakReferenceMapping.EventID, .7, "broken-2"),
+    };
+    var brokenSegments = new[]
+    {
+        new TranscriptSegment(0, 1000, "surrounding narration"),
+        new TranscriptSegment(105, 200, "He left the room. Morning came quickly."),
+    };
+    Assert(
+        OpenAIContentAnalysisProvider.ExcludeLoneWeakSingletons(brokenCluster, brokenSegments)
+            .Count == 0,
+        "Two weak mentions separated by a complete sentence of ordinary narrative were " +
+        "treated as one dense cluster.");
+
+    // A lone weak mention sharing an unbroken passage with a stronger label (explicit
+    // activity) is kept as context for that activity rather than excluded as noise.
+    var weakBesideStrong = new[]
+    {
+        new ScanEvent(Guid.NewGuid(), 100, 105, weakDialogueMapping.CategoryID,
+            weakDialogueMapping.GroupID, weakDialogueMapping.EventID, .7, "beside-strong-weak"),
+        new ScanEvent(Guid.NewGuid(), 106, 120, explicitMapping.CategoryID,
+            explicitMapping.GroupID, explicitMapping.EventID, .9, "beside-strong-explicit"),
+    };
+    var keptBesideStrong = OpenAIContentAnalysisProvider.ExcludeLoneWeakSingletons(
+        weakBesideStrong, wideNarrativeSegments);
+    Assert(
+        keptBesideStrong.Any(item => item.StableKey == "beside-strong-weak"),
+        "A weak mention sharing an unbroken passage with a stronger label was excluded " +
+        "instead of kept as context for that activity.");
+}
+
+// Sol dispatch gating: only what is genuinely ambiguous or borderline reaches Sol, so the
+// pipeline stops re-paying for every Terra accept regardless of confidence.
+{
+    const double threshold = .95;
+    OpenAIContentAnalysisProvider.VerifiedSceneCandidate Decision(
+        bool accepted, bool needsEscalation, double confidence) => new(
+        "candidate", accepted, needsEscalation, true, true, 0, 10, confidence, "description");
+
+    // Terra's own needsEscalation flag always sends it to Sol, regardless of confidence.
+    Assert(
+        OpenAIContentAnalysisProvider.NeedsSolReview(Decision(false, true, .99), threshold),
+        "A candidate Terra flagged needsEscalation was not sent to Sol.");
+
+    // A confident accept at or above the threshold skips Sol.
+    Assert(
+        !OpenAIContentAnalysisProvider.NeedsSolReview(Decision(true, false, .97), threshold),
+        "A confident Terra accept above the threshold was still sent to Sol.");
+
+    // An accept just below the threshold still needs Sol's review.
+    Assert(
+        OpenAIContentAnalysisProvider.NeedsSolReview(Decision(true, false, .90), threshold),
+        "A Terra accept below the confidence threshold was not sent to Sol.");
+
+    // A rejected candidate (neither accepted nor flagged) needs nothing further.
+    Assert(
+        !OpenAIContentAnalysisProvider.NeedsSolReview(Decision(false, false, .99), threshold),
+        "A candidate Terra rejected outright was sent to Sol anyway.");
+}
 
 var narrowSceneEvents = SceneEventPostProcessor.Process(
     [
@@ -513,6 +872,194 @@ var retainedSceneEvents = SceneEventPostProcessor.Process(
 Assert(retainedSceneEvents.Count == 1,
     "A verified scene comfortably above the minimum lost its complete-scene skip.");
 
+// End-to-end pipeline: a fixture transcript run through the full updated scanner --
+// deterministic profanity, Luna, narrow-violence policy, the Terra entry gate, Terra, the
+// Sol dispatch gate, Sol, and sentence-boundary scene merging -- asserting the final result
+// is word-snapped and routed the way the overhaul intends.
+{
+    var checkpointRoot = Path.Combine(
+        Path.GetTempPath(), $"audiochoice-e2e-checkpoints-{Guid.NewGuid():N}");
+    try
+    {
+        var e2eOptions = new OpenAIProcessingOptions
+        {
+            AnalysisModel = "gpt-5.6-luna",
+            SceneVerificationModel = "gpt-5.6-terra",
+            SceneEscalationModel = "gpt-5.6-sol",
+            ViolenceVerificationModel = "gpt-5.6-terra",
+            SolEscalationConfidenceThreshold = .95,
+            MinimumEventConfidence = .55,
+        };
+
+        // A transcript with: one profane word (deterministic, never touches Luna), one
+        // ordinary conflict sentence (must not become graphic violence), and one sexual
+        // scene spanning two Luna batches, confirmed at high confidence by Terra without
+        // needing Sol at all.
+        var e2eSegments = new[]
+        {
+            new TranscriptSegment(0, 5, "Damn it, he muttered, and slammed the car door.", new[]
+            {
+                new TranscriptWord("Damn", 0.2, 0.6),
+                new TranscriptWord("it,", 0.6, 0.8),
+            }),
+            new TranscriptSegment(5, 10, "They argued for a while about the schedule."),
+            new TranscriptSegment(
+                10, 20, "She crossed the room and kissed him slowly by the fire.", new[]
+                {
+                    new TranscriptWord("She", 10.0, 10.3),
+                    new TranscriptWord("crossed", 10.3, 10.7),
+                    new TranscriptWord("the", 10.7, 10.9),
+                    new TranscriptWord("room", 10.9, 11.3),
+                    new TranscriptWord("and", 11.3, 11.5),
+                    new TranscriptWord("kissed", 11.5, 12.0),
+                    new TranscriptWord("him", 12.0, 12.2),
+                    new TranscriptWord("slowly", 12.2, 12.7),
+                    new TranscriptWord("by", 12.7, 12.9),
+                    new TranscriptWord("the", 12.9, 13.1),
+                    new TranscriptWord("fire.", 13.1, 13.6),
+                }),
+            new TranscriptSegment(
+                20, 30, "Clothes fell away as they moved together on the rug for a while.", new[]
+                {
+                    new TranscriptWord("Clothes", 20.0, 20.5),
+                    new TranscriptWord("fell", 20.5, 20.8),
+                    new TranscriptWord("away", 20.8, 21.2),
+                    new TranscriptWord("as", 21.2, 21.4),
+                    new TranscriptWord("they", 21.4, 21.6),
+                    new TranscriptWord("moved", 21.6, 22.0),
+                    new TranscriptWord("together", 22.0, 22.6),
+                    new TranscriptWord("on", 22.6, 22.8),
+                    new TranscriptWord("the", 22.8, 23.0),
+                    new TranscriptWord("rug", 23.0, 23.5),
+                    new TranscriptWord("for", 23.5, 23.7),
+                    new TranscriptWord("a", 23.7, 23.8),
+                    new TranscriptWord("while.", 25.8, 26.3),
+                }),
+            new TranscriptSegment(30, 40, "Morning came, and with it the ordinary day."),
+        };
+
+        var e2eModelClient = new FixtureAnalysisModelClient();
+        var e2eDataPaths = new AudioChoiceDataPaths(
+            new FakeWebHostEnvironment(checkpointRoot),
+            new ConfigurationBuilder().Build());
+        var e2eProvider = new OpenAIContentAnalysisProvider(
+            e2eModelClient, e2eOptions, e2eDataPaths,
+            NullLogger<OpenAIContentAnalysisProvider>.Instance);
+
+        var e2eResult = await e2eProvider.Analyze(e2eSegments, null, CancellationToken.None);
+
+        var profanityEvent = e2eResult.SingleOrDefault(
+            item => item.EventID == ContentTaxonomy.Mappings["profanity_mild"].EventID);
+        Assert(
+            profanityEvent is not null && Math.Abs(profanityEvent.StartTime - 0.2) < 0.001 &&
+                Math.Abs(profanityEvent.EndTime - 0.6) < 0.001,
+            "The end-to-end pipeline did not detect the deterministic profanity word at its " +
+            "own word-level timing.");
+
+        Assert(
+            !e2eResult.Any(item => item.EventID == ContentTaxonomy.Mappings["violence_graphic"].EventID),
+            "The end-to-end pipeline reported graphic violence for an ordinary argument.");
+
+        var sceneEvent = e2eResult.SingleOrDefault(
+            item => item.EventID == ContentTaxonomy.Mappings["sexual_complete_scene"].EventID);
+        Assert(
+            sceneEvent is not null,
+            "The end-to-end pipeline did not produce a complete-scene event for the fixture " +
+            "sexual scene.");
+        // Word-snapped, not flat-padded: the scene's boundary must land exactly on one of
+        // the fixture's own word timings, not on some multi-second-padded number.
+        var allWordTimes = e2eSegments
+            .Where(segment => segment.Words is not null)
+            .SelectMany(segment => segment.Words!)
+            .SelectMany(word => new[] { word.StartTime, word.EndTime })
+            .ToHashSet();
+        Assert(
+            allWordTimes.Contains(sceneEvent!.StartTime) && allWordTimes.Contains(sceneEvent.EndTime),
+            $"The end-to-end scene's boundary ({sceneEvent.StartTime}-{sceneEvent.EndTime}) " +
+            "did not land on any of the fixture transcript's own word timings.");
+
+        Assert(
+            e2eModelClient.SolCallCount == 0,
+            "The end-to-end pipeline invoked Sol for a scene Terra confirmed at high " +
+            "confidence, which the Sol dispatch gate exists to avoid.");
+        Assert(
+            e2eModelClient.LunaCallCount >= 1 && e2eModelClient.TerraCallCount >= 1,
+            "The end-to-end pipeline did not exercise Luna and Terra at all.");
+    }
+    finally
+    {
+        if (Directory.Exists(checkpointRoot)) Directory.Delete(checkpointRoot, true);
+    }
+}
+
+// Negative-control regression guard: a book with nothing objectionable in it must produce
+// (near-)zero events after the full pipeline overhaul, so a precision regression (the
+// pipeline over-firing on ordinary prose) is caught here rather than discovered by a
+// listener hearing a false positive. Text drawn from real public-domain openings -- Pride
+// and Prejudice, chapter one -- with no model calls needed at all: every detector this
+// pipeline runs before Luna is deterministic (profanity, the plausibility guard), and this
+// fixture never reaches Luna in the first place because there is nothing for a batch to
+// even contain besides ordinary narration, which is exactly the property being asserted.
+{
+    var knownCleanRoot = Path.Combine(
+        Path.GetTempPath(), $"audiochoice-negative-control-{Guid.NewGuid():N}");
+    try
+    {
+        var cleanOptions = new OpenAIProcessingOptions
+        {
+            AnalysisModel = "gpt-5.6-luna",
+            SceneVerificationModel = "gpt-5.6-terra",
+            SceneEscalationModel = "gpt-5.6-sol",
+        };
+        var cleanModelClient = new FixtureAnalysisModelClient();
+        var cleanDataPaths = new AudioChoiceDataPaths(
+            new FakeWebHostEnvironment(knownCleanRoot),
+            new ConfigurationBuilder().Build());
+        var cleanProvider = new OpenAIContentAnalysisProvider(
+            cleanModelClient, cleanOptions, cleanDataPaths,
+            NullLogger<OpenAIContentAnalysisProvider>.Instance);
+
+        var cleanText = new[]
+        {
+            "It is a truth universally acknowledged, that a single man in possession of a " +
+                "good fortune, must be in want of a wife.",
+            "However little known the feelings or views of such a man may be on his first " +
+                "entering a neighbourhood, this truth is so well fixed in the minds of the " +
+                "surrounding families, that he is considered as the rightful property of " +
+                "some one or other of their daughters.",
+            "\"My dear Mr. Bennet,\" said his lady to him one day, \"have you heard that " +
+                "Netherfield Park is let at last?\"",
+            "Mr. Bennet replied that he had not.",
+            "\"But it is,\" returned she; \"for Mrs. Long has just been here, and she told " +
+                "me all about it.\"",
+            "Mr. Bennet made no answer.",
+            "\"Do not you want to know who has taken it?\" cried his wife impatiently.",
+            "\"You want to tell me, and I have no objection to hearing it.\"",
+            "This was invitation enough.",
+            "\"Why, my dear, you must know, Mrs. Long says that Netherfield is taken by a " +
+                "young man of large fortune from the north of England.\"",
+        };
+        var cleanSegments = cleanText
+            .Select((text, index) => new TranscriptSegment(index * 8.0, index * 8.0 + 7.5, text))
+            .ToArray();
+
+        var cleanResult = await cleanProvider.Analyze(cleanSegments, null, CancellationToken.None);
+
+        Assert(
+            cleanResult.Count == 0,
+            $"A known-clean passage of ordinary narrative produced {cleanResult.Count} " +
+            "event(s); the pipeline is over-firing on prose containing nothing objectionable.");
+        Assert(
+            cleanModelClient.TerraCallCount == 0 && cleanModelClient.SolCallCount == 0,
+            "A known-clean passage with nothing for Luna to propose still reached Terra or " +
+            "Sol, which should never be invoked when there is no candidate to review.");
+    }
+    finally
+    {
+        if (Directory.Exists(knownCleanRoot)) Directory.Delete(knownCleanRoot, true);
+    }
+}
+
 var schedulerProvider = new SchedulerFakeProvider();
 var scheduler = new ConcurrentChunkTranscriber(
     schedulerProvider,
@@ -551,6 +1098,57 @@ var retryScheduler = new ConcurrentChunkTranscriber(
 var retryResult = await retryScheduler.Transcribe(
     [new AudioChunk("retry", 0, 1)], null, CancellationToken.None);
 Assert(retryResult[0].RetryCount == 1, "Transient transcription failure was not retried once.");
+
+// Two audiobooks' chunks must actually transcribe at the same time once the semaphore
+// permits it, not merely be scheduled without visible error. Proven by recording each
+// call's own start/end instant against a wall clock and asserting two windows overlap --
+// which also proves the test would catch the mismatch it exists for: run the identical
+// scenario at a concurrency of one below, and it correctly reports no overlap at all.
+var overlapProvider = new TimestampingFakeProvider(TimeSpan.FromMilliseconds(120));
+var overlapScheduler = new ConcurrentChunkTranscriber(
+    overlapProvider,
+    new OpenAIProcessingOptions { TranscriptionWorkers = 1, TranscriptionConcurrencyPerWorker = 2 },
+    NullLogger<ConcurrentChunkTranscriber>.Instance);
+await overlapScheduler.Transcribe(
+    [new AudioChunk("a", 0, 10), new AudioChunk("b", 10, 20)], null, CancellationToken.None);
+Assert(
+    overlapProvider.Calls.Count == 2 &&
+        overlapProvider.Calls[0].Start < overlapProvider.Calls[1].End &&
+        overlapProvider.Calls[1].Start < overlapProvider.Calls[0].End,
+    "Two chunks did not transcribe concurrently even though the configured concurrency " +
+    "allowed two in flight at once.");
+
+var serializedProvider = new TimestampingFakeProvider(TimeSpan.FromMilliseconds(120));
+var serializedScheduler = new ConcurrentChunkTranscriber(
+    serializedProvider,
+    new OpenAIProcessingOptions { TranscriptionWorkers = 1, TranscriptionConcurrencyPerWorker = 1 },
+    NullLogger<ConcurrentChunkTranscriber>.Instance);
+await serializedScheduler.Transcribe(
+    [new AudioChunk("a", 0, 10), new AudioChunk("b", 10, 20)], null, CancellationToken.None);
+Assert(
+    serializedProvider.Calls[0].End <= serializedProvider.Calls[1].Start ||
+        serializedProvider.Calls[1].End <= serializedProvider.Calls[0].Start,
+    "A concurrency of one still let two chunks overlap, which means the overlap assertion " +
+    "above proves nothing.");
+
+// The raised A100 ceiling (four slots): four chunks submitted together must all run
+// within the same window rather than any of them queuing behind another, which is what
+// "headroom beyond two" actually has to mean if it is to be trusted under real load.
+var fourWayProvider = new TimestampingFakeProvider(TimeSpan.FromMilliseconds(150));
+var fourWayScheduler = new ConcurrentChunkTranscriber(
+    fourWayProvider,
+    new OpenAIProcessingOptions { TranscriptionWorkers = 1, TranscriptionConcurrencyPerWorker = 4 },
+    NullLogger<ConcurrentChunkTranscriber>.Instance);
+var fourWayStart = DateTime.UtcNow;
+await fourWayScheduler.Transcribe(
+    Enumerable.Range(0, 4).Select(i => new AudioChunk($"chunk-{i}", i * 10, i * 10 + 10)).ToArray(),
+    null, CancellationToken.None);
+var fourWayElapsed = DateTime.UtcNow - fourWayStart;
+Assert(fourWayProvider.Calls.Count == 4, "Not all four submitted chunks were transcribed.");
+Assert(
+    fourWayElapsed < TimeSpan.FromMilliseconds(150 * 4),
+    $"Four chunks at a concurrency of four took {fourWayElapsed.TotalMilliseconds:F0}ms, " +
+    "close to four serial calls; none should have queued behind another.");
 
 // Edition identity. A fingerprint is a hash of file bytes, so a converted or
 // re-tagged copy of the same recording gets a different one and every artifact keyed
@@ -935,15 +1533,34 @@ foreach (var excluded in new[] { "violence_mild", "violence_intense", "violence_
         $"{excluded} lost its mapping, so older scans containing it would stop resolving.");
 }
 
-// The prompt lists the allowed labels for the model. It is generated from the same source as
-// the response schema, and this is what proves the generation still covers everything.
-foreach (var label in ContentTaxonomy.EnforcedLabels)
+// The prompt lists the labels Luna itself may emit. It is generated from the same source as
+// the response schema, and this is what proves the generation still covers everything --
+// narrower than the full enforced set, since profanity is excluded from what Luna may
+// propose even though the app still offers its switches.
+Assert(
+    ContentTaxonomy.ModelEmittableLabels.Count == ContentTaxonomy.EnforcedLabels.Count - 4 &&
+        !ContentTaxonomy.ModelEmittableLabels.Any(label => label.StartsWith("profanity_")),
+    "ModelEmittableLabels no longer excludes exactly the four profanity labels from the " +
+    "enforced set.");
+foreach (var label in ContentTaxonomy.ModelEmittableLabels)
 {
     Assert(OpenAIContentAnalysisProvider.AllowedLabelList.Contains(label, StringComparison.Ordinal),
         $"The analysis prompt does not mention the allowed label {label}.");
 }
 Assert(!OpenAIContentAnalysisProvider.AllowedLabelList.Contains("violence_mild", StringComparison.Ordinal),
     "The analysis prompt offers the model a label the policy excludes.");
+foreach (var profanityLabel in new[]
+    { "profanity_mild", "profanity_strong", "profanity_sexual", "profanity_slur" })
+{
+    Assert(
+        !OpenAIContentAnalysisProvider.AllowedLabelList.Contains(profanityLabel, StringComparison.Ordinal),
+        $"The analysis prompt still offers Luna the profanity label {profanityLabel}, which " +
+        "should be deterministic-only.");
+    Assert(
+        ContentTaxonomy.EnforcedLabels.Contains(profanityLabel, StringComparer.Ordinal),
+        $"{profanityLabel} was removed from EnforcedLabels, which would remove its switch " +
+        "from the app even though profanity detection itself is unaffected.");
+}
 
 // Listener reports that filtering was wrong. The only route by which a missed passage
 // becomes something anyone can act on, so what it accepts and refuses matters.
@@ -2594,6 +3211,72 @@ Assert(
     TranscriptWordLocator.FindQuotedSubstring([bookPassage], "crossed her arms") is null,
     "A quoted substring absent from every supplied passage was located anyway.");
 
+// The shared word-snap primitive every later boundary fix builds on.
+{
+    var snapWords = new TranscriptSegment(300, 310, "He paused before the door and knocked twice.", new[]
+    {
+        new TranscriptWord("He", 300.0, 300.2),
+        new TranscriptWord("paused", 300.2, 300.6),
+        new TranscriptWord("before", 300.6, 300.9),
+        new TranscriptWord("the", 300.9, 301.0),
+        new TranscriptWord("door", 301.0, 301.4),
+        new TranscriptWord("and", 301.4, 301.6),
+        new TranscriptWord("knocked", 301.6, 302.1),
+        new TranscriptWord("twice.", 302.1, 302.5),
+    });
+
+    // An exact word match snaps to itself.
+    var exact = TranscriptWordLocator.SnapToNearestWord([snapWords], 301.0, 301.4);
+    Assert(
+        exact is { } exactSpan && exactSpan.Start == 301.0 && exactSpan.End == 301.4,
+        "A proposed boundary exactly on a word's own timing was not snapped to itself.");
+
+    // A boundary sitting between two words snaps to the nearer one.
+    var between = TranscriptWordLocator.SnapToNearestWord([snapWords], 300.7, 301.45);
+    Assert(
+        between is { } betweenSpan &&
+            betweenSpan.Start == 300.6 && // 300.7 is nearer "before" (300.6-300.9)'s start than "the"'s
+            betweenSpan.End == 301.4, // 301.45 is nearer "door"'s end (301.4) than "and"'s end (301.6)
+        "A boundary between two words was not snapped to the nearer one.");
+
+    // A boundary far outside the transcript still resolves to the nearest real word rather
+    // than being left unsnapped or thrown.
+    var beyond = TranscriptWordLocator.SnapToNearestWord([snapWords], -500, 9999);
+    Assert(
+        beyond is { } beyondSpan &&
+            beyondSpan.Start == 300.0 && beyondSpan.End == 302.5,
+        "A boundary far outside the transcript's own range was not clamped to its nearest word.");
+
+    // No word list at all (a transcript saved before word timings existed) must fall back
+    // gracefully rather than throw or invent a boundary.
+    var noWords = new TranscriptSegment(300, 310, "He paused before the door.");
+    Assert(
+        TranscriptWordLocator.SnapToNearestWord([noWords], 301, 302) is null,
+        "A transcript with no word timing returned a snap instead of falling back.");
+
+    // Expansion moves one word boundary outward at a time within the cap, not as far as the
+    // cap could reach: one second past "door"'s end (301.4) could reach all the way to
+    // "knocked"'s end (302.1), but the nearest boundary beyond 301.4 is "and"'s own end
+    // (301.6), and that is what a one-second allowance must snap to.
+    var expanded = TranscriptWordLocator.ExpandAndSnap([snapWords], 301.0, 301.4, 1.0);
+    Assert(
+        expanded is { } expandedSpan && expandedSpan.End == 301.6,
+        $"Expanding one second past a word's end did not snap to the nearest word boundary " +
+        $"beyond it (got {expanded?.End}).");
+
+    // An expansion cap that reaches no word at all (an isolated word with nothing within
+    // range) falls back to the nearest word to the original point rather than to nothing.
+    var isolated = new TranscriptSegment(400, 401, "Wait.", new[]
+    {
+        new TranscriptWord("Wait.", 400.0, 400.4),
+    });
+    var noRoomToExpand = TranscriptWordLocator.ExpandAndSnap([isolated], 400.0, 400.4, 0.1);
+    Assert(
+        noRoomToExpand is { } noRoomSpan &&
+            noRoomSpan.Start == 400.0 && noRoomSpan.End == 400.4,
+        "A tiny expansion cap with no other word nearby did not fall back to the original word.");
+}
+
 // Comparing two transcripts directly, for the case chapter structure and a retail identifier
 // cannot reach: two files whose reported runtime disagrees for a reason that turns out to be
 // a wrong client-reported duration rather than different audio. Built from the exact shape
@@ -2728,6 +3411,105 @@ static void Assert(bool condition, string message)
     }
 }
 
+/// <summary>The minimum needed to construct AudioChoiceDataPaths against a temp directory.</summary>
+sealed class FakeWebHostEnvironment(string contentRootPath) : IWebHostEnvironment
+{
+    public string ContentRootPath { get; set; } = contentRootPath;
+    public string EnvironmentName { get; set; } = "Test";
+    public string ApplicationName { get; set; } = "AudioChoice.Api.ContractTests";
+    public string WebRootPath { get; set; } = contentRootPath;
+    public Microsoft.Extensions.FileProviders.IFileProvider ContentRootFileProvider { get; set; } =
+        new Microsoft.Extensions.FileProviders.NullFileProvider();
+    public Microsoft.Extensions.FileProviders.IFileProvider WebRootFileProvider { get; set; } =
+        new Microsoft.Extensions.FileProviders.NullFileProvider();
+}
+
+/// <summary>
+/// Answers Luna, Terra and Sol calls with fixed, recognizable decisions rather than a real
+/// model, so the end-to-end pipeline test proves the scanner's own routing and boundary
+/// logic without depending on model behavior at all.
+/// </summary>
+sealed class FixtureAnalysisModelClient : IAnalysisModelClient
+{
+    public string ProviderName => "fixture";
+    public int LunaCallCount { get; private set; }
+    public int TerraCallCount { get; private set; }
+    public int SolCallCount { get; private set; }
+
+    public Task<AnalysisModelResponse> CompleteJson(
+        string model,
+        string input,
+        string schemaName,
+        System.Text.Json.Nodes.JsonObject schema,
+        CancellationToken cancellationToken)
+    {
+        var json = schemaName switch
+        {
+            "audiochoice_scan_events" => RespondToLuna(input),
+            "audiochoice_violence_verification" => """{"candidates":[]}""",
+            "audiochoice_scene_verification" => RespondToSceneVerification(model, input),
+            _ => throw new InvalidOperationException($"Unexpected schema {schemaName}."),
+        };
+        return Task.FromResult(new AnalysisModelResponse(json));
+    }
+
+    /// <summary>
+    /// Luna's fixed answer: the fixture sexual scene, whichever batch(es) it falls in,
+    /// reported as one implied-activity event plus the required accompanying complete-scene
+    /// event -- exactly the pairing the real prompt requires ("ALWAYS emit
+    /// sexual_complete_scene alongside..."). Never reports profanity (Luna no longer may)
+    /// or graphic violence for the fixture's ordinary argument.
+    /// </summary>
+    private string RespondToLuna(string input)
+    {
+        LunaCallCount += 1;
+        if (!input.Contains("kissed him slowly", StringComparison.Ordinal))
+        {
+            return """{"events":[]}""";
+        }
+        return """
+        {"events":[
+          {"label":"sexual_implied_activity","startTime":10,"endTime":30,"confidence":0.8,
+           "safeDescription":"An intimate encounter is implied","profanityWord":null,
+           "quote":"kissed him slowly"},
+          {"label":"sexual_complete_scene","startTime":10,"endTime":30,"confidence":0.8,
+           "safeDescription":"A sustained intimate encounter","profanityWord":null,
+           "quote":"kissed him slowly"}
+        ]}
+        """;
+    }
+
+    /// <summary>
+    /// Terra's fixed answer: accepts the scene at 0.97 confidence -- above
+    /// SolEscalationConfidenceThreshold (0.95) -- so the Sol dispatch gate keeps it from
+    /// ever reaching Sol, which is exactly the routing this test exists to prove.
+    /// </summary>
+    private string RespondToSceneVerification(string model, string input)
+    {
+        if (model == "gpt-5.6-sol") SolCallCount += 1;
+        else TerraCallCount += 1;
+
+        var candidateKeyStart = input.IndexOf("\"candidateKey\":\"", StringComparison.Ordinal);
+        var candidateKey = "unknown";
+        if (candidateKeyStart >= 0)
+        {
+            var valueStart = candidateKeyStart + "\"candidateKey\":\"".Length;
+            var valueEnd = input.IndexOf('"', valueStart);
+            if (valueEnd > valueStart) candidateKey = input[valueStart..valueEnd];
+        }
+
+        return $$"""
+        {"candidates":[
+          {"candidateKey":"{{candidateKey}}","accepted":true,"needsEscalation":false,
+           "directSexualActEvidence":true,"sustainedBeyondKissing":true,
+           "startTime":10,"endTime":29,"confidence":0.97,
+           "safeDescription":"Sustained consensual sexual activity",
+           "quote":"crossed the room and kissed"}
+        ]}
+        """;
+    }
+}
+
 sealed class FakeAudioChunker : IAudioChunker
 {
     public async IAsyncEnumerable<AudioChunk> CreateChunks(
@@ -2749,6 +3531,26 @@ sealed class FakeTranscriptionProvider : ITranscriptionProvider
         CancellationToken cancellationToken) =>
         Task.FromResult<IReadOnlyList<TranscriptSegment>>(
             [new TranscriptSegment(0, 5, "test")]);
+}
+
+/// <summary>
+/// Records the wall-clock window of every call it receives, which is what proves two
+/// chunks actually ran at the same time rather than merely being scheduled without error.
+/// </summary>
+sealed class TimestampingFakeProvider(TimeSpan delay) : ITranscriptionProvider
+{
+    private readonly System.Collections.Concurrent.ConcurrentQueue<(DateTime Start, DateTime End)> _calls = new();
+    public string ModelName => "timestamping-test-model";
+    public IReadOnlyList<(DateTime Start, DateTime End)> Calls => _calls.ToArray();
+
+    public async Task<IReadOnlyList<TranscriptSegment>> Transcribe(
+        AudioChunk chunk, CancellationToken cancellationToken)
+    {
+        var start = DateTime.UtcNow;
+        await Task.Delay(delay, cancellationToken);
+        _calls.Enqueue((start, DateTime.UtcNow));
+        return [new TranscriptSegment(0, 1, chunk.FilePath)];
+    }
 }
 
 sealed class SchedulerFakeProvider : ITranscriptionProvider
