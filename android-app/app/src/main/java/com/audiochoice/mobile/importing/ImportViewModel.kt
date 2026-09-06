@@ -665,6 +665,23 @@ class ImportViewModel(
         while (true) {
             val response = try {
                 api.scanJob(accessToken, scanID)
+            } catch (notFound: com.audiochoice.mobile.data.ApiException) {
+                // A 404 here means the scan job itself is gone -- not a network hiccup, which
+                // is everything else this catches. Retrying forever on a job that no longer
+                // exists left a listener stuck reconnecting indefinitely with no way out from
+                // inside the app, surviving even a force-stop because the scan ID this resumes
+                // from is saved to disk in ActiveScanStore.
+                if (notFound.statusCode == 404) {
+                    activeScanStore.clear()
+                    error(
+                        "That scan is no longer available. Please import this audiobook again.",
+                    )
+                }
+                mutableState.value = mutableState.value.copy(
+                    statusMessage = "The cloud scan is still running. AudioChoice will reconnect automatically.",
+                )
+                delay(15_000)
+                continue
             } catch (_: Exception) {
                 mutableState.value = mutableState.value.copy(
                     statusMessage = "The cloud scan is still running. AudioChoice will reconnect automatically.",
