@@ -164,6 +164,7 @@ fun AudioChoiceApp(
                 incomingCompanionTransferUri,
                 onExternalAudioHandled,
                 onCompanionTransferHandled,
+                onDeleteAccount = auth::deleteAccount,
             )
         }
     }
@@ -500,6 +501,7 @@ private fun LibraryShell(
     incomingCompanionTransferUri: StateFlow<Uri?>,
     onExternalAudioHandled: () -> Unit,
     onCompanionTransferHandled: () -> Unit,
+    onDeleteAccount: (onResult: (String?) -> Unit) -> Unit = { it(null) },
 ) {
     val context = androidx.compose.ui.platform.LocalContext.current
     var selected by rememberSaveable { mutableIntStateOf(0) }
@@ -856,6 +858,7 @@ private fun LibraryShell(
                             { profilePage = ProfilePage.VOICE_MEASUREMENT }
                         } else null,
                         onLogout = onLogout,
+                        onDeleteAccount = onDeleteAccount,
                         accountPlan = libraryState.accountPlan,
                     )
                     ProfilePage.FAQ -> FaqScreen(api) { profilePage = ProfilePage.MAIN }
@@ -1515,8 +1518,11 @@ private fun ProfileScreen(
     /** Null outside the experimental build, where the row must not appear at all. */
     onVoiceMeasurement: (() -> Unit)? = null,
     onLogout: () -> Unit,
+    onDeleteAccount: (onResult: (String?) -> Unit) -> Unit = { it(null) },
 ) {
     val context = androidx.compose.ui.platform.LocalContext.current
+    var confirmDelete by rememberSaveable { mutableStateOf(false) }
+    var deletingAccount by rememberSaveable { mutableStateOf(false) }
     fun openUrl(url: String, preferDiscord: Boolean = false) {
         if (url.isBlank() || url.startsWith("REPLACE_")) {
             Toast.makeText(context, "The feedback form will be available soon.", Toast.LENGTH_SHORT).show()
@@ -1607,7 +1613,40 @@ private fun ProfileScreen(
         }
         Spacer(Modifier.height(18.dp))
         OutlinedButton(onClick = onLogout, modifier = Modifier.fillMaxWidth().height(50.dp)) { Text("Sign out") }
+        Spacer(Modifier.height(10.dp))
+        OutlinedButton(
+            onClick = { confirmDelete = true },
+            enabled = !deletingAccount,
+            modifier = Modifier.fillMaxWidth().height(50.dp),
+            colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.error),
+        ) { Text(if (deletingAccount) "Deleting…" else "Delete Account") }
         Spacer(Modifier.height(20.dp))
+    }
+    if (confirmDelete) {
+        AlertDialog(
+            onDismissRequest = { confirmDelete = false },
+            title = { Text("Delete your AudioChoice account?") },
+            text = {
+                Text(
+                    "This permanently deletes your library, filter choices, and account. This " +
+                        "cannot be undone. If you have an active subscription, cancel it " +
+                        "separately in your Play Store subscription settings.",
+                )
+            },
+            dismissButton = { TextButton(onClick = { confirmDelete = false }) { Text("Cancel") } },
+            confirmButton = {
+                TextButton(onClick = {
+                    confirmDelete = false
+                    deletingAccount = true
+                    onDeleteAccount { failure ->
+                        deletingAccount = false
+                        if (failure != null) {
+                            Toast.makeText(context, failure, Toast.LENGTH_LONG).show()
+                        }
+                    }
+                }) { Text("Delete", color = MaterialTheme.colorScheme.error) }
+            },
+        )
     }
 }
 

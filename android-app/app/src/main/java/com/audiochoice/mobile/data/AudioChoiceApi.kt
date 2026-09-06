@@ -75,6 +75,16 @@ class AudioChoiceApi(private val json: Json) {
         request<Unit>("POST", "/v1/auth/logout", null, accessToken)
     }
 
+    /**
+     * Permanently deletes the signed-in account: library, bookmarks, filter settings,
+     * entitlements, and any active subscription's server-side record. Does not cancel an active
+     * Play Store subscription automatically -- that is managed through the listener's own Play
+     * Store subscription settings, since only Google can stop the billing itself.
+     */
+    suspend fun deleteAccount(accessToken: String) {
+        request<Unit>("DELETE", "/v1/account", null, accessToken)
+    }
+
     suspend fun sendSupportMessage(
         accessToken: String,
         supportRequest: SupportMessageRequest,

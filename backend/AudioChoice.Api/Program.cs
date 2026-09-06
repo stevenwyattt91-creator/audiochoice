@@ -829,6 +829,27 @@ app.MapGet("/v1/account/access", (HttpContext context, IEntitlementStore entitle
     return user is null ? Results.Unauthorized() : Results.Ok(entitlements.Access(user.ID));
 });
 
+// Permanent and irreversible: deletes the account and everything that cascades from it (library,
+// bookmarks, filter settings, entitlements, companion transfers, filter reports, affiliate
+// attribution). Required by App Store Review Guideline 5.1.1(v) for any app that lets someone
+// create an account.
+app.MapDelete("/v1/account", (HttpContext context, IAccountStore accounts) =>
+{
+    var user = CurrentUser(context);
+    if (user is null) return Results.Unauthorized();
+    return accounts.DeleteAccount(user.ID) switch
+    {
+        AccountDeletionResult.Deleted => Results.NoContent(),
+        AccountDeletionResult.NotFound => Results.NotFound(),
+        AccountDeletionResult.Blocked => Results.Conflict(new
+        {
+            error = "This account cannot be deleted automatically because it has audit or " +
+                "administrative work on record. Contact support@audiochoiceapp.com to have it removed."
+        }),
+        _ => Results.Problem(statusCode: 500),
+    };
+});
+
 app.MapPost("/v1/admin/accounts/{userID:guid}/entitlements", (
     Guid userID,
     EntitlementGrantRequest request,

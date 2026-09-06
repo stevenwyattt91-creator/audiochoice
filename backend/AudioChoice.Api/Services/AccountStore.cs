@@ -28,6 +28,28 @@ public interface IAccountStore
     /// on whichever account it happens to match, silently.
     /// </remarks>
     Guid? FindUserIDByEmail(string email);
+
+    /// <summary>
+    /// Permanently deletes an account and everything that references it by foreign key with
+    /// cascading delete: identities, sessions, action tokens, library books, bookmarks, filter
+    /// profiles and settings, entitlements, companion transfers, conversion consents, filter
+    /// reports, and affiliate referral attribution.
+    /// </summary>
+    /// <remarks>
+    /// <see cref="AccountDeletionResult.Blocked"/> covers the one case that cannot cascade: an
+    /// account that is also an internal auditor/admin and has created, been assigned, reviewed, or
+    /// approved audit work. Those rows require an operator's judgment about reassigning or
+    /// discarding that work, so this refuses rather than either deleting the account underneath work
+    /// still in progress or silently leaving it half-deleted.
+    /// </remarks>
+    AccountDeletionResult DeleteAccount(Guid userID);
+}
+
+public enum AccountDeletionResult
+{
+    Deleted,
+    NotFound,
+    Blocked,
 }
 
 public sealed record RegistrationResult(
@@ -190,6 +212,20 @@ public sealed class FileAccountStore : IAccountStore
         }
     }
 
+    public AccountDeletionResult DeleteAccount(Guid userID)
+    {
+        lock (_lock)
+        {
+            var removed = _state.Accounts.RemoveAll(value => value.ID == userID);
+            if (removed == 0) return AccountDeletionResult.NotFound;
+            _state.Sessions.RemoveAll(value => value.AccountID == userID);
+            _state.EmailVerifications.RemoveAll(value => value.AccountID == userID);
+            _state.PasswordResets.RemoveAll(value => value.AccountID == userID);
+            _state.LinkedIdentities.RemoveAll(value => value.AccountID == userID);
+            Persist();
+            return AccountDeletionResult.Deleted;
+        }
+    }
 
     public bool VerifyEmail(string token)
     {
