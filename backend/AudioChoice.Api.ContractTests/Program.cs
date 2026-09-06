@@ -412,12 +412,60 @@ var pipelineResult = await pipeline.Process(
 Assert(
     transcriptStore.Transcript?.Segments.Single().StartTime == 10,
     "Chunk timestamp offset was not applied.");
+// Whisper's word timings are relative to the chunk it transcribed, exactly like the segment
+// they sit inside. Only the segment bounds used to be shifted to absolute audiobook time,
+// which left every word in a chunk after the first pointing at the wrong place in the audio
+// once flattened out of its segment by TranscriptWordLocator, DeterministicContentDetector,
+// or ReaderAlignment.
+Assert(
+    transcriptStore.Transcript?.Segments.Single().Words?.Single().StartTime == 10,
+    "Chunk timestamp offset was not applied to word-level timings.");
 Assert(
     transcriptStore.SaveCount == 2 && transcriptStore.Transcript?.IsComplete == true,
     "Partial and completed transcript checkpoints were not saved.");
 Assert(
     pipelineResult.ScannerVersion == "contract-test",
     "Pipeline scanner version was not returned.");
+
+// The materialized path (what ScanWorker actually runs against real uploads) offsets each
+// chunk's segments to absolute audiobook time separately from the streaming path above.
+// This must apply to word-level timings too, or every word past the first chunk resolves to
+// the wrong position once flattened out of its segment by TranscriptWordLocator,
+// DeterministicContentDetector, or ReaderAlignment.
+var materializedTranscriptStore = new CapturingTranscriptStore();
+var materializedPipeline = new ScanPipeline(
+    new TwoChunkMaterializedAudioChunker(),
+    new ChunkRelativeTranscriptionProvider(),
+    new FakeAnalysisProvider(),
+    materializedTranscriptStore,
+    new OpenAIProcessingOptions { TranscriptionWorkers = 1, TranscriptionConcurrencyPerWorker = 1 },
+    new ConcurrentChunkTranscriber(
+        new ChunkRelativeTranscriptionProvider(),
+        new OpenAIProcessingOptions { TranscriptionWorkers = 1, TranscriptionConcurrencyPerWorker = 1 },
+        NullLogger<ConcurrentChunkTranscriber>.Instance));
+
+await materializedPipeline.Process(
+    upload with { IsUploaded = true, StoredPath = "/private/materialized-test.audio" },
+    null,
+    CancellationToken.None);
+
+var materializedSegments = materializedTranscriptStore.Transcript!.Segments
+    .OrderBy(segment => segment.StartTime)
+    .ToArray();
+Assert(
+    materializedSegments.Length == 2,
+    "Materialized pipeline did not produce one segment per chunk.");
+Assert(
+    materializedSegments[0].StartTime == 1 && materializedSegments[0].Words?.Single().StartTime == 1,
+    "First chunk's segment/word timing should already be near-absolute with no meaningful offset.");
+Assert(
+    materializedSegments[1].StartTime == 601,
+    "Materialized pipeline did not offset the second chunk's segment to absolute time.");
+Assert(
+    materializedSegments[1].Words?.Single().StartTime == 601 &&
+    materializedSegments[1].Words?.Single().EndTime == 602,
+    "Materialized pipeline did not offset the second chunk's word timings to absolute time; " +
+    "they were left relative to the chunk, which is where they resolve to the wrong audio position.");
 
 var temporaryAudio = Path.GetTempFileName();
 var chunkPaths = new List<string>();
@@ -2843,6 +2891,36 @@ sealed class FakeAudioChunker : IAudioChunker
     }
 }
 
+/// <summary>
+/// Exercises the pre-materialized path (<c>ScanPipeline.ProcessMaterialized</c>), which is
+/// what production actually runs. Two chunks so the offset applied to the second one's
+/// words is not indistinguishable from a bug that only shifts the first chunk correctly.
+/// </summary>
+sealed class TwoChunkMaterializedAudioChunker : IAudioChunker, IPreMaterializedAudioChunker
+{
+    public IAsyncEnumerable<AudioChunk> CreateChunks(
+        string audioFilePath, CancellationToken cancellationToken) =>
+        throw new NotSupportedException("This fake only exercises the materialized path.");
+
+    public Task<IReadOnlyList<AudioChunk>> Materialize(
+        string audioFilePath, CancellationToken cancellationToken) =>
+        Task.FromResult<IReadOnlyList<AudioChunk>>(
+            [new AudioChunk("chunk-0", 0, 600), new AudioChunk("chunk-1", 600, 1200)]);
+}
+
+sealed class ChunkRelativeTranscriptionProvider : ITranscriptionProvider
+{
+    public string ModelName => "chunk-relative-fake";
+
+    // Whisper reports word timings relative to the chunk it was handed, always starting near
+    // zero regardless of where that chunk sits in the audiobook. Real transcription behaves
+    // exactly the same way; this fake exists to make that shape reproducible in a test.
+    public Task<IReadOnlyList<TranscriptSegment>> Transcribe(
+        AudioChunk chunk, CancellationToken cancellationToken) =>
+        Task.FromResult<IReadOnlyList<TranscriptSegment>>(
+            [new TranscriptSegment(1, 2, "word", [new TranscriptWord("word", 1, 2)])]);
+}
+
 sealed class FakeTranscriptionProvider : ITranscriptionProvider
 {
     public string ModelName => "fake-transcriber";
@@ -2851,7 +2929,7 @@ sealed class FakeTranscriptionProvider : ITranscriptionProvider
         AudioChunk chunk,
         CancellationToken cancellationToken) =>
         Task.FromResult<IReadOnlyList<TranscriptSegment>>(
-            [new TranscriptSegment(0, 5, "test")]);
+            [new TranscriptSegment(0, 5, "test", [new TranscriptWord("test", 0, 5)])]);
 }
 
 /// <summary>
