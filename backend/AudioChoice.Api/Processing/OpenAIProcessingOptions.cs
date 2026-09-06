@@ -84,12 +84,36 @@ public sealed class OpenAIProcessingOptions
     /// </remarks>
     public string ViolenceVerificationModel { get; init; } = string.Empty;
 
+    /// <summary>
+    /// The Terra confidence at or above which an accepted scene finalizes directly, skipping
+    /// Sol entirely.
+    /// </summary>
+    /// <remarks>
+    /// Previously every Terra-accepted scene, regardless of confidence, was re-paid-for at
+    /// Sol -- "double-paying on the easy path" per the backend filtering checklist. Terra's
+    /// own prompt already requires both evidence booleans and at least 0.85 confidence before
+    /// it may accept a scene at all, so an accepted scene is never a guess; a genuinely
+    /// ambiguous or borderline one is what <c>needsEscalation</c> exists to flag, and that
+    /// path is untouched. Set above 0.85 -- deliberately higher than the minimum Terra's own
+    /// prompt already enforces for "accepted" -- so only Terra's clearest calls skip the
+    /// second pass; anything less certain, including an accepted scene that only barely
+    /// cleared 0.85, still gets Sol's review.
+    /// </remarks>
+    public double SolEscalationConfidenceThreshold { get; init; } = .95;
+
     /// <summary>The violence verifier, or the scene verifier when none is set.</summary>
     public string EffectiveViolenceVerificationModel =>
         string.IsNullOrWhiteSpace(ViolenceVerificationModel)
             ? SceneVerificationModel
             : ViolenceVerificationModel;
-    public string ScannerVersion { get; init; } = "3.6";
+    // Bumped for the concurrency/word-snap/sentence-boundary overhaul: word-snapped scene
+    // boundaries (replacing flat second-based padding and clamps), sentence-boundary scene
+    // merging (replacing the flat 45s gap), a Terra entry gate excluding lone weak
+    // singletons, Sol dispatch gated to only ambiguous/low-confidence Terra results, and
+    // Luna no longer proposing profanity labels. Results are stored per edition and scanner
+    // version, so this writes new rows rather than overwriting results from the prior
+    // pipeline.
+    public string ScannerVersion { get; init; } = "5.0-word-snapped";
     /// <summary>Only jobs in this lane may be claimed by this worker instance.</summary>
     public string ProcessingLane { get; init; } = ScanProcessingLanes.AzureOpenAI;
     /// <summary>

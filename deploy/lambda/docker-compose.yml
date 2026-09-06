@@ -15,7 +15,15 @@ services:
       WHISPER_DEVICE: cuda
       WHISPER_COMPUTE_TYPE: float16
       WHISPER_WORKERS: ${WHISPER_WORKERS:-1}
-      WHISPER_CONCURRENCY_PER_WORKER: ${WHISPER_CONCURRENCY_PER_WORKER:-2}
+      # Raised from 2. This A100 is dedicated to this workload alone (no shared TTS
+      # synthesis load -- see SynthesisRouter's endpoint-collision guard), and
+      # large-v3-turbo's VRAM footprint leaves headroom for more than two chunks
+      # in flight. Four is a safer starting ceiling, not a measured maximum: watch
+      # for "transcription_slot_saturated" log lines (queue wait time staying above
+      # WHISPER_SATURATION_WARNING_SECONDS) to tell whether to raise it further, and
+      # watch GPU memory/utilization under real load before raising it again.
+      WHISPER_CONCURRENCY_PER_WORKER: ${WHISPER_CONCURRENCY_PER_WORKER:-4}
+      WHISPER_SATURATION_WARNING_SECONDS: ${WHISPER_SATURATION_WARNING_SECONDS:-5}
     deploy:
       resources:
         reservations:
@@ -66,10 +74,14 @@ services:
       # applies this explicitly and no longer uses HttpClient's 100-second default.
       AudioChoice__OpenAI__FasterWhisperTimeoutSeconds: "900"
       AudioChoice__OpenAI__ScanWorkerConcurrency: "2"
-      # Two end-to-end lanes share two total GPU transcription slots. Avoid
-      # creating a deep per-lane HTTP backlog behind the Whisper semaphore.
+      # Must match whisper's own WHISPER_WORKERS * WHISPER_CONCURRENCY_PER_WORKER
+      # above. This used to be 1x1, which serialized every transcription request
+      # behind a single semaphore slot even though the GPU server itself already
+      # had open slots -- so a second scan lane's job sat idle waiting on this
+      # side while the GPU sat idle on the other. Kept at four in step with the
+      # GPU's own ceiling above; raise both together, never just one.
       AudioChoice__OpenAI__TranscriptionWorkers: "1"
-      AudioChoice__OpenAI__TranscriptionConcurrencyPerWorker: "1"
+      AudioChoice__OpenAI__TranscriptionConcurrencyPerWorker: "4"
       # Bounded parallel model work: independent transcript windows can run together,
       # while Terra remains the gate before any Sol escalation.
       AudioChoice__OpenAI__ContentAnalysisConcurrency: "2"

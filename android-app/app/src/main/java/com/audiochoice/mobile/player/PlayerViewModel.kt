@@ -1517,13 +1517,49 @@ class PlayerViewModel(
         if (pendingFilterSeekTargetMs == targetMs) return
 
         pendingFilterSeekTargetMs = targetMs
-        controller?.seekTo(targetMs)
+        seekAcrossFilterSkip(targetMs)
+    }
+
+    /** The in-flight fade around a filter skip, if one is running. */
+    private var filterFadeJob: kotlinx.coroutines.Job? = null
+
+    /**
+     * Seeks across a word-snapped filter boundary with a short fade either side, instead of
+     * an instant volume cut at the exact sample the boundary lands on.
+     */
+    private fun seekAcrossFilterSkip(targetMs: Long) {
+        filterFadeJob?.cancel()
+        filterFadeJob = viewModelScope.launch {
+            fadeVolume(to = 0f)
+            controller?.seekTo(targetMs)
+            fadeVolume(to = 1f)
+        }
+    }
+
+    private suspend fun fadeVolume(to: Float) {
+        val startingVolume = controller?.volume ?: return
+        repeat(FILTER_FADE_STEPS) { step ->
+            val fraction = (step + 1) / FILTER_FADE_STEPS.toFloat()
+            controller?.volume = startingVolume + (to - startingVolume) * fraction
+            delay(FILTER_FADE_STEP_MS)
+        }
     }
 
     private companion object {
         const val FILTER_LOOK_AHEAD_SECONDS = 0.25
         const val FILTER_EXIT_PADDING_SECONDS = 0.20
         const val FILTER_SEEK_TOLERANCE_MS = 25L
+
+        /**
+         * A word-snapped skip boundary lands exactly where the transcript's own word timing
+         * says it should, which is not the same as landing on a silent sample: an abrupt
+         * volume change there is audible as a click. Fading across the seek instead of
+         * cutting at it trades that click for a fade too brief to notice as a fade -- the
+         * upper end of the range this exists to stay under, since a longer one would itself
+         * become audible as fading in and out.
+         */
+        const val FILTER_FADE_STEPS = 8
+        const val FILTER_FADE_STEP_MS = 25L // 8 * 25ms = 200ms fade either side of the seek.
 
         /**
          * How far behind the saved position an idle adopted player may sit before the

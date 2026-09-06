@@ -11,21 +11,6 @@ namespace AudioChoice.Api.Processing;
 /// </summary>
 public static class SceneEventPostProcessor
 {
-    private const double MergeGapSeconds = 45;
-    /// <summary>
-    /// Seconds added either side of a merged scene, so a skip does not clip its own edges.
-    ///
-    /// Reduced from eight to three. Eight was chosen to be safe and cost sixteen seconds on
-    /// every scene, which on a book with forty of them is more than ten minutes of audio
-    /// removed for margin alone. Three still covers the case this exists for -- a transcript
-    /// boundary landing a word or two early -- without turning caution into the largest single
-    /// contributor to how much of a book disappears.
-    ///
-    /// Applies only to complete scenes. A short event keeps the narrowest bounds the model
-    /// supported, because padding a three-word phrase is how a phrase becomes a passage.
-    /// </summary>
-    private const double SafetyPaddingSeconds = 3;
-
     /// <summary>
     /// The shortest merged range still worth a scene-level skip.
     /// </summary>
@@ -44,7 +29,10 @@ public static class SceneEventPostProcessor
     ///
     /// Kept rather than removed. A floor still stops a single explicit sentence and its padding
     /// from becoming a scene-sized skip, and every range reaching here has already cleared two
-    /// verification passes at 0.85 confidence.
+    /// verification passes at 0.85 confidence. Measured against the cluster's own raw span,
+    /// before word-snapping: snapping moves an edge by at most the distance to the nearest real
+    /// word, never by the multi-second amount a flat pad used to add, so there is nothing left
+    /// to double-count here the way the old floor had to account for its own padding.
     /// </remarks>
     private const double MinimumCompleteSceneSeconds = 15;
 
@@ -70,26 +58,24 @@ public static class SceneEventPostProcessor
         foreach (var candidate in sceneEvents.Skip(1))
         {
             var clusterEnd = cluster.Max(item => item.EndTime);
-            if (candidate.StartTime <= clusterEnd + MergeGapSeconds)
+            if (!TranscriptSentenceBoundaries.HasClearSentenceBetween(
+                clusterEnd, candidate.StartTime, segments))
             {
                 cluster.Add(candidate);
                 continue;
             }
 
-            mergedScenes.Add(Merge(cluster, completeScene, audiobookStart, audiobookEnd));
+            mergedScenes.Add(Merge(cluster, completeScene, audiobookStart, audiobookEnd, segments));
             cluster = [candidate];
         }
 
-        mergedScenes.Add(Merge(cluster, completeScene, audiobookStart, audiobookEnd));
+        mergedScenes.Add(Merge(cluster, completeScene, audiobookStart, audiobookEnd, segments));
 
         // Complete-scene events drive broad automatic skips. Anything shorter remains
         // represented by the separately detected explicit/implied activity events, but
         // is too narrow to justify expanding into a scene-level skip.
         mergedScenes = mergedScenes
-            // Padding must not promote a short isolated phrase into a complete-scene
-            // skip. Require the unpadded supported range to meet the minimum.
-            .Where(item => item.EndTime - item.StartTime >=
-                MinimumCompleteSceneSeconds + (SafetyPaddingSeconds * 2))
+            .Where(item => item.EndTime - item.StartTime >= MinimumCompleteSceneSeconds)
             .ToList();
 
         return events
@@ -103,10 +89,22 @@ public static class SceneEventPostProcessor
         IReadOnlyList<ScanEvent> cluster,
         TaxonomyMapping mapping,
         double audiobookStart,
-        double audiobookEnd)
+        double audiobookEnd,
+        IReadOnlyList<TranscriptSegment> segments)
     {
-        var start = Math.Max(audiobookStart, cluster.Min(item => item.StartTime) - SafetyPaddingSeconds);
-        var end = Math.Min(audiobookEnd, cluster.Max(item => item.EndTime) + SafetyPaddingSeconds);
+        var rawStart = cluster.Min(item => item.StartTime);
+        var rawEnd = cluster.Max(item => item.EndTime);
+
+        // Snapped to the transcript's own nearest word instead of padded by a flat number of
+        // seconds either side. A flat pad was a guess at how far a transcript boundary could
+        // land from the words it was supposed to bound; the transcript already states where
+        // those words actually are, so the guess is replaced with that fact. Falls back to the
+        // raw cluster range when no supplied segment carries word timing at all -- the same
+        // fallback every other word-snapped boundary in this pipeline uses for a transcript
+        // saved before word timings existed.
+        var snapped = TranscriptWordLocator.SnapToNearestWord(segments, rawStart, rawEnd);
+        var start = Math.Max(audiobookStart, snapped?.Start ?? rawStart);
+        var end = Math.Min(audiobookEnd, snapped?.End ?? rawEnd);
         var confidence = cluster.Max(item => item.Confidence);
         var description = cluster
             .Select(item => item.SafeDescription?.Trim())

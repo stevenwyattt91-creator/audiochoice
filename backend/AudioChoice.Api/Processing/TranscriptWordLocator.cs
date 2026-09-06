@@ -147,6 +147,111 @@ public static class TranscriptWordLocator
     }
 
     /// <summary>
+    /// Snaps a proposed range to the transcript's own nearest word boundaries.
+    /// </summary>
+    /// <remarks>
+    /// The shared foundation every boundary-fixing step in the scanner builds on: a flat
+    /// second-based pad or clamp is replaced everywhere with "the nearest place a word
+    /// actually starts or ends", using the same word-level timing the profanity detector
+    /// already trusts for a single word. Returns null when no supplied segment carries word
+    /// timing at all, mirroring the existing fallback: a caller with no words to snap to
+    /// keeps whatever range it already had rather than inventing one.
+    /// </remarks>
+    public static (double Start, double End)? SnapToNearestWord(
+        IReadOnlyList<TranscriptSegment> segments,
+        double proposedStart,
+        double proposedEnd)
+    {
+        var words = FlattenWords(segments);
+        if (words.Length == 0) return null;
+
+        var start = NearestBoundary(words, proposedStart, useStart: true);
+        var end = NearestBoundary(words, proposedEnd, useStart: false);
+        if (end < start) end = start;
+        return (start, end);
+    }
+
+    /// <summary>
+    /// Expands a range outward by up to <paramref name="maxExpansionSeconds"/> on each side,
+    /// then snaps that expanded edge to the nearest actual word boundary.
+    /// </summary>
+    /// <remarks>
+    /// This is Sol's own rule -- up to one second of allowance on each end so a skip does not
+    /// clip its own edges, with the allowance itself never landing mid-word. The expansion is
+    /// a ceiling, not a fixed amount: if a word boundary sits closer than the cap, the edge
+    /// moves only as far as that word; if none sits within the cap at all, the edge snaps to
+    /// the nearest word to the original, unexpanded point instead of landing on nothing. This
+    /// is deliberately not <see cref="SnapToNearestWord"/> called with a widened proposed
+    /// range, because that would let the nearest word be arbitrarily far past the cap; here
+    /// the cap always wins over distance.
+    /// </remarks>
+    public static (double Start, double End)? ExpandAndSnap(
+        IReadOnlyList<TranscriptSegment> segments,
+        double start,
+        double end,
+        double maxExpansionSeconds)
+    {
+        var words = FlattenWords(segments);
+        if (words.Length == 0) return null;
+
+        var expandedStart = SnapWithinCap(words, start, maxExpansionSeconds, useStart: true);
+        var expandedEnd = SnapWithinCap(words, end, maxExpansionSeconds, useStart: false);
+        if (expandedEnd < expandedStart) expandedEnd = expandedStart;
+        return (expandedStart, expandedEnd);
+    }
+
+    /// <summary>
+    /// The nearest word boundary beyond <paramref name="original"/>, in the direction the
+    /// edge is expanding, that still falls within the expansion cap.
+    /// </summary>
+    /// <remarks>
+    /// Deliberately the nearest such boundary and not the furthest one the cap could reach:
+    /// the allowance exists so a skip does not clip a word already underway right at its
+    /// edge, one word at a time, not to reach past it into words further away just because
+    /// the total budget permits it. Falls back to the boundary nearest the original point
+    /// (which may be the original point's own word) when nothing lies beyond it within the
+    /// cap, so the edge still lands on a real word rather than an unsnapped number.
+    /// </remarks>
+    private static double SnapWithinCap(
+        IReadOnlyList<TranscriptWord> words, double original, double maxExpansionSeconds, bool useStart)
+    {
+        var cap = Math.Max(0, maxExpansionSeconds);
+        var beyondOriginal = useStart
+            ? words.Select(word => word.StartTime).Where(value => value < original && value >= original - cap)
+            : words.Select(word => word.EndTime).Where(value => value > original && value <= original + cap);
+
+        return useStart
+            ? (beyondOriginal.Any() ? beyondOriginal.Max() : NearestBoundary(words, original, useStart: true))
+            : (beyondOriginal.Any() ? beyondOriginal.Min() : NearestBoundary(words, original, useStart: false));
+    }
+
+    /// <summary>The word start (or end) time closest to <paramref name="target"/>.</summary>
+    private static double NearestBoundary(
+        IReadOnlyList<TranscriptWord> words, double target, bool useStart)
+    {
+        var best = words[0];
+        var bestDistance = Math.Abs((useStart ? best.StartTime : best.EndTime) - target);
+        foreach (var word in words)
+        {
+            var distance = Math.Abs((useStart ? word.StartTime : word.EndTime) - target);
+            if (distance < bestDistance)
+            {
+                best = word;
+                bestDistance = distance;
+            }
+        }
+        return useStart ? best.StartTime : best.EndTime;
+    }
+
+    /// <summary>Every word from every supplied segment that carries word timing, in order.</summary>
+    private static TranscriptWord[] FlattenWords(IReadOnlyList<TranscriptSegment> segments) =>
+        segments
+            .Where(segment => segment.Words is { Count: > 0 })
+            .SelectMany(segment => segment.Words!)
+            .OrderBy(word => word.StartTime)
+            .ToArray();
+
+    /// <summary>
     /// Reduces a phrase to the sequence of normalized words <see cref="FindPhrase"/> compares
     /// against, using the same rule the caller's word list is normalized with.
     /// </summary>
