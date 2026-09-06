@@ -13,7 +13,6 @@ public enum CloudScanStatus
 public static class ScanProcessingLanes
 {
     public const string AzureOpenAI = "azure-openai";
-    public const string IOSBetaLambda = "ios-beta-lambda";
 }
 
 public sealed record BookFingerprint(

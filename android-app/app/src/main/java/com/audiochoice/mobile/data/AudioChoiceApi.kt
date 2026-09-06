@@ -287,7 +287,7 @@ class AudioChoiceApi(private val json: Json) {
         fingerprint: BookFingerprint,
         signature: EditionSignature? = null,
     ): CloudScanResponse =
-        post("/v1/scans/requests", CloudScanRequest(fingerprint, signature = signature), accessToken, scanChannel())
+        post("/v1/scans/requests", CloudScanRequest(fingerprint, signature = signature), accessToken)
 
     /**
      * The served help content.
@@ -352,9 +352,7 @@ class AudioChoiceApi(private val json: Json) {
     }
 
     suspend fun submitScan(accessToken: String, uploadID: String, fingerprint: BookFingerprint): CloudScanResponse =
-        post("/v1/scans/jobs", CloudScanJobSubmissionRequest(uploadID, fingerprint), accessToken, scanChannel())
-
-    private fun scanChannel(): String? = if (BuildConfig.BETA_BUILD) "ios-beta" else null
+        post("/v1/scans/jobs", CloudScanJobSubmissionRequest(uploadID, fingerprint), accessToken)
 
     suspend fun scanJob(accessToken: String, scanID: String): CloudScanResponse =
         request("GET", "/v1/scans/jobs/$scanID", null, accessToken)
@@ -499,15 +497,13 @@ class AudioChoiceApi(private val json: Json) {
         path: String,
         body: Request,
         token: String? = null,
-        scanChannel: String? = null,
-    ): Response = request("POST", path, json.encodeToString(body), token, scanChannel)
+    ): Response = request("POST", path, json.encodeToString(body), token)
 
     private suspend inline fun <reified Response> request(
         method: String,
         path: String,
         body: String?,
         token: String?,
-        scanChannel: String? = null,
     ): Response = withContext(Dispatchers.IO) {
         check(baseUrl.startsWith("https://")) {
             "AudioChoice staging has not been connected to this build yet."
@@ -526,7 +522,6 @@ class AudioChoiceApi(private val json: Json) {
                 readTimeout = 90_000
                 setRequestProperty("Accept", "application/json")
                 if (token != null) setRequestProperty("Authorization", "Bearer $token")
-                if (scanChannel != null) setRequestProperty("X-AudioChoice-Scan-Channel", scanChannel)
                 if (body != null) {
                     doOutput = true
                     setRequestProperty("Content-Type", "application/json")
