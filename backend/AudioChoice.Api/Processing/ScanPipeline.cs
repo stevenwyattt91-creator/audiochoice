@@ -86,7 +86,18 @@ public sealed class ScanPipeline(
                     segment with
                     {
                         StartTime = segment.StartTime + chunk.StartTime,
-                        EndTime = segment.EndTime + chunk.StartTime
+                        EndTime = segment.EndTime + chunk.StartTime,
+                        // Whisper reports word timings relative to the chunk it was given, same
+                        // as the segment itself. Only the segment bounds were being shifted back
+                        // to absolute audiobook time, so every word past the first chunk pointed
+                        // at the wrong place in the audio (or nowhere) once it was flattened out
+                        // of its segment by TranscriptWordLocator, DeterministicContentDetector,
+                        // or ReaderAlignment.
+                        Words = segment.Words?.Select(word => word with
+                        {
+                            StartTime = word.StartTime + chunk.StartTime,
+                            EndTime = word.EndTime + chunk.StartTime
+                        }).ToArray()
                     }));
 
                 var duration = Math.Max(1, upload.Fingerprint.Duration ?? chunk.EndTime);
@@ -213,7 +224,14 @@ public sealed class ScanPipeline(
                 segments.AddRange(result.Segments.Select(segment => segment with
                 {
                     StartTime = segment.StartTime + result.Chunk.StartTime,
-                    EndTime = segment.EndTime + result.Chunk.StartTime
+                    EndTime = segment.EndTime + result.Chunk.StartTime,
+                    // See the matching comment in the streaming path above: word timings are
+                    // chunk-relative from Whisper and must be shifted the same as the segment.
+                    Words = segment.Words?.Select(word => word with
+                    {
+                        StartTime = word.StartTime + result.Chunk.StartTime,
+                        EndTime = word.EndTime + result.Chunk.StartTime
+                    }).ToArray()
                 }));
                 checkpoints.Add(new TranscriptionChunkCheckpoint(
                     scanID ?? Guid.Empty, result.Index, result.Total,
