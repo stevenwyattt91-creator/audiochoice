@@ -107,6 +107,22 @@ struct AuthenticationClient {
         try await post(["email": email, "password": password], path: "v1/auth/login")
     }
 
+    /// Permanently deletes the signed-in account and everything tied to it: library, bookmarks,
+    /// filter settings, entitlements, and any active subscription's server-side record. Does not
+    /// cancel an Apple subscription automatically -- that is managed through the listener's own
+    /// Apple ID subscription settings, since only Apple can stop the billing itself.
+    func deleteAccount(accessToken: String) async throws {
+        var request = URLRequest(url: url(for: "v1/account"))
+        request.httpMethod = "DELETE"
+        request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+            let message = (try? JSONDecoder().decode(ServerMessage.self, from: data).error)
+                ?? "This account could not be deleted."
+            throw AuthenticationError.rejected(message)
+        }
+    }
+
     func signInWithApple(credential: ASAuthorizationAppleIDCredential) async throws -> AuthResponse {
         guard let code = credential.authorizationCode.flatMap({ String(data: $0, encoding: .utf8) }) else {
             throw AuthenticationError.invalidAppleCredential
@@ -211,5 +227,17 @@ final class AuthSession: ObservableObject {
         CloudCredentialStore.saveToken("")
         UserDefaults.standard.removeObject(forKey: userKey)
         user = nil
+    }
+
+    /// Deletes the account on the server, then clears this device the same way `signOut()` does.
+    ///
+    /// Unlike `signOut()`, a failure here must not clear the local session -- that would tell the
+    /// listener their account is gone when it is not, leaving them signed out of an account that
+    /// still exists with no way back in except signing in again.
+    func deleteAccount() async throws {
+        let token = CloudCredentialStore.loadToken().trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !token.isEmpty else { throw AuthenticationError.missingServer }
+        try await AuthenticationClient().deleteAccount(accessToken: token)
+        signOut()
     }
 }

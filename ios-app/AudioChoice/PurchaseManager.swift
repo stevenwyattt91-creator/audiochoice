@@ -18,12 +18,11 @@ struct AccountAccessResponse: Codable {
 
 /// The subscription product this build offers.
 ///
-/// A single placeholder id until App Store Connect has a real product configured -- StoreKit
-/// simply reports zero products for an id that does not exist yet, which `PurchaseManager` treats
-/// as "not available" rather than as an error, so this file needs no change once the real id
-/// exists; only this constant does.
+/// Matches the Product ID actually created in App Store Connect exactly, as it must -- StoreKit
+/// resolves products by this identifier alone, and it cannot be edited in App Store Connect once
+/// saved, so this is the side that has to agree with it.
 enum StoreProducts {
-    static let premiumMonthly = "com.audiochoice.mobile.premium.monthly"
+    static let premiumMonthly = "Monthly"
 }
 
 enum PurchaseError: LocalizedError {

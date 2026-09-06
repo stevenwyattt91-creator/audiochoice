@@ -1,12 +1,13 @@
 import StoreKit
 import SwiftUI
 
-/// The subscription paywall.
+/// The subscription screen, reachable from Profile.
 ///
-/// Shown from Profile at any time -- not gated behind hitting a limit -- because the premium
-/// voice itself is what is gated (see `NarrationTierStore` on Android; iOS narration gating is
-/// not yet built), and a listener deciding whether to subscribe should be able to find this
-/// screen without first bumping into a wall.
+/// Reaching this screen at all means the account already has active access -- `PaywallGate` is
+/// what stands between a lapsed or free account and the rest of the app, so anyone here is either
+/// confirming their subscription is in good standing or restoring one after reinstalling. It still
+/// falls back to a subscribe button if `access` somehow reads inactive by the time this loads (a
+/// slow refresh, a network hiccup), so it is never stuck showing nothing.
 struct PremiumScreen: View {
     @ObservedObject private var purchases = PurchaseManager.shared
     @State private var errorMessage: String?
@@ -18,9 +19,8 @@ struct PremiumScreen: View {
                     HStack(spacing: 0) {
                         Text("Audio").font(.title2.bold())
                         Text("Choice").font(.title2.bold()).foregroundStyle(ACTheme.accent)
-                        Text(" Premium").font(.title2.bold())
                     }
-                    Text("The most natural narration voice, closest to a human narrator.")
+                    Text("Filter sensitive content, follow along with an EPUB, and keep your audio private on your device.")
                         .foregroundStyle(ACTheme.secondaryText)
                 }
                 .padding(.vertical, 6)
@@ -29,7 +29,7 @@ struct PremiumScreen: View {
 
             if purchases.access.plan == "premium" && purchases.access.isActive {
                 Section {
-                    Label("You're subscribed to AudioChoice Premium.", systemImage: "checkmark.seal.fill")
+                    Label("You're subscribed to AudioChoice.", systemImage: "checkmark.seal.fill")
                         .foregroundStyle(ACTheme.accent)
                     if let expiresAt = purchases.access.expiresAt {
                         Text("Renews \(expiresAt.formatted(date: .abbreviated, time: .omitted)).")

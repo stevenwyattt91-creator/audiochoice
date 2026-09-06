@@ -230,6 +230,35 @@ public sealed class PostgresAccountStore(NpgsqlDataSource dataSource) : IAccount
         return reader.Read() ? reader.GetGuid(0) : null;
     }
 
+    public AccountDeletionResult DeleteAccount(Guid userID)
+    {
+        using var connection = dataSource.OpenConnection();
+        using var transaction = connection.BeginTransaction();
+        try
+        {
+            using var command = new NpgsqlCommand(
+                "delete from users where id = $1;", connection, transaction);
+            command.Parameters.AddWithValue(userID);
+            var deleted = command.ExecuteNonQuery();
+            if (deleted == 0)
+            {
+                transaction.Rollback();
+                return AccountDeletionResult.NotFound;
+            }
+            transaction.Commit();
+            return AccountDeletionResult.Deleted;
+        }
+        catch (PostgresException error) when (error.SqlState == "23503")
+        {
+            // A foreign key without cascade delete refused this -- the account is an internal
+            // auditor/admin with audit work on record (created, assigned, reviewed, or approved an
+            // assignment, or uploaded review media). Reassigning or discarding that work is an
+            // operator decision, not one a self-service delete should make silently.
+            transaction.Rollback();
+            return AccountDeletionResult.Blocked;
+        }
+    }
+
 
     private static AuthResponse CreateSession(
         NpgsqlConnection connection, NpgsqlTransaction transaction, AuthUser user)

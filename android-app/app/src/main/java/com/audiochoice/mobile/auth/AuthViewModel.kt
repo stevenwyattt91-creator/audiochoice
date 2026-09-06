@@ -112,6 +112,28 @@ class AuthViewModel(
         }
     }
 
+    /**
+     * Permanently deletes the account, reporting a failure rather than clearing the local session
+     * as if it succeeded -- unlike [logout], where a dead session can be dropped optimistically,
+     * telling someone their account is gone when the server never confirmed it would be wrong.
+     */
+    fun deleteAccount(onResult: (String?) -> Unit) {
+        val current = mutableState.value.session ?: return
+        viewModelScope.launch {
+            mutableState.value = mutableState.value.copy(busy = true, error = null)
+            val failure = runCatching { api.deleteAccount(current.accessToken) }
+                .exceptionOrNull()
+                ?.let { it.message ?: "This account could not be deleted." }
+            if (failure == null) {
+                sessions.clear()
+                mutableState.value = AuthUiState(loadingSession = false)
+            } else {
+                mutableState.value = mutableState.value.copy(busy = false, error = failure)
+            }
+            onResult(failure)
+        }
+    }
+
     private fun authenticate(block: suspend () -> AuthResponse) {
         if (mutableState.value.busy) return
         viewModelScope.launch {

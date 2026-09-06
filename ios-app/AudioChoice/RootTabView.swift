@@ -61,7 +61,7 @@ struct ProfileScreen: View {
                 Text("Profile").font(.largeTitle.bold())
                 accountCard
                 ACCard { VStack(spacing: 0) {
-                    profileLink("Premium", "The most natural narration voice", "star", PremiumScreen())
+                    profileLink("Subscription", "Manage your AudioChoice subscription", "star", PremiumScreen())
                     Divider().overlay(ACTheme.secondaryText.opacity(0.25))
                     profileLink("Filter Profiles", "Set what you never want to hear once", "slider.horizontal.3", FilterProfilesScreen())
                     Divider().overlay(ACTheme.secondaryText.opacity(0.25))

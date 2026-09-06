@@ -22,6 +22,8 @@ struct AccountScreen: View {
     @State private var referralCode = ""
     @State private var referralCodeValid: Bool?
     @State private var referralCheckTask: Task<Void, Never>?
+    @State private var confirmingDelete = false
+    @State private var deletingAccount = false
 
     var body: some View {
         Form {
@@ -51,6 +53,8 @@ struct AccountScreen: View {
                     LabeledContent("Email", value: user.email)
                     LabeledContent("Method", value: user.provider.capitalized)
                     Button("Sign Out", role: .destructive) { session.signOut() }
+                    Button("Delete Account", role: .destructive) { confirmingDelete = true }
+                        .disabled(deletingAccount)
                 }
             } else {
                 Section(creatingAccount ? "Create Account" : "Sign In") {
@@ -138,6 +142,16 @@ struct AccountScreen: View {
                 }
             }
         }
+        .confirmationDialog(
+            "Delete your AudioChoice account?",
+            isPresented: $confirmingDelete,
+            titleVisibility: .visible
+        ) {
+            Button("Delete Account", role: .destructive) { Task { await deleteAccount() } }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This permanently deletes your library, filter choices, and account. This cannot be undone. If you have an active subscription, cancel it separately in your Apple ID subscription settings.")
+        }
         .navigationTitle(isLaunchScreen ? "" : "Account")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar(isLaunchScreen ? .hidden : .visible, for: .navigationBar)
@@ -163,6 +177,14 @@ struct AccountScreen: View {
                 ? try await client.register(email: email, password: password, referralCode: referralCode)
                 : try await client.login(email: email, password: password)
             session.accept(response)
+        } catch { errorMessage = error.localizedDescription }
+    }
+
+    private func deleteAccount() async {
+        deletingAccount = true
+        defer { deletingAccount = false }
+        do {
+            try await session.deleteAccount()
         } catch { errorMessage = error.localizedDescription }
     }
 
