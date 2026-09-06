@@ -831,6 +831,82 @@ Assert(abbreviationBetween.Count == 1,
         "A candidate Terra rejected outright was sent to Sol anyway.");
 }
 
+// Sexual-violence lane: a separate finalized label from the consensual scene lane, requiring
+// its own consent-related evidence, and mutually exclusive with it.
+{
+    OpenAIContentAnalysisProvider.VerifiedSceneCandidate Decision(
+        bool accepted, bool directEvidence, bool sustained, bool nonconsensual,
+        double confidence = .95) => new(
+        "candidate", accepted, false, directEvidence, sustained, 0, 10, confidence,
+        "description", Quote: "quote", NonconsensualEvidence: nonconsensual);
+
+    // The consensual lane never looks at nonconsensualEvidence at all -- an accepted,
+    // sustained candidate finalizes as sexual_complete_scene regardless of that field.
+    var consensualOutcome = OpenAIContentAnalysisProvider.ResolveSceneOutcome(
+        "sexual_complete_scene", Decision(true, true, true, nonconsensual: true));
+    Assert(
+        consensualOutcome is { Label: "sexual_complete_scene" },
+        "A candidate reviewed under the consensual lane did not finalize as " +
+        "sexual_complete_scene regardless of an incidentally-true nonconsensualEvidence field.");
+
+    // The sexual_violence lane requires nonconsensualEvidence specifically; without it, an
+    // otherwise-accepted candidate must not finalize as sexual_violence.
+    var missingConsentEvidence = OpenAIContentAnalysisProvider.ResolveSceneOutcome(
+        "sexual_violence", Decision(true, true, true, nonconsensual: false));
+    Assert(
+        missingConsentEvidence is null,
+        "A sexual_violence candidate with directSexualActEvidence and sustainedBeyondKissing " +
+        "true, but nonconsensualEvidence false, still finalized as an event -- ambiguous or " +
+        "absent consent evidence must not become a reported assault.");
+
+    // With all three evidence fields true and confidence clearing the floor, the
+    // sexual_violence lane finalizes as its own label, never sexual_complete_scene.
+    var violenceOutcome = OpenAIContentAnalysisProvider.ResolveSceneOutcome(
+        "sexual_violence", Decision(true, true, true, nonconsensual: true));
+    Assert(
+        violenceOutcome is { Label: "sexual_violence" } outcome &&
+            outcome.Mapping.EventID == ContentTaxonomy.Mappings["sexual_violence"].EventID,
+        "A fully-confirmed sexual_violence candidate did not finalize under its own taxonomy " +
+        "mapping.");
+    Assert(
+        violenceOutcome!.Value.Mapping.EventID !=
+            ContentTaxonomy.Mappings["sexual_complete_scene"].EventID,
+        "A confirmed sexual_violence candidate finalized under the consensual scene's mapping.");
+
+    // Confidence below the 0.85 scene floor rejects outright, same as the consensual lane.
+    var lowConfidence = OpenAIContentAnalysisProvider.ResolveSceneOutcome(
+        "sexual_violence", Decision(true, true, true, nonconsensual: true, confidence: .70));
+    Assert(
+        lowConfidence is null,
+        "A sexual_violence candidate below the confidence floor still finalized as an event.");
+}
+
+// Lane separation in coalescing: a sexual_violence candidate and a nearby consensual-scene
+// candidate must never be merged into one Terra review window, even when close in time.
+{
+    var violenceCandidateSegment = new TranscriptSegment(0, 5, "he refused to stop despite her protest");
+    var consensualCandidateSegment = new TranscriptSegment(10, 15, "they moved together willingly");
+
+    var mixedLaneCandidates = new[]
+    {
+        new OpenAIContentAnalysisProvider.SceneVerificationCandidate(
+            "violence-1", 0, 5, [violenceCandidateSegment], "sexual_violence"),
+        new OpenAIContentAnalysisProvider.SceneVerificationCandidate(
+            "consensual-1", 10, 15, [consensualCandidateSegment], "sexual_complete_scene"),
+    };
+    var coalesced = OpenAIContentAnalysisProvider.CoalesceSceneCandidates(mixedLaneCandidates);
+    Assert(
+        coalesced.Count == 2,
+        $"A sexual_violence candidate and a nearby consensual-scene candidate, only ten " +
+        $"seconds apart, were merged into one Terra review window (got {coalesced.Count} " +
+        "windows instead of 2) -- Luna already treats the two as mutually exclusive claims " +
+        "and they must not be reviewed together.");
+    Assert(
+        coalesced.All(item => item.FirstPassLane is "sexual_violence" or "sexual_complete_scene") &&
+            coalesced.Select(item => item.FirstPassLane).Distinct().Count() == 2,
+        "Coalescing did not preserve each candidate's own first-pass lane.");
+}
+
 var narrowSceneEvents = SceneEventPostProcessor.Process(
     [
         new ScanEvent(Guid.NewGuid(), 300, 308, completeSceneMapping.CategoryID,
@@ -871,6 +947,48 @@ var retainedSceneEvents = SceneEventPostProcessor.Process(
     [new TranscriptSegment(0, 600, "Test transcript")]);
 Assert(retainedSceneEvents.Count == 1,
     "A verified scene comfortably above the minimum lost its complete-scene skip.");
+
+// sexual_violence gets the same merge/word-snap/minimum-length treatment as
+// sexual_complete_scene, but clustered entirely separately -- a confirmed assault scene and
+// a confirmed consensual scene must never merge into one skip even when adjacent in time.
+{
+    var sexualViolenceMapping = ContentTaxonomy.Mappings["sexual_violence"];
+
+    // A standalone sexual_violence scene clears the same 15-second floor and gets the same
+    // structural treatment (merge/floor) as a consensual scene.
+    var violenceOnly = SceneEventPostProcessor.Process(
+        [
+            new ScanEvent(Guid.NewGuid(), 300, 380, sexualViolenceMapping.CategoryID,
+                sexualViolenceMapping.GroupID, sexualViolenceMapping.EventID, .94, "violence-scene",
+                "Sexual violence is described")
+        ],
+        [new TranscriptSegment(0, 600, "Test transcript")]);
+    Assert(
+        violenceOnly.Count == 1 && violenceOnly[0].EventID == sexualViolenceMapping.EventID,
+        "A standalone sexual_violence event above the minimum length did not survive " +
+        "post-processing under its own event ID.");
+
+    // A confirmed sexual_violence scene and a confirmed consensual scene, immediately
+    // adjacent in time with no transcript text between them (the case that would merge two
+    // same-label candidates), must remain two separate events, never one merged skip.
+    var mixedLabels = SceneEventPostProcessor.Process(
+        [
+            new ScanEvent(Guid.NewGuid(), 100, 140, sexualViolenceMapping.CategoryID,
+                sexualViolenceMapping.GroupID, sexualViolenceMapping.EventID, .94, "adjacent-violence",
+                "Sexual violence is described"),
+            new ScanEvent(Guid.NewGuid(), 140, 180, completeSceneMapping.CategoryID,
+                completeSceneMapping.GroupID, completeSceneMapping.EventID, .94, "adjacent-consensual",
+                "Sustained intimate encounter"),
+        ],
+        [new TranscriptSegment(0, 600, "continuous narration throughout")]);
+    Assert(
+        mixedLabels.Count == 2 &&
+            mixedLabels.Any(item => item.EventID == sexualViolenceMapping.EventID) &&
+            mixedLabels.Any(item => item.EventID == completeSceneMapping.EventID),
+        $"An adjacent sexual_violence event and sexual_complete_scene event were merged " +
+        $"into one skip across label boundaries (got {mixedLabels.Count} event(s)) -- the " +
+        "two labels must never merge into each other regardless of time proximity.");
+}
 
 // End-to-end pipeline: a fixture transcript run through the full updated scanner --
 // deterministic profanity, Luna, narrow-violence policy, the Terra entry gate, Terra, the
@@ -989,6 +1107,96 @@ Assert(retainedSceneEvents.Count == 1,
     finally
     {
         if (Directory.Exists(checkpointRoot)) Directory.Delete(checkpointRoot, true);
+    }
+}
+
+// End-to-end pipeline: sexual_violence. A fixture transcript whose only sexual-content
+// candidate is non-consensual must finalize as sexual_violence -- never
+// sexual_complete_scene -- and must go through the same word-snap and Sol-dispatch-gate
+// treatment the consensual lane gets.
+{
+    var violenceCheckpointRoot = Path.Combine(
+        Path.GetTempPath(), $"audiochoice-e2e-violence-checkpoints-{Guid.NewGuid():N}");
+    try
+    {
+        var violenceOptions = new OpenAIProcessingOptions
+        {
+            AnalysisModel = "gpt-5.6-luna",
+            SceneVerificationModel = "gpt-5.6-terra",
+            SceneEscalationModel = "gpt-5.6-sol",
+            ViolenceVerificationModel = "gpt-5.6-terra",
+            SolEscalationConfidenceThreshold = .95,
+            MinimumEventConfidence = .55,
+        };
+
+        var violenceSegments = new[]
+        {
+            new TranscriptSegment(0, 5, "Morning came quietly at first."),
+            new TranscriptSegment(
+                10, 20, "He refused to let go despite her clear protest and struggle.", new[]
+                {
+                    new TranscriptWord("He", 10.0, 10.2),
+                    new TranscriptWord("refused", 10.2, 10.6),
+                    new TranscriptWord("to", 10.6, 10.7),
+                    new TranscriptWord("let", 10.7, 10.9),
+                    new TranscriptWord("go", 10.9, 11.1),
+                    new TranscriptWord("despite", 11.1, 11.5),
+                    new TranscriptWord("her", 11.5, 11.7),
+                    new TranscriptWord("clear", 11.7, 12.0),
+                    new TranscriptWord("protest", 12.0, 12.5),
+                    new TranscriptWord("and", 12.5, 12.7),
+                    new TranscriptWord("struggle.", 12.7, 27.0),
+                }),
+            new TranscriptSegment(30, 40, "Afterward, the house fell silent."),
+        };
+
+        var violenceModelClient = new FixtureAnalysisModelClient();
+        var violenceDataPaths = new AudioChoiceDataPaths(
+            new FakeWebHostEnvironment(violenceCheckpointRoot),
+            new ConfigurationBuilder().Build());
+        var violenceProvider = new OpenAIContentAnalysisProvider(
+            violenceModelClient, violenceOptions, violenceDataPaths,
+            NullLogger<OpenAIContentAnalysisProvider>.Instance);
+
+        var violenceResult = await violenceProvider.Analyze(
+            violenceSegments, null, CancellationToken.None);
+
+        var violenceEvent = violenceResult.SingleOrDefault(
+            item => item.EventID == ContentTaxonomy.Mappings["sexual_violence"].EventID);
+        Assert(
+            violenceEvent is not null,
+            "The end-to-end pipeline did not produce a sexual_violence event for the " +
+            "fixture's non-consensual passage.");
+        Assert(
+            !violenceResult.Any(item => item.EventID == ContentTaxonomy.Mappings["sexual_complete_scene"].EventID),
+            "The end-to-end pipeline reported the fixture's non-consensual passage as a " +
+            "consensual sexual_complete_scene, which the two labels' mutual exclusivity " +
+            "must prevent.");
+
+        var violenceWordTimes = violenceSegments
+            .Where(segment => segment.Words is not null)
+            .SelectMany(segment => segment.Words!)
+            .SelectMany(word => new[] { word.StartTime, word.EndTime })
+            .ToHashSet();
+        Assert(
+            violenceWordTimes.Contains(violenceEvent!.StartTime) &&
+                violenceWordTimes.Contains(violenceEvent.EndTime),
+            $"The end-to-end sexual_violence event's boundary " +
+            $"({violenceEvent.StartTime}-{violenceEvent.EndTime}) did not land on any of " +
+            "the fixture transcript's own word timings.");
+
+        Assert(
+            violenceModelClient.SolCallCount == 0,
+            "The end-to-end pipeline invoked Sol for a sexual_violence candidate Terra " +
+            "confirmed at high confidence, which the Sol dispatch gate exists to avoid.");
+        Assert(
+            violenceModelClient.TerraCallCount >= 1,
+            "The end-to-end pipeline did not send the sexual_violence candidate to Terra " +
+            "at all.");
+    }
+    finally
+    {
+        if (Directory.Exists(violenceCheckpointRoot)) Directory.Delete(violenceCheckpointRoot, true);
     }
 }
 
@@ -3462,12 +3670,24 @@ sealed class FixtureAnalysisModelClient : IAnalysisModelClient
     /// Luna's fixed answer: the fixture sexual scene, whichever batch(es) it falls in,
     /// reported as one implied-activity event plus the required accompanying complete-scene
     /// event -- exactly the pairing the real prompt requires ("ALWAYS emit
-    /// sexual_complete_scene alongside..."). Never reports profanity (Luna no longer may)
-    /// or graphic violence for the fixture's ordinary argument.
+    /// sexual_complete_scene alongside..."). A separate trigger phrase reports a
+    /// sexual_violence candidate instead, mutually exclusive with the consensual pairing, the
+    /// same way Luna's real prompt requires. Never reports profanity (Luna no longer may) or
+    /// graphic violence for the fixture's ordinary argument.
     /// </summary>
     private string RespondToLuna(string input)
     {
         LunaCallCount += 1;
+        if (input.Contains("refused to let go", StringComparison.Ordinal))
+        {
+            return """
+            {"events":[
+              {"label":"sexual_violence","startTime":10,"endTime":30,"confidence":0.8,
+               "safeDescription":"Sexual violence is described","profanityWord":null,
+               "quote":"refused to let go"}
+            ]}
+            """;
+        }
         if (!input.Contains("kissed him slowly", StringComparison.Ordinal))
         {
             return """{"events":[]}""";
@@ -3487,7 +3707,10 @@ sealed class FixtureAnalysisModelClient : IAnalysisModelClient
     /// <summary>
     /// Terra's fixed answer: accepts the scene at 0.97 confidence -- above
     /// SolEscalationConfidenceThreshold (0.95) -- so the Sol dispatch gate keeps it from
-    /// ever reaching Sol, which is exactly the routing this test exists to prove.
+    /// ever reaching Sol, which is exactly the routing this test exists to prove. For a
+    /// sexual_violence review (detected the same way the real prompt is written: it names
+    /// the sexual-violence skip range explicitly), also reports nonconsensualEvidence=true,
+    /// since this fixture's only violence candidate is meant to confirm.
     /// </summary>
     private string RespondToSceneVerification(string model, string input)
     {
@@ -3503,13 +3726,21 @@ sealed class FixtureAnalysisModelClient : IAnalysisModelClient
             if (valueEnd > valueStart) candidateKey = input[valueStart..valueEnd];
         }
 
+        var isSexualViolenceLane = input.Contains("sexual-violence skip range", StringComparison.Ordinal);
+        var nonconsensualEvidence = isSexualViolenceLane ? "true" : "false";
+        var quote = isSexualViolenceLane ? "refused to let go" : "crossed the room and kissed";
+        var safeDescription = isSexualViolenceLane
+            ? "Sexual violence is described"
+            : "Sustained consensual sexual activity";
+
         return $$"""
         {"candidates":[
           {"candidateKey":"{{candidateKey}}","accepted":true,"needsEscalation":false,
            "directSexualActEvidence":true,"sustainedBeyondKissing":true,
+           "nonconsensualEvidence":{{nonconsensualEvidence}},
            "startTime":10,"endTime":29,"confidence":0.97,
-           "safeDescription":"Sustained consensual sexual activity",
-           "quote":"crossed the room and kissed"}
+           "safeDescription":"{{safeDescription}}",
+           "quote":"{{quote}}"}
         ]}
         """;
     }

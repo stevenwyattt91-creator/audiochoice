@@ -24,9 +24,15 @@ public sealed class OpenAIContentAnalysisProvider(
     // singletons, Sol's boundary is quote-confirmed-and-word-snapped rather than clamped to
     // ±30s, Sol is only invoked for ambiguous/low-confidence Terra results, and scene merging
     // is sentence-boundary-based rather than a flat 45s gap.
-    private const string BaseAnalysisPromptVersion = "5.0-word-snapped";
-    private const string SceneVerificationVersion = "5.0-word-snapped";
-    private const string SceneEscalationVersion = "5.0-word-snapped";
+    //
+    // Bumped again for sexual_violence: Luna's prompt now defines it as mutually exclusive
+    // with the consensual scene ladder, and Terra/Sol's own prompts and schema gained a
+    // second, consent-specific verification lane (VerifySceneBatch, ResolveSceneOutcome) that
+    // did not exist under the prior version -- a cached answer from before this change never
+    // considered whether the passage was non-consensual at all.
+    private const string BaseAnalysisPromptVersion = "5.1-sexual-violence";
+    private const string SceneVerificationVersion = "5.1-sexual-violence";
+    private const string SceneEscalationVersion = "5.1-sexual-violence";
     private readonly string _checkpointFolder = dataPaths.AnalysisCheckpoints;
     public string ScannerVersion => options.ScannerVersion;
 
@@ -748,6 +754,7 @@ public sealed class OpenAIContentAnalysisProvider(
             "sexual_implied_activity" => "An intimate encounter is implied",
             "sexual_explicit_activity" => "Characters are described in an intimate encounter",
             "sexual_complete_scene" => "Characters are described in a sustained intimate encounter",
+            "sexual_violence" => "Sexual violence is described",
             "violence_graphic" => "Graphic violence described",
             "violence_torture" => "Torture described",
             "violence_children" => "Violence involving children described",
@@ -1082,11 +1089,13 @@ Candidates:
         Action<double>? reportProgress,
         CancellationToken cancellationToken)
     {
-        var mapping = ContentTaxonomy.Mappings["sexual_complete_scene"];
+        var completeSceneMapping = ContentTaxonomy.Mappings["sexual_complete_scene"];
+        var sexualViolenceMapping = ContentTaxonomy.Mappings["sexual_violence"];
         var sexualEventIDs = new[]
         {
             "sexual_suggestive_dialogue", "sexual_references", "sexual_nudity",
-            "sexual_implied_activity", "sexual_explicit_activity", "sexual_complete_scene"
+            "sexual_implied_activity", "sexual_explicit_activity", "sexual_complete_scene",
+            "sexual_violence"
         }.Select(label => ContentTaxonomy.Mappings[label].EventID).ToHashSet();
         var sexualCandidateEvents = events
             .Where(item => sexualEventIDs.Contains(item.EventID))
@@ -1105,10 +1114,20 @@ Candidates:
                 item.StableKey,
                 item.StartTime,
                 item.EndTime,
-                SentenceBoundedContext(item.StartTime, item.EndTime, segments)))
+                SentenceBoundedContext(item.StartTime, item.EndTime, segments),
+                // Which lane Luna's first pass placed this event in, not a final decision --
+                // Terra/Sol's own nonconsensualEvidence field decides the finalized label
+                // below. This only keeps a real assault scene's supporting context separate
+                // from an unrelated nearby consensual scene when the two are coalesced for
+                // review, so one request is never asked to judge both at once.
+                item.EventID == sexualViolenceMapping.EventID
+                    ? "sexual_violence" : "sexual_complete_scene"))
             .ToArray();
 
-        var retained = events.Where(item => item.EventID != mapping.EventID).ToList();
+        var retained = events
+            .Where(item => item.EventID != completeSceneMapping.EventID &&
+                item.EventID != sexualViolenceMapping.EventID)
+            .ToList();
         if (candidates.Length == 0)
         {
             reportProgress?.Invoke(1);
@@ -1211,11 +1230,13 @@ Candidates:
         {
             var verification = solByCandidate.GetValueOrDefault(
                 terraDecision.CandidateKey, terraDecision);
-            if (!verification.Accepted || !verification.DirectSexualActEvidence ||
-                !verification.SustainedBeyondKissing || verification.Confidence < .85 ||
-                !sourceRanges.TryGetValue(verification.CandidateKey, out _) ||
+            if (!sourceRanges.TryGetValue(verification.CandidateKey, out _) ||
                 !sourceCandidates.TryGetValue(verification.CandidateKey, out var sourceCandidate))
                 continue;
+
+            var outcome = ResolveSceneOutcome(sourceCandidate.FirstPassLane, verification);
+            if (outcome is null) continue;
+            var (label, mapping) = outcome.Value;
 
             // The refined start is a model-invented number, one call further from the
             // transcript than the first pass's own proposal, and it is the only thing here
@@ -1230,9 +1251,9 @@ Candidates:
             {
                 rejectedForUnconfirmedQuote += 1;
                 logger.LogInformation(
-                    "Rejected Sol/Terra's accepted scene for {CandidateKey}: its boundary " +
+                    "Rejected Sol/Terra's accepted {Label} for {CandidateKey}: its boundary " +
                     "could not be confirmed against the transcript's own words.",
-                    verification.CandidateKey);
+                    label, verification.CandidateKey);
                 continue;
             }
 
@@ -1241,8 +1262,8 @@ Candidates:
             retained.Add(new ScanEvent(
                 Guid.NewGuid(), start, end, mapping.CategoryID, mapping.GroupID,
                 mapping.EventID, verification.Confidence,
-                Hash($"verified-scene|{start:F1}|{end:F1}|{verification.CandidateKey}"),
-                SafeDescriptionForEvent("sexual_complete_scene", verification.SafeDescription)));
+                Hash($"verified-scene|{mapping.EventID:N}|{start:F1}|{end:F1}|{verification.CandidateKey}"),
+                SafeDescriptionForEvent(label, verification.SafeDescription)));
         }
         if (rejectedForUnconfirmedQuote > 0)
         {
@@ -1257,7 +1278,8 @@ Candidates:
         logger.LogInformation(
             "Sexual-scene verification retained {RetainedCount} of {CandidateCount} candidates " +
             "after {EscalationCount} capped escalation requests.",
-            retained.Count(item => item.EventID == mapping.EventID),
+            retained.Count(item => item.EventID == completeSceneMapping.EventID ||
+                item.EventID == sexualViolenceMapping.EventID),
             verificationCandidates.Count,
             escalationCandidates.Length);
         return retained;
@@ -1292,7 +1314,7 @@ Candidates:
         var strongEventIDs = new[]
         {
             "sexual_nudity", "sexual_implied_activity", "sexual_explicit_activity",
-            "sexual_complete_scene"
+            "sexual_complete_scene", "sexual_violence"
         }.Select(label => ContentTaxonomy.Mappings[label].EventID).ToHashSet();
 
         var ordered = candidates.OrderBy(item => item.StartTime).ToArray();
@@ -1376,6 +1398,47 @@ Candidates:
 
     private bool NeedsSolReview(VerifiedSceneCandidate decision) =>
         NeedsSolReview(decision, options.SolEscalationConfidenceThreshold);
+
+    /// <summary>
+    /// The two lanes' finalized confidence floor. Kept at the pre-existing 0.85 rather than
+    /// the general 0.55 event floor for both lanes: a scene-level skip already carries more
+    /// weight than a single detected line, and sexual_violence in particular must not be
+    /// reported to a listener as confirmed on weaker evidence than a consensual scene is.
+    /// </summary>
+    private const double SceneAcceptanceConfidenceFloor = .85;
+
+    /// <summary>
+    /// Decides whether a verified candidate becomes a finalized event at all, and if so
+    /// which label and taxonomy mapping it finalizes under.
+    /// </summary>
+    /// <remarks>
+    /// The two lanes require different evidence because they are answering different
+    /// questions: the consensual lane asks whether a sexual act is happening and is sustained
+    /// beyond kissing; the sexual_violence lane asks the same about the act, plus whether the
+    /// passage itself establishes it was non-consensual. Mixing the two checks would let an
+    /// ordinary consensual scene satisfy the violence lane's threshold, or let a genuine
+    /// assault scene's evidence be judged by a check that never asks about consent at all --
+    /// which is exactly the ambiguity the two labels exist to resolve rather than reproduce.
+    /// </remarks>
+    internal static (string Label, TaxonomyMapping Mapping)? ResolveSceneOutcome(
+        string firstPassLane, VerifiedSceneCandidate verification)
+    {
+        if (!verification.Accepted || !verification.DirectSexualActEvidence ||
+            !verification.SustainedBeyondKissing ||
+            verification.Confidence < SceneAcceptanceConfidenceFloor)
+        {
+            return null;
+        }
+
+        if (firstPassLane == "sexual_violence")
+        {
+            return verification.NonconsensualEvidence
+                ? ("sexual_violence", ContentTaxonomy.Mappings["sexual_violence"])
+                : null;
+        }
+
+        return ("sexual_complete_scene", ContentTaxonomy.Mappings["sexual_complete_scene"]);
+    }
 
     /// <summary>
     /// Finalizes a confirmed scene's boundary: the quote-confirmed start, a claimed end no
@@ -1473,41 +1536,50 @@ Candidates:
         return results.SelectMany(item => item).ToArray();
     }
 
-    private static IReadOnlyList<SceneVerificationCandidate> CoalesceSceneCandidates(
+    internal static IReadOnlyList<SceneVerificationCandidate> CoalesceSceneCandidates(
         IReadOnlyList<SceneVerificationCandidate> candidates)
     {
         const double mergeGapSeconds = 45;
-        var ordered = candidates.OrderBy(item => item.ProposedStartTime).ToArray();
         var result = new List<SceneVerificationCandidate>();
-        var group = new List<SceneVerificationCandidate>();
-        var groupEnd = double.MinValue;
 
-        void Flush()
+        // Coalesced independently per first-pass lane. A nearby sexual_violence candidate
+        // and a consensual sexual_complete_scene candidate are never merged into one review
+        // window even if they sit close in time -- Luna already treated them as mutually
+        // exclusive, and merging them here would ask Terra to review two different claims
+        // (assault, and ordinary romance) as if they were one passage.
+        foreach (var lane in candidates.GroupBy(item => item.FirstPassLane, StringComparer.Ordinal))
         {
-            if (group.Count == 0) return;
-            var first = group[0];
-            var last = group[^1];
-            var start = group.Min(item => item.ProposedStartTime);
-            var end = group.Max(item => item.ProposedEndTime);
-            var mergedSegments = group
-                .SelectMany(item => item.Segments)
-                .DistinctBy(item => (item.StartTime, item.EndTime))
-                .OrderBy(item => item.StartTime)
-                .ToArray();
-            result.Add(new SceneVerificationCandidate(
-                Hash($"coalesced-scene|{first.CandidateKey}|{last.CandidateKey}"),
-                start, end, mergedSegments));
-            group.Clear();
-        }
+            var ordered = lane.OrderBy(item => item.ProposedStartTime).ToArray();
+            var group = new List<SceneVerificationCandidate>();
+            var groupEnd = double.MinValue;
 
-        foreach (var candidate in ordered)
-        {
-            if (group.Count > 0 && candidate.ProposedStartTime > groupEnd + mergeGapSeconds)
-                Flush();
-            group.Add(candidate);
-            groupEnd = Math.Max(groupEnd, candidate.ProposedEndTime);
+            void Flush()
+            {
+                if (group.Count == 0) return;
+                var first = group[0];
+                var last = group[^1];
+                var start = group.Min(item => item.ProposedStartTime);
+                var end = group.Max(item => item.ProposedEndTime);
+                var mergedSegments = group
+                    .SelectMany(item => item.Segments)
+                    .DistinctBy(item => (item.StartTime, item.EndTime))
+                    .OrderBy(item => item.StartTime)
+                    .ToArray();
+                result.Add(new SceneVerificationCandidate(
+                    Hash($"coalesced-scene|{first.CandidateKey}|{last.CandidateKey}"),
+                    start, end, mergedSegments, first.FirstPassLane));
+                group.Clear();
+            }
+
+            foreach (var candidate in ordered)
+            {
+                if (group.Count > 0 && candidate.ProposedStartTime > groupEnd + mergeGapSeconds)
+                    Flush();
+                group.Add(candidate);
+                groupEnd = Math.Max(groupEnd, candidate.ProposedEndTime);
+            }
+            Flush();
         }
-        Flush();
         return result;
     }
 
@@ -1634,12 +1706,64 @@ Candidates:
         File.Move(temporary, path, overwrite: true);
     }
 
+    /// <summary>
+    /// The shared closing instructions for both verification prompts below: boundary
+    /// refinement, safeDescription rules, and the quote used to confirm the boundary.
+    /// </summary>
+    /// <remarks>
+    /// Kept identical across both lanes deliberately. The two lanes disagree about what
+    /// counts as evidence, not about how a confirmed range is reported once accepted.
+    /// </remarks>
+    private const string SceneVerificationClosingInstructions = """
+For an accepted candidate, refine startTime to the beginning of the activity
+or its immediate unmistakable lead-in, and endTime where that activity clearly finishes.
+Keep timestamps within the supplied excerpt. Use a neutral, non-graphic but useful description.
+Do not include graphic details or quotations in safeDescription. Never name intimate
+anatomy or describe touching mechanics, positions, squeezing, or similar physical details.
+Also return quote: for an accepted candidate, the exact consecutive words, copied verbatim
+from a single segment's text, that begin the activity at your refined startTime -- this is not
+shown to a listener, it is how the server confirms your refined boundary against the
+transcript's own word timing. For a rejected candidate return an empty string. Return one
+decision for every candidateKey, including nonconsensualEvidence (false when not applicable).
+""";
+
     private async Task<SceneVerificationPayload> VerifySceneBatch(
         IReadOnlyList<SceneVerificationCandidate> candidates,
         string model,
         CancellationToken cancellationToken)
     {
-        var input = """
+        // Batches here are always a single candidate (Chunk(1) at every call site), so one
+        // lane's candidates are never mixed with the other's in the same request -- each
+        // request asks exactly one question, consensual-scene evidence or non-consent
+        // evidence, never both at once.
+        var isSexualViolenceLane = candidates.Count > 0 &&
+            candidates.All(item => item.FirstPassLane == "sexual_violence");
+
+        var input = (isSexualViolenceLane
+            ? """
+Act as a strict final verifier for one audiobook sexual-violence skip range (rape or sexual
+assault). Each candidate was produced by a first-pass detector and may be a false positive, or
+may in fact describe consensual activity that was mislabeled.
+
+Set directSexualActEvidence=true only when this candidate's own transcript directly supports an
+ongoing sexual act, imposed attempt, or credible immediate threat of one. Set
+nonconsensualEvidence=true only when the passage itself establishes the act was without consent:
+refusal, resistance, incapacitation, explicit coercion, or an exploited power imbalance used to
+force the act. Judge consent from what the passage itself shows, never from a character's
+profession, relationship to another character, or the setting alone. Set sustainedBeyondKissing
+the same way the consensual lane would: true when the passage goes beyond attraction, dialogue,
+kissing, embracing, or nudity alone into an actual act.
+
+accepted may be true only when directSexualActEvidence, nonconsensualEvidence, and
+sustainedBeyondKissing are ALL true, and confidence is at least 0.85. If the passage instead
+reads as consensual, or if consent is genuinely ambiguous rather than clearly absent, accepted
+must be false -- ambiguous consent is not evidence of assault and must not be reported as one.
+Set needsEscalation=true only when the candidate is still a plausible non-consensual act but the
+evidence, confidence, or exact boundaries are uncertain and require a stronger final review; set
+it false for clear rejections, ambiguous-consent passages, or passages that read as consensual.
+Confirmed accepted candidates also receive final review.
+"""
+            : """
 Act as a strict final verifier for one audiobook sexual-scene skip range.
 Each candidate was produced by a high-recall detector and may be a false positive.
 Set directSexualActEvidence=true only when this candidate's own transcript directly supports
@@ -1656,7 +1780,9 @@ Do not require graphic anatomical vocabulary. In context, physical sexual escala
 intimate touching (for example a hand moving onto a thigh), opening or spreading legs, removing
 clothing, intimate caressing, or explicit consent/positioning is direct evidence when it is part
 of an ongoing sexual encounter. A combination of these cues must not be downgraded merely because
-the narration is euphemistic or non-graphic.
+the narration is euphemistic or non-graphic. This lane is for consensual activity only: if the
+passage instead shows the act was non-consensual, reject it here (accepted=false) rather than
+reclassifying it -- a separate sexual-violence review handles that case.
 
 accepted may be true only when BOTH evidence booleans are true and confidence is at least
 0.85. Otherwise accepted must be false. Set needsEscalation=true only when the candidate is
@@ -1665,19 +1791,7 @@ uncertain and require a stronger final review. Set needsEscalation=false for cle
 isolated innuendo, references, attraction, kissing, or nudity alone. Confirmed accepted scenes
 will also receive final review. Confidence must describe the evidence that a sexual act occurs,
 not merely for one suggestive word, and not for how long it lasts.
-
-For an accepted candidate, refine startTime to the beginning of the sexual activity
-or its immediate unmistakable lead-in, and endTime where that activity clearly finishes.
-Keep timestamps within the supplied excerpt. Use a neutral, non-graphic but useful description
-that distinguishes the scene from a single explicit phrase. Do not return the generic wording
-"Complete sexual scene". Examples of acceptable style are "Sustained consensual sexual
-activity" or "Sexual activity following romantic dialogue". Do not include graphic details
-or quotations in safeDescription. Never name intimate anatomy or describe touching mechanics,
-positions, squeezing, or similar physical details. Also return quote: for an accepted candidate,
-the exact consecutive words, copied verbatim from a single segment's text, that begin the
-activity at your refined startTime -- this is not shown to a listener, it is how the server
-confirms your refined boundary against the transcript's own word timing. For a rejected
-candidate return an empty string. Return one decision for every candidateKey.
+""") + SceneVerificationClosingInstructions + """
 
 Candidates:
 """ + JsonSerializer.Serialize(candidates);
@@ -1786,10 +1900,12 @@ For isolated events, return the narrowest supported timestamps. A short referenc
 event: if three words carry it, the range should cover those three words and not the sentence
 or paragraph around them. Never widen a brief event to be safe -- a wide range on a passing
 reference removes narration the listener wanted to hear. 
-The six sexual levels are a ladder, and each rung means one thing. A listener switches on the
-level they are not willing to hear, so a passage placed a rung too high is removed from someone
-who wanted it, and a rung too low is heard by someone who did not. Choose the highest rung the
-passage actually reaches, and only that one, except where a complete scene is also required below.
+The six sexual levels below are a ladder, and each rung means one thing. A listener switches on
+the level they are not willing to hear, so a passage placed a rung too high is removed from
+someone who wanted it, and a rung too low is heard by someone who did not. Choose the highest
+rung the passage actually reaches, and only that one, except where a complete scene is also
+required below. sexual_violence sits apart from this ladder entirely; see its own definition
+below for when it replaces the ladder rather than adding to it.
 
 sexual_suggestive_dialogue -- flirtation, innuendo, wanting, tension. Kissing and embracing belong
 here, however charged, and so does a passage that is only anticipation. Kissing is NOT explicit
@@ -1812,6 +1928,26 @@ that a sexual act is taking place.
 
 sexual_complete_scene -- the whole span of a scene containing implied or explicit activity, from
 its clear lead-in to the point where the story returns to non-sexual action or conversation.
+Reserved for consensual activity; see sexual_violence below for the non-consensual case.
+
+sexual_violence -- rape or sexual assault: a sexual act, or the credible immediate threat or
+attempt of one, imposed on a character who does not consent, cannot consent, or whose consent
+is coerced or withdrawn and disregarded. This includes an assault narrated as it happens, one
+implied or faded out the same way sexual_implied_activity is, and one described only
+afterward provided the passage makes clear that it happened without consent. Judge consent from
+what the passage itself establishes -- refusal, resistance, incapacitation, coercion, or an
+imbalance of power exploited to force the act -- not from a character's profession, relationship
+to another character, or the setting alone. A passage that is ambiguous about consent, or where
+the narration itself is uncertain, is not sexual_violence; use the ordinary ladder instead and
+let a human reviewer resolve the ambiguity. This is its own category, not a rung on the ladder
+above: a passage is sexual_violence or it is a consensual sexual_suggestive_dialogue /
+sexual_references / sexual_nudity / sexual_implied_activity / sexual_explicit_activity /
+sexual_complete_scene, never both. Do not emit sexual_complete_scene for a passage reported as
+sexual_violence, and do not emit sexual_violence for a passage that is ordinary threat, assault,
+or violence with no sexual element -- that remains a violence label if it qualifies for one.
+Treat this with at least the same care as violence_graphic: report it when the passage actually
+depicts or credibly implies it, and do not infer it from a menacing tone, a violent scene that
+happens to involve two characters, or a relationship's power imbalance on its own.
 
 No word is sexual content by itself. A body part named in passing is anatomy, not a sexual
 reference: a hand on a chest during first aid, a breast wound in battle, a character washing, a
@@ -1819,20 +1955,22 @@ mother nursing, a medical examination. Judge the passage by what is happening in
 presence of a word. The same applies to violence and every other category -- a word is evidence
 only in the sense the passage actually uses it.
 
-ALWAYS emit sexual_complete_scene alongside sexual_implied_activity or sexual_explicit_activity,
-every time, including a brief encounter and one whose description is euphemistic. A listener who
-switches on Complete sex scenes is asking for sex scenes to be gone; a scene that was too short or
-too discreet to qualify is exactly the one that then plays and is heard. Do not reduce a scene to
-the single explicit sentence that made it recognisable, and do not withhold the scene event
-because the scene was small.
+ALWAYS emit sexual_complete_scene alongside sexual_implied_activity or sexual_explicit_activity
+for a CONSENSUAL scene, every time, including a brief encounter and one whose description is
+euphemistic. A listener who switches on Complete sex scenes is asking for sex scenes to be gone;
+a scene that was too short or too discreet to qualify is exactly the one that then plays and is
+heard. Do not reduce a scene to the single explicit sentence that made it recognisable, and do
+not withhold the scene event because the scene was small. A sexual_violence passage never also
+receives sexual_complete_scene -- report sexual_violence alone, spanning the same full extent a
+complete scene would (lead-in through to the point the story returns to non-sexual action).
 
 If a sexual scene was already underway at the first supplied segment, set the scene start to
 that first segment's startTime. If it is still underway at the last supplied segment, set its
 end to that last segment's endTime. The server analyzes overlapping windows and will join those
 partial ranges. A scene can span several minutes. Consensual romance, foreplay, implied acts,
 explicit acts, and the immediate aftermath may establish continuity even when no explicit word
-appears in every segment. Do not extend a scene across a clear topic, location, time, or chapter
-change.
+appears in every segment; the same applies to a sexual_violence passage and its own immediate
+aftermath. Do not extend a scene across a clear topic, location, time, or chapter change.
 Allowed labels:
 """ + AllowedLabelList + """
 For safeDescription, write a neutral, discreet, non-graphic summary of at most 80 characters.
@@ -1943,7 +2081,7 @@ Transcript segments:
                     ["additionalProperties"] = false,
                     ["required"] = new JsonArray(
                         "candidateKey", "accepted", "needsEscalation", "directSexualActEvidence",
-                        "sustainedBeyondKissing", "startTime", "endTime",
+                        "sustainedBeyondKissing", "nonconsensualEvidence", "startTime", "endTime",
                         "confidence", "safeDescription", "quote"),
                     ["properties"] = new JsonObject
                     {
@@ -1952,6 +2090,10 @@ Transcript segments:
                         ["needsEscalation"] = new JsonObject { ["type"] = "boolean" },
                         ["directSexualActEvidence"] = new JsonObject { ["type"] = "boolean" },
                         ["sustainedBeyondKissing"] = new JsonObject { ["type"] = "boolean" },
+                        // Only meaningful for a candidate reviewed in the sexual_violence
+                        // lane; false is always correct for a consensual-lane candidate and
+                        // plays no part in that lane's decision. See ResolveSceneOutcome.
+                        ["nonconsensualEvidence"] = new JsonObject { ["type"] = "boolean" },
                         ["startTime"] = new JsonObject { ["type"] = "number" },
                         ["endTime"] = new JsonObject { ["type"] = "number" },
                         ["confidence"] = new JsonObject
@@ -1997,11 +2139,19 @@ Transcript segments:
         /// </summary>
         [property: JsonPropertyName("quote")] string? Quote = null);
 
-    private sealed record SceneVerificationCandidate(
+    internal sealed record SceneVerificationCandidate(
         [property: JsonPropertyName("candidateKey")] string CandidateKey,
         [property: JsonPropertyName("proposedStartTime")] double ProposedStartTime,
         [property: JsonPropertyName("proposedEndTime")] double ProposedEndTime,
-        [property: JsonPropertyName("segments")] IReadOnlyList<TranscriptSegment> Segments);
+        [property: JsonPropertyName("segments")] IReadOnlyList<TranscriptSegment> Segments,
+        /// <summary>
+        /// "sexual_complete_scene" or "sexual_violence" -- which lane Luna's first pass
+        /// placed this candidate in. Not shown to the model or trusted as a final answer;
+        /// only used so two candidates from different lanes are never coalesced into one
+        /// review window, since Terra/Sol's own consent-related verdict is what actually
+        /// decides the finalized label.
+        /// </summary>
+        [property: JsonIgnore] string FirstPassLane = "sexual_complete_scene");
 
     private sealed record SceneVerificationPayload(
         [property: JsonPropertyName("candidates")]
@@ -2031,7 +2181,15 @@ Transcript segments:
         /// against the transcript before the refined boundary is trusted; see AddEvent's
         /// sibling logic in AnchorToTranscript, which this mirrors on a smaller scale.
         /// </summary>
-        [property: JsonPropertyName("quote")] string? Quote = null);
+        [property: JsonPropertyName("quote")] string? Quote = null,
+        /// <summary>
+        /// True only when the candidate is being reviewed under the sexual_violence lane and
+        /// the passage itself establishes the act was non-consensual. Always false for a
+        /// candidate reviewed under the consensual sexual_complete_scene lane, where it plays
+        /// no part in the decision -- see <see cref="ResolveSceneOutcome"/> for how the two
+        /// lanes' evidence requirements differ.
+        /// </summary>
+        [property: JsonPropertyName("nonconsensualEvidence")] bool NonconsensualEvidence = false);
 
     private static string SafeDescription(string? value)
     {

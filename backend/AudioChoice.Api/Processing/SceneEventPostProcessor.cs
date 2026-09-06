@@ -36,42 +36,65 @@ public static class SceneEventPostProcessor
     /// </remarks>
     private const double MinimumCompleteSceneSeconds = 15;
 
+    /// <summary>
+    /// The scene-level event types this processor clusters, merges, and word-snaps.
+    /// </summary>
+    /// <remarks>
+    /// sexual_violence is treated exactly like sexual_complete_scene structurally -- same
+    /// sentence-boundary merge rule, same word-snap, same minimum-length floor -- but the two
+    /// are always clustered and merged separately from each other, never together. Terra/Sol
+    /// already keep the two labels as mutually exclusive claims about the same passage (see
+    /// OpenAIContentAnalysisProvider's per-lane verification), and merging a confirmed
+    /// assault scene with a nearby confirmed consensual one here would erase that distinction
+    /// right before it reaches the listener.
+    /// </remarks>
+    private static readonly string[] SceneLabels = ["sexual_complete_scene", "sexual_violence"];
+
     public static IReadOnlyList<ScanEvent> Process(
         IReadOnlyList<ScanEvent> events,
         IReadOnlyList<TranscriptSegment> segments)
     {
-        var completeScene = ContentTaxonomy.Mappings["sexual_complete_scene"];
-        var sceneEvents = events
-            .Where(item => item.EventID == completeScene.EventID)
-            .OrderBy(item => item.StartTime)
-            .ToArray();
-
-        if (sceneEvents.Length == 0) return events;
+        var sceneMappings = SceneLabels.Select(label => ContentTaxonomy.Mappings[label]).ToArray();
+        var sceneEventIDs = sceneMappings.Select(item => item.EventID).ToHashSet();
 
         var audiobookStart = segments.Count == 0 ? 0 : segments.Min(item => item.StartTime);
-        var audiobookEnd = segments.Count == 0
-            ? sceneEvents.Max(item => item.EndTime)
-            : segments.Max(item => item.EndTime);
         var mergedScenes = new List<ScanEvent>();
-        var cluster = new List<ScanEvent> { sceneEvents[0] };
+        var anySceneEvents = false;
 
-        foreach (var candidate in sceneEvents.Skip(1))
+        foreach (var mapping in sceneMappings)
         {
-            var clusterEnd = cluster.Max(item => item.EndTime);
-            if (!TranscriptSentenceBoundaries.HasClearSentenceBetween(
-                clusterEnd, candidate.StartTime, segments))
+            var sceneEvents = events
+                .Where(item => item.EventID == mapping.EventID)
+                .OrderBy(item => item.StartTime)
+                .ToArray();
+            if (sceneEvents.Length == 0) continue;
+            anySceneEvents = true;
+
+            var audiobookEnd = segments.Count == 0
+                ? sceneEvents.Max(item => item.EndTime)
+                : segments.Max(item => item.EndTime);
+            var cluster = new List<ScanEvent> { sceneEvents[0] };
+
+            foreach (var candidate in sceneEvents.Skip(1))
             {
-                cluster.Add(candidate);
-                continue;
+                var clusterEnd = cluster.Max(item => item.EndTime);
+                if (!TranscriptSentenceBoundaries.HasClearSentenceBetween(
+                    clusterEnd, candidate.StartTime, segments))
+                {
+                    cluster.Add(candidate);
+                    continue;
+                }
+
+                mergedScenes.Add(Merge(cluster, mapping, audiobookStart, audiobookEnd, segments));
+                cluster = [candidate];
             }
 
-            mergedScenes.Add(Merge(cluster, completeScene, audiobookStart, audiobookEnd, segments));
-            cluster = [candidate];
+            mergedScenes.Add(Merge(cluster, mapping, audiobookStart, audiobookEnd, segments));
         }
 
-        mergedScenes.Add(Merge(cluster, completeScene, audiobookStart, audiobookEnd, segments));
+        if (!anySceneEvents) return events;
 
-        // Complete-scene events drive broad automatic skips. Anything shorter remains
+        // Scene-level events drive broad automatic skips. Anything shorter remains
         // represented by the separately detected explicit/implied activity events, but
         // is too narrow to justify expanding into a scene-level skip.
         mergedScenes = mergedScenes
@@ -79,7 +102,7 @@ public static class SceneEventPostProcessor
             .ToList();
 
         return events
-            .Where(item => item.EventID != completeScene.EventID)
+            .Where(item => !sceneEventIDs.Contains(item.EventID))
             .Concat(mergedScenes)
             .OrderBy(item => item.StartTime)
             .ToArray();

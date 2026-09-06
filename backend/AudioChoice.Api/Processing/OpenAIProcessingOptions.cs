@@ -113,7 +113,13 @@ public sealed class OpenAIProcessingOptions
     // Luna no longer proposing profanity labels. Results are stored per edition and scanner
     // version, so this writes new rows rather than overwriting results from the prior
     // pipeline.
-    public string ScannerVersion { get; init; } = "5.0-word-snapped";
+    //
+    // Bumped again to add the sexual_violence category: its own taxonomy group, its own
+    // Luna definition (mutually exclusive with the consensual scene ladder), and its own
+    // Terra/Sol verification lane with a consent-specific evidence requirement. A scan made
+    // under the prior version never had a chance to report sexual_violence at all, so it
+    // must not be presented as though it had.
+    public string ScannerVersion { get; init; } = "5.1-sexual-violence";
     /// <summary>Only jobs in this lane may be claimed by this worker instance.</summary>
     public string ProcessingLane { get; init; } = ScanProcessingLanes.AzureOpenAI;
     /// <summary>

@@ -31,7 +31,7 @@ object PlaybackFilterTaxonomy {
         fun add(c: Int, labels: List<String>, parent: String) = labels.forEachIndexed { index, label ->
             put(group(c, index + 1), Definition(parent, label))
         }
-        add(1, listOf("Suggestive dialogue", "Sexual references", "Nudity", "Implied sexual activity", "Explicit sexual activity", "Complete sex scenes"), "Sexual Content")
+        add(1, listOf("Suggestive dialogue", "Sexual references", "Nudity", "Implied sexual activity", "Explicit sexual activity", "Complete sex scenes", "Sexual violence (rape / sexual assault)"), "Sexual Content")
         add(2, listOf("Mild profanity", "Strong profanity", "Sexual profanity", "Slurs / derogatory language"), "Profanity")
         put(group(3, 3), Definition("Violence", "Graphic violence / gore"))
         put(group(3, 4), Definition("Violence", "Torture"))
