@@ -13,7 +13,8 @@
         { "index": 3, "label": "sexual_nudity", "name": "Nudity", "enforced": true },
         { "index": 4, "label": "sexual_implied_activity", "name": "Implied sexual activity", "enforced": true },
         { "index": 5, "label": "sexual_explicit_activity", "name": "Explicit sexual activity", "enforced": true },
-        { "index": 6, "label": "sexual_complete_scene", "name": "Complete sex scenes", "enforced": true }
+        { "index": 6, "label": "sexual_complete_scene", "name": "Complete sex scenes", "enforced": true },
+        { "index": 7, "label": "sexual_violence", "name": "Sexual violence (rape / sexual assault)", "enforced": true }
       ]
     },
     {

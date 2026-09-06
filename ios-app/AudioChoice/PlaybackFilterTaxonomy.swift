@@ -67,7 +67,8 @@ enum PlaybackFilterTaxonomy {
 
         add(1, "Sexual Content", [
             "Suggestive dialogue", "Sexual references", "Nudity",
-            "Implied sexual activity", "Explicit sexual activity", "Complete sex scenes"
+            "Implied sexual activity", "Explicit sexual activity", "Complete sex scenes",
+            "Sexual violence (rape / sexual assault)"
         ])
         add(2, "Profanity", [
             "Mild profanity", "Strong profanity", "Sexual profanity", "Slurs / derogatory language"
