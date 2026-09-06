@@ -113,7 +113,7 @@ struct SupportFormScreen: View {
                 Button(sent ? "Message sent" : (sending ? "Sending…" : "Send message")) { Task { await send() } }
                     .disabled(sending || subject.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || message.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
-            Section { Text(sent ? "Thanks — your message was sent to the AudioChoice team." : "Include the audiobook name and what you expected to happen. You can also use Submit Feedback for beta issues.").foregroundStyle(ACTheme.secondaryText) }
+            Section { Text(sent ? "Thanks — your message was sent to the AudioChoice team." : "Include the audiobook name and what you expected to happen.").foregroundStyle(ACTheme.secondaryText) }
             if let errorMessage { Section { Text(errorMessage).foregroundStyle(.orange) } }
         }.navigationTitle("Support").acScreen()
     }
@@ -127,21 +127,4 @@ struct SupportFormScreen: View {
     }
 }
 
-struct BetaFeedbackScreen: View {
-    enum Destination { case discord, feedback }
-    let destination: Destination
-    @Environment(\.openURL) private var openURL
-    @State private var unavailable = false
-    private var url: URL? {
-        let key = destination == .discord ? "betaDiscordURL" : "betaFeedbackURL"
-        return UserDefaults.standard.string(forKey: key).flatMap(URL.init(string:))
-    }
-    var body: some View {
-        VStack(spacing: 20) {
-            Image(systemName: destination == .discord ? "message" : "square.and.pencil").font(.system(size: 46)).foregroundStyle(ACTheme.accent)
-            Text(destination == .discord ? "AudioChoice Beta Community" : "Submit Beta Feedback").font(.title2.bold())
-            Text(destination == .discord ? "Join the community to discuss the beta." : "Tell us about playback, filter timing, or anything that needs improvement.").multilineTextAlignment(.center).foregroundStyle(ACTheme.secondaryText)
-            Button(destination == .discord ? "Open Discord" : "Open feedback form") { if let url { openURL(url) } else { unavailable = true } }.buttonStyle(.borderedProminent).tint(ACTheme.accent).foregroundStyle(.black)
-        }.padding().navigationTitle("Feedback").alert("Link not configured", isPresented: $unavailable) { Button("OK", role: .cancel) {} } message: { Text("The beta link will be added before release.") }
-    }
-}
+
