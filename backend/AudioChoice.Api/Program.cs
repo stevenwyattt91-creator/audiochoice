@@ -462,15 +462,17 @@ app.Logger.LogInformation(
     openAIOptions.EffectiveViolenceVerificationModel,
     openAIOptions.ScannerVersion);
 
-// Every scan job used to be routed to one of two independently deployed workers -- the Azure
-// worker here, or a separate GPU host reachable only over SSH -- based on whether the request
-// carried the beta client's X-AudioChoice-Scan-Channel header. That split meant a fix deployed
-// to one worker silently never reached the other: a chunk-offset transcription bug was fixed
-// here and still reproduced identically on a real scan, because the beta app's header sent it
-// to the unpatched host instead. There is now exactly one lane and one worker deployment for
-// every client, beta or not, Android or iOS. The header is still read (older clients may still
-// send it) but no longer changes anything.
-string ScanLane(HttpContext context) => ScanProcessingLanes.AzureOpenAI;
+// A request may still name the GPU lane explicitly, which beta clients do. Everything else
+// takes the configured default, which is now that same lane: the Azure worker transcribes
+// through OpenAI and, with the paid-test ceiling its deployment still carries, cannot finish an
+// audiobook anyway. Nothing in scanning reaches OpenAI once this is the default.
+string ScanLane(HttpContext context) =>
+    string.Equals(
+        context.Request.Headers["X-AudioChoice-Scan-Channel"].ToString(),
+        "ios-beta",
+        StringComparison.OrdinalIgnoreCase)
+        ? ScanProcessingLanes.IOSBetaLambda
+        : openAIOptions.DefaultProcessingLane;
 
 app.UseCors("AdminPortal");
 app.UseRateLimiter();

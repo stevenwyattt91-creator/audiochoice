@@ -299,6 +299,7 @@ struct CloudScanClient {
         var request = URLRequest(url: endpoint("v1/explore/\(catalogID)/cover"))
         request.httpMethod = "PUT"
         request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
+        request.setValue("ios-beta", forHTTPHeaderField: "X-AudioChoice-Scan-Channel")
         request.setValue("image/jpeg", forHTTPHeaderField: "Content-Type")
         request.setValue("application/json", forHTTPHeaderField: "Accept")
         request.httpBody = data
@@ -406,6 +407,7 @@ struct CloudScanClient {
         request.setValue("application/json", forHTTPHeaderField: "Accept")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
+        request.setValue("ios-beta", forHTTPHeaderField: "X-AudioChoice-Scan-Channel")
     }
 
     private func endpoint(_ path: String) -> URL {
