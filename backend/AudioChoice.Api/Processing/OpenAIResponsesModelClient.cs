@@ -52,37 +52,69 @@ public sealed class OpenAIResponsesModelClient(
             request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", options.ApiKey);
             request.Content = new StringContent(payload, Encoding.UTF8, "application/json");
 
-            using var response = await client.SendAsync(request, cancellationToken);
-            if (response.IsSuccessStatusCode)
+            HttpResponseMessage response;
+            try
             {
-                var responseJson = await response.Content.ReadAsStringAsync(cancellationToken);
-                var root = JsonNode.Parse(responseJson)
-                    ?? throw new InvalidOperationException(
-                        $"{schemaName} returned invalid JSON.");
-                return new AnalysisModelResponse(
-                    ExtractOutputText(root, schemaName),
-                    root["usage"]?["input_tokens"]?.GetValue<long>(),
-                    root["usage"]?["output_tokens"]?.GetValue<long>());
+                response = await client.SendAsync(request, cancellationToken);
+            }
+            // A client-side timeout or a dropped connection throws before any HTTP status
+            // code exists to inspect below, so this must be its own catch rather than folded
+            // into the status-code check that follows. Not caught when the caller's own
+            // cancellationToken is what fired -- that is a real cancellation, not a transient
+            // failure, and must propagate rather than be retried three times on the way out.
+            catch (Exception error) when (
+                error is TaskCanceledException or HttpRequestException or IOException &&
+                !cancellationToken.IsCancellationRequested)
+            {
+                if (attempt >= options.MaximumRetries)
+                {
+                    throw new HttpRequestException(
+                        $"{schemaName} did not respond within the configured timeout after " +
+                        $"{attempt + 1} attempt(s).", error);
+                }
+
+                var timeoutDelay = TimeSpan.FromSeconds(Math.Pow(2, attempt));
+                logger.LogWarning(
+                    error,
+                    "{SchemaName} request to {Model} timed out or failed to connect; retry {Attempt} after {Delay}.",
+                    schemaName, model, attempt + 1, timeoutDelay);
+                await Task.Delay(timeoutDelay, cancellationToken);
+                continue;
             }
 
-            // Only a rate limit or a server fault is worth repeating. A rejected request
-            // repeated identically is rejected identically, and paying for that three times
-            // only delays the error.
-            if (attempt >= options.MaximumRetries ||
-                (response.StatusCode != HttpStatusCode.TooManyRequests &&
-                 (int)response.StatusCode < 500))
+            using (response)
             {
-                var error = await response.Content.ReadAsStringAsync(cancellationToken);
-                throw new HttpRequestException(
-                    $"{schemaName} failed with HTTP {(int)response.StatusCode}: {error}");
-            }
+                if (response.IsSuccessStatusCode)
+                {
+                    var responseJson = await response.Content.ReadAsStringAsync(cancellationToken);
+                    var root = JsonNode.Parse(responseJson)
+                        ?? throw new InvalidOperationException(
+                            $"{schemaName} returned invalid JSON.");
+                    return new AnalysisModelResponse(
+                        ExtractOutputText(root, schemaName),
+                        root["usage"]?["input_tokens"]?.GetValue<long>(),
+                        root["usage"]?["output_tokens"]?.GetValue<long>());
+                }
 
-            var delay = response.Headers.RetryAfter?.Delta
-                ?? TimeSpan.FromSeconds(Math.Pow(2, attempt));
-            logger.LogWarning(
-                "{SchemaName} retry {Attempt} on {Model} after {Delay}.",
-                schemaName, attempt + 1, model, delay);
-            await Task.Delay(delay, cancellationToken);
+                // Only a rate limit or a server fault is worth repeating. A rejected request
+                // repeated identically is rejected identically, and paying for that three times
+                // only delays the error.
+                if (attempt >= options.MaximumRetries ||
+                    (response.StatusCode != HttpStatusCode.TooManyRequests &&
+                     (int)response.StatusCode < 500))
+                {
+                    var error = await response.Content.ReadAsStringAsync(cancellationToken);
+                    throw new HttpRequestException(
+                        $"{schemaName} failed with HTTP {(int)response.StatusCode}: {error}");
+                }
+
+                var delay = response.Headers.RetryAfter?.Delta
+                    ?? TimeSpan.FromSeconds(Math.Pow(2, attempt));
+                logger.LogWarning(
+                    "{SchemaName} retry {Attempt} on {Model} after {Delay}.",
+                    schemaName, attempt + 1, model, delay);
+                await Task.Delay(delay, cancellationToken);
+            }
         }
     }
 
