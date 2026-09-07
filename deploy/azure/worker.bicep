@@ -159,16 +159,8 @@ resource worker 'Microsoft.App/containerApps@2024-03-01' = {
               value: 'gpt-5.6-sol'
             }
             {
-              name: 'AudioChoice__OpenAI__ScannerVersion'
-              value: '3.2'
-            }
-            {
               name: 'AudioChoice__OpenAI__MaximumSceneVerificationRequestsPerJob'
               value: '50'
-            }
-            {
-              name: 'AudioChoice__OpenAI__MaximumSceneEscalationRequestsPerJob'
-              value: '5'
             }
             {
               name: 'AudioChoice__OpenAI__MaximumRetries'
