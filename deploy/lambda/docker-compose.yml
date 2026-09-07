@@ -39,10 +39,19 @@ services:
       dockerfile: deploy/lambda/Dockerfile
     restart: unless-stopped
     network_mode: host
+    volumes:
+      # Luna/Terra/Sol checkpoint one completed analysis batch at a time specifically so a
+      # mid-scan failure -- OpenAI credits running out, a timeout, this container being
+      # replaced -- does not have to re-pay for work already done. Without this mount that
+      # checkpoint directory lived on the container's own filesystem instead, which nightly
+      # instance replacement (and every `--force-recreate` during a deploy) destroys, so the
+      # code's own recovery path had nothing durable to recover from.
+      - /lambda/nfs/audiochoice-worker-state/scanner-data:/data
     env_file:
       - lambda-worker.env
     environment:
       ASPNETCORE_ENVIRONMENT: Production
+      AudioChoice__DataPath: /data
       AudioChoice__OpenAI__WorkerEnabled: "true"
       AudioChoice__OpenAI__ProcessingLane: ios-beta-lambda
       # Transcripts MUST go to shared Blob storage, not this container's disk.
