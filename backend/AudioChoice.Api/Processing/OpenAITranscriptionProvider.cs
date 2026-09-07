@@ -36,6 +36,7 @@ public sealed class OpenAITranscriptionProvider(
             content.Add(new StringContent(options.TranscriptionModel), "model");
             content.Add(new StringContent("verbose_json"), "response_format");
             content.Add(new StringContent("segment"), "timestamp_granularities[]");
+            content.Add(new StringContent("word"), "timestamp_granularities[]");
             request.Content = content;
 
             using var response = await client.SendAsync(
@@ -58,13 +59,51 @@ public sealed class OpenAITranscriptionProvider(
                         "The transcription response did not contain timestamped segments.");
                 }
 
-                return payload.Segments
+                // Unlike faster-whisper, which nests each segment's own words inside it, this
+                // API returns one flat words array for the whole chunk. Each word is assigned
+                // to whichever segment's time range contains its midpoint, so a word that
+                // straddles a segment boundary lands on the segment its narration mostly
+                // belongs to rather than always the earlier or later one.
+                var words = payload.Words ?? [];
+                var wordIndex = 0;
+
+                var orderedSegments = payload.Segments
                     .Where(segment => !string.IsNullOrWhiteSpace(segment.Text))
-                    .Select(segment => new TranscriptSegment(
+                    .ToArray();
+                var result = new TranscriptSegment[orderedSegments.Length];
+
+                for (var segmentIndex = 0; segmentIndex < orderedSegments.Length; segmentIndex++)
+                {
+                    var segment = orderedSegments[segmentIndex];
+                    var isLastSegment = segmentIndex == orderedSegments.Length - 1;
+                    var segmentWords = new List<TranscriptWord>();
+
+                    while (wordIndex < words.Count)
+                    {
+                        var word = words[wordIndex];
+                        var midpoint = (word.Start + word.End) / 2;
+                        // The last segment claims every remaining word, so a word timed
+                        // slightly past the transcript's own final segment boundary (rounding
+                        // between the two granularities in the same response) is not silently
+                        // dropped instead of attached anywhere.
+                        if (!isLastSegment && midpoint > segment.End) break;
+
+                        var trimmed = word.Word.Trim();
+                        if (trimmed.Length > 0)
+                        {
+                            segmentWords.Add(new TranscriptWord(trimmed, word.Start, word.End));
+                        }
+                        wordIndex += 1;
+                    }
+
+                    result[segmentIndex] = new TranscriptSegment(
                         segment.Start,
                         segment.End,
-                        segment.Text.Trim()))
-                    .ToArray();
+                        segment.Text.Trim(),
+                        segmentWords.Count > 0 ? segmentWords : null);
+                }
+
+                return result;
             }
 
             if (!ShouldRetry(response.StatusCode, attempt))
@@ -103,10 +142,20 @@ public sealed class OpenAITranscriptionProvider(
 
     private sealed record VerboseTranscript(
         [property: JsonPropertyName("segments")]
-        IReadOnlyList<VerboseSegment>? Segments);
+        IReadOnlyList<VerboseSegment>? Segments,
+        // Present only when "word" was requested alongside "segment" in
+        // timestamp_granularities[]. One flat list for the whole chunk, not nested inside
+        // each segment the way faster-whisper's own response shape is.
+        [property: JsonPropertyName("words")]
+        IReadOnlyList<VerboseWord>? Words = null);
 
     private sealed record VerboseSegment(
         [property: JsonPropertyName("start")] double Start,
         [property: JsonPropertyName("end")] double End,
         [property: JsonPropertyName("text")] string Text);
+
+    private sealed record VerboseWord(
+        [property: JsonPropertyName("word")] string Word,
+        [property: JsonPropertyName("start")] double Start,
+        [property: JsonPropertyName("end")] double End);
 }
