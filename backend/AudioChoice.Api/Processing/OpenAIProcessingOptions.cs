@@ -35,6 +35,18 @@ public sealed class OpenAIProcessingOptions
     public string BaseURL { get; init; } = "https://api.openai.com/v1/";
     public string TranscriptionModel { get; init; } = "whisper-1";
     /// <summary>
+    /// Applies to every Luna/Terra/Sol request made through OpenAIResponsesModelClient.
+    /// </summary>
+    /// <remarks>
+    /// Left unset this client used HttpClient's 100-second platform default, which a long scan
+    /// batch (tens of thousands of input tokens, on the largest windows in a full-book Luna
+    /// pass) can outlast under real load -- and a timeout throws before any HTTP status code
+    /// is received, so the retry loop below it never saw the failure at all. A rescan that had
+    /// already spent most of an hour on transcription and 90% of its analysis was lost to a
+    /// single slow response on the home stretch, with nothing to retry against.
+    /// </remarks>
+    public int AnalysisRequestTimeoutSeconds { get; init; } = 300;
+    /// <summary>
     /// Which service the three analysis models are reached through: "openai" or "bedrock".
     /// </summary>
     /// <remarks>

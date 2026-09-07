@@ -372,7 +372,16 @@ if (openAIOptions.WorkerEnabled)
 
     builder.Services.AddHttpClient(
         "OpenAIProcessing",
-        client => client.BaseAddress = new Uri(openAIOptions.BaseURL));
+        client =>
+        {
+            client.BaseAddress = new Uri(openAIOptions.BaseURL);
+            // A timeout throws before any HTTP status code is received, so
+            // OpenAIResponsesModelClient's own status-code-based retry loop never even saw
+            // the failure -- the platform's hidden 100-second default was silently ending a
+            // long scan job on its largest Luna batches, deep into an hour-plus rescan.
+            client.Timeout = TimeSpan.FromSeconds(
+                Math.Max(30, openAIOptions.AnalysisRequestTimeoutSeconds));
+        });
 
     builder.Services.AddSingleton<ITranscriptionProvider>(services =>
         string.Equals(openAIOptions.TranscriptionProvider, "faster-whisper", StringComparison.OrdinalIgnoreCase)
