@@ -56,11 +56,20 @@ struct PaywallGate: View {
 /// nothing free to use -- it has to explain what AudioChoice does (nobody has seen it yet), and it
 /// has to offer a way out (Sign Out) for someone who signed into the wrong account or changed
 /// their mind, since there is no Profile tab to reach otherwise.
+///
+/// For the same reason it also has to offer Delete Account. `PaywallGate` replaces the whole app
+/// for an account without an entitlement, so `RootTabView` -- and with it Profile and the delete
+/// control on `AccountScreen` -- is unreachable from here. That leaves the one state an App Review
+/// reviewer is guaranteed to be in, a fresh account with nothing purchased, as the one state with
+/// no way to delete the account, which is what Review Guideline 5.1.1(v) requires. Signing out is
+/// not a substitute: the account still exists afterwards.
 private struct PaywallScreen: View {
     @ObservedObject private var purchases = PurchaseManager.shared
     @ObservedObject private var session = AuthSession.shared
     @State private var errorMessage: String?
     @State private var confirmingSignOut = false
+    @State private var confirmingDelete = false
+    @State private var deletingAccount = false
 
     var body: some View {
         ScrollView {
@@ -123,8 +132,15 @@ private struct PaywallScreen: View {
                     Text(errorMessage).foregroundStyle(.orange).multilineTextAlignment(.center)
                 }
 
-                Button("Sign Out", role: .destructive) { confirmingSignOut = true }
-                    .padding(.top, 8)
+                VStack(spacing: 4) {
+                    Button("Sign Out", role: .destructive) { confirmingSignOut = true }
+                    Button(deletingAccount ? "Deleting…" : "Delete Account", role: .destructive) {
+                        confirmingDelete = true
+                    }
+                    .disabled(deletingAccount)
+                    .font(.footnote)
+                }
+                .padding(.top, 8)
 
                 Spacer().frame(height: 12)
             }
@@ -139,6 +155,16 @@ private struct PaywallScreen: View {
         ) {
             Button("Sign Out", role: .destructive) { session.signOut() }
             Button("Cancel", role: .cancel) {}
+        }
+        .confirmationDialog(
+            "Delete your AudioChoice account?",
+            isPresented: $confirmingDelete,
+            titleVisibility: .visible
+        ) {
+            Button("Delete Account", role: .destructive) { Task { await deleteAccount() } }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This permanently deletes your library, filter choices, and account. This cannot be undone. If you have an active subscription, cancel it separately in your Apple ID subscription settings.")
         }
         .task { await purchases.loadProducts() }
     }
@@ -164,5 +190,23 @@ private struct PaywallScreen: View {
     private func restore() async {
         errorMessage = nil
         await purchases.restorePurchases()
+    }
+
+    /// Deletes the account and, on success, leaves this screen because `AuthSession.deleteAccount`
+    /// clears the local session, which sends the app back to sign-in.
+    ///
+    /// A failure deliberately keeps the listener here with the reason shown rather than signing them
+    /// out, matching `AuthSession.deleteAccount`: an account that could not be deleted still exists,
+    /// and clearing the session would claim otherwise. The backend answers 409 with an explanation
+    /// for an account carrying audit work, and that text is what surfaces here.
+    private func deleteAccount() async {
+        errorMessage = nil
+        deletingAccount = true
+        defer { deletingAccount = false }
+        do {
+            try await session.deleteAccount()
+        } catch {
+            errorMessage = error.localizedDescription
+        }
     }
 }
