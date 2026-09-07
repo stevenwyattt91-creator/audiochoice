@@ -1151,6 +1151,31 @@ Assert(retainedSceneEvents.Count == 1,
         Assert(
             e2eModelClient.LunaCallCount >= 1 && e2eModelClient.TerraCallCount >= 1,
             "The end-to-end pipeline did not exercise Luna and Terra at all.");
+
+        // A second Analyze call against the exact same segments and checkpoint root must not
+        // call Luna or Terra again at all. This is what protects a real scan from wasting
+        // OpenAI spend a second time when a run is interrupted (credits exhausted, a timeout,
+        // the process restarting) partway through and retried afterward: every already-
+        // completed batch's checkpoint is reused instead of re-analyzed, so only whatever
+        // never finished the first time costs anything on the retry.
+        var repeatModelClient = new FixtureAnalysisModelClient();
+        var repeatProvider = new OpenAIContentAnalysisProvider(
+            repeatModelClient, e2eOptions, e2eDataPaths,
+            NullLogger<OpenAIContentAnalysisProvider>.Instance);
+        var repeatResult = await repeatProvider.Analyze(e2eSegments, null, CancellationToken.None);
+
+        Assert(
+            repeatModelClient.LunaCallCount == 0 && repeatModelClient.TerraCallCount == 0 &&
+                repeatModelClient.SolCallCount == 0,
+            "Re-analyzing the exact same segments made a fresh model call instead of reusing " +
+            "the saved checkpoint from the first pass; a scan interrupted partway through " +
+            "would re-pay for every batch it had already completed.");
+        Assert(
+            repeatResult.Count == e2eResult.Count &&
+                repeatResult.All(item => e2eResult.Any(original =>
+                    original.EventID == item.EventID && Math.Abs(original.StartTime - item.StartTime) < 0.001)),
+            "Reusing checkpoints from a prior run produced a different result than the " +
+            "original analysis.");
     }
     finally
     {
