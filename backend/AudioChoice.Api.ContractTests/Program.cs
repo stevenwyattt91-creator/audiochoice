@@ -1355,6 +1355,59 @@ var retryResult = await retryScheduler.Transcribe(
     [new AudioChunk("retry", 0, 1)], null, CancellationToken.None);
 Assert(retryResult[0].RetryCount == 1, "Transient transcription failure was not retried once.");
 
+// OpenAI's transcription API returns one flat words array for the whole chunk, unlike
+// faster-whisper which nests each segment's own words inside it. Whoever consumes this
+// provider's output (TranscriptWordLocator, DeterministicContentDetector, ReaderAlignment)
+// only ever reads segment.Words, so a real regression here would look identical to the
+// chunk-offset bug: word timings silently absent, with nothing to indicate why.
+{
+    var openAIResponseJson = """
+        {
+          "segments": [
+            { "start": 0.0, "end": 2.0, "text": "Hello there" },
+            { "start": 2.0, "end": 4.0, "text": "friend indeed" }
+          ],
+          "words": [
+            { "word": "Hello", "start": 0.0, "end": 0.5 },
+            { "word": " there", "start": 0.5, "end": 1.9 },
+            { "word": " friend", "start": 2.1, "end": 3.0 },
+            { "word": " indeed", "start": 3.0, "end": 3.9 }
+          ]
+        }
+        """;
+    using var fakeHandler = new FakeHttpMessageHandler(openAIResponseJson);
+    using var openAIHttpClient = new HttpClient(fakeHandler) { BaseAddress = new Uri("https://fake.test/v1/") };
+    var openAIProvider = new OpenAITranscriptionProvider(
+        openAIHttpClient,
+        new OpenAIProcessingOptions { ApiKey = "test-key", TranscriptionModel = "whisper-1" },
+        NullLogger<OpenAITranscriptionProvider>.Instance);
+
+    var tempChunkFile = Path.GetTempFileName();
+    try
+    {
+        var openAISegments = await openAIProvider.Transcribe(
+            new AudioChunk(tempChunkFile, 0, 4), CancellationToken.None);
+
+        Assert(openAISegments.Count == 2, "OpenAI transcription provider dropped or split a segment.");
+        Assert(
+            openAISegments[0].Words?.Count == 2 && openAISegments[0].Words![0].Text == "Hello" &&
+            openAISegments[0].Words![1].Text == "there",
+            "OpenAI transcription provider did not attach the first segment's own words to it.");
+        Assert(
+            openAISegments[1].Words?.Count == 2 && openAISegments[1].Words![0].Text == "friend" &&
+            openAISegments[1].Words![1].Text == "indeed",
+            "OpenAI transcription provider did not attach the second segment's own words to it, " +
+            "or assigned a word across the segment boundary to the wrong segment.");
+        Assert(
+            openAISegments[0].Words![0].StartTime == 0.0 && openAISegments[1].Words![1].EndTime == 3.9,
+            "OpenAI transcription provider did not preserve each word's own start/end timing.");
+    }
+    finally
+    {
+        File.Delete(tempChunkFile);
+    }
+}
+
 // Two audiobooks' chunks must actually transcribe at the same time once the semaphore
 // permits it, not merely be scheduled without visible error. Proven by recording each
 // call's own start/end instant against a wall clock and asserting two windows overlap --
@@ -2919,6 +2972,17 @@ sealed class ChunkRelativeTranscriptionProvider : ITranscriptionProvider
         AudioChunk chunk, CancellationToken cancellationToken) =>
         Task.FromResult<IReadOnlyList<TranscriptSegment>>(
             [new TranscriptSegment(1, 2, "word", [new TranscriptWord("word", 1, 2)])]);
+}
+
+/// <summary>Returns one fixed JSON body for every request, for testing an HttpClient-based provider without a real network call.</summary>
+sealed class FakeHttpMessageHandler(string responseJson) : HttpMessageHandler
+{
+    protected override Task<HttpResponseMessage> SendAsync(
+        HttpRequestMessage request, CancellationToken cancellationToken) =>
+        Task.FromResult(new HttpResponseMessage(System.Net.HttpStatusCode.OK)
+        {
+            Content = new StringContent(responseJson, System.Text.Encoding.UTF8, "application/json")
+        });
 }
 
 sealed class FakeTranscriptionProvider : ITranscriptionProvider
