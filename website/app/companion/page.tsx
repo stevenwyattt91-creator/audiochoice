@@ -48,13 +48,36 @@ export default function CompanionPage() {
   const [showSignIn, setShowSignIn] = useState(false);
   const [authBusy, setAuthBusy] = useState(false);
   const [authError, setAuthError] = useState("");
+  // null while unknown, which is not the same as false. Showing "subscription required" before the
+  // answer arrives would accuse a paying subscriber of not paying every time the page loaded.
+  const [canTransfer, setCanTransfer] = useState<boolean | null>(null);
   const input = useRef<HTMLInputElement>(null);
   const isAax = file?.name.toLowerCase().endsWith(".aax") ?? false;
+
+  // The subscription is enforced by the API, which answers 402 to an unentitled account. This is
+  // only so the page can say so before someone picks a 700 MB file and waits for the upload to be
+  // refused.
+  const checkAccess = async () => {
+    const token = window.localStorage.getItem("audiochoice.accessToken");
+    if (!token) { setCanTransfer(null); return; }
+    try {
+      const response = await fetch(`${API_URL}/v1/account/access`, { headers: { Authorization: `Bearer ${token}` } });
+      if (!response.ok) throw new Error("unavailable");
+      const body = await response.json() as { canUseCompanion?: boolean };
+      setCanTransfer(Boolean(body.canUseCompanion));
+    } catch {
+      // Left unknown rather than false. A network problem is not a lapsed subscription, and the
+      // API still has the final say when the transfer is actually requested.
+      setCanTransfer(null);
+    }
+  };
+
   useEffect(() => {
     const token = window.localStorage.getItem("audiochoice.accessToken");
     const email = window.localStorage.getItem("audiochoice.accountEmail") ?? "";
     setSignedIn(Boolean(token));
     setAccountEmail(email);
+    if (token) void checkAccess();
   }, []);
   const chooseFile = (event: ChangeEvent<HTMLInputElement>) => { const selected = event.target.files?.[0] ?? null; setError(""); setFile(selected); setAcknowledged(false); if (!selected) { setStage("choose"); return; } setStage(selected.name.toLowerCase().endsWith(".aax") ? "acknowledge" : "choose"); };
   const beginTransfer = async () => {
@@ -62,6 +85,9 @@ export default function CompanionPage() {
     if (isAax && !acknowledged) { setStage("acknowledge"); return; }
     const accessToken = window.localStorage.getItem("audiochoice.accessToken");
     if (!accessToken) { setShowSignIn(true); setError("Sign in before starting the phone transfer."); return; }
+    // Stops a large upload that the API would refuse anyway. Only a known-false blocks; unknown
+    // proceeds and lets the server answer, since a failed access check is not a lapsed subscription.
+    if (canTransfer === false) { setError("An active AudioChoice subscription is required to transfer an audiobook to your phone."); return; }
     setError(""); setProgress(5); setStage("uploading");
     try {
       const hashBuffer = await crypto.subtle.digest("SHA-256", await file.arrayBuffer());
@@ -91,6 +117,7 @@ export default function CompanionPage() {
     const email = body.user?.email ?? "";
     if (email) window.localStorage.setItem("audiochoice.accountEmail", email);
     setAccountEmail(email); setSignedIn(true); setShowSignIn(false); setAuthError(""); setError("");
+    void checkAccess();
   };
   const passwordSignIn = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault(); setAuthBusy(true); setAuthError("");
@@ -135,7 +162,9 @@ export default function CompanionPage() {
       <header className="companion-hero shell transfer-hero"><div><span className="portal-kicker">AUDIOCHOICE TRANSFER TO PHONE</span><h1>Send your audiobook<br /><em>to your phone.</em></h1><p>Choose a file you already own, follow the guided steps, and scan a private QR code in AudioChoice to start the normal import process.</p><p className="companion-safety">Your audiobook stays on your devices. A temporary handoff is used only to move it to the app and expires after import.</p></div><aside className="companion-visual" aria-label="Audiobook transfer preview"><div className="companion-file"><span>▥</span><b>{file?.name ?? "Your audiobook.m4b"}</b><small>{stage === "ready" ? "Ready to import" : "Private transfer"}</small></div><div className="companion-route"><i /><span>⌁</span><i /></div><div className="companion-phone"><small>AUDIOCHOICE</small><strong>{stage === "ready" ? "Scan to import" : "Your phone"}</strong><b>✓</b></div></aside></header>
       <section className="transfer-workflow shell" aria-labelledby="transfer-title"><div className="companion-heading"><span className="label">GUIDED TRANSFER</span><h2 id="transfer-title">Every step, clearly.</h2><p>Stay on this page while the transfer is prepared. For AAX files, we pause so you can convert the file before sending the resulting M4B.</p></div><div className="transfer-step-list">{steps.map(([number, title, copy], index) => <div key={number} className={`transfer-step-card ${activeStep === index + 1 ? "active" : ""} ${activeStep > index + 1 ? "complete" : ""}`}><span>{activeStep > index + 1 ? "✓" : number}</span><div><b>{title}</b><p>{copy}</p></div></div>)}</div>
         <article className="transfer-panel"><div className="transfer-panel-head"><span className="label">STEP {activeStep} OF 4</span><button type="button" onClick={reset}>Start over</button></div>
-        {stage === "choose" && <><h3>Choose an audiobook</h3><p className="transfer-muted">M4B, M4A, and MP3 transfer directly. AAX files require the ownership acknowledgement and an authorized conversion before transfer.</p><label className={`file-drop transfer-file ${file ? "selected" : ""}`}><input ref={input} type="file" accept=".m4b,.m4a,.mp3,.aax,audio/mp4,audio/x-m4a,audio/mpeg" onChange={chooseFile} /><span>{file ? "✓" : "＋"}</span><strong>{file ? file.name : "Select an M4B, M4A, MP3, or AAX"}</strong><small>{file ? `${(file.size / 1_000_000).toFixed(0)} MB selected` : "The original file remains on this computer."}</small></label>{file && <button className="primary transfer-action" type="button" onClick={beginTransfer}>Continue <span>→</span></button>}</>}
+        {stage === "choose" && !signedIn && <><h3>Sign in to transfer</h3><p className="transfer-muted">The transfer tool works with your AudioChoice account, so the handoff can only be claimed by your own phone.</p><div className="ownership-card"><b>Your AudioChoice account</b><p>Sign in with the same account you use in the app. An active subscription is required to transfer an audiobook.</p></div><button className="primary transfer-action" type="button" onClick={() => setShowSignIn(true)}>Sign in <span>→</span></button></>}
+        {stage === "choose" && signedIn && canTransfer === false && <><h3>An active subscription is required</h3><p className="transfer-muted">Transferring an audiobook from this computer to your phone is part of an AudioChoice subscription.</p><div className="ownership-card"><b>No active subscription on {accountEmail || "this account"}</b><p>Subscribe in the AudioChoice app on your phone, then return here and the transfer tool will be ready. If you have just subscribed, reload this page.</p></div><button className="secondary transfer-action" type="button" onClick={() => void checkAccess()}>Check again</button></>}
+        {stage === "choose" && signedIn && canTransfer !== false && <><h3>Choose an audiobook</h3><p className="transfer-muted">M4B, M4A, and MP3 transfer directly. AAX files require the ownership acknowledgement and an authorized conversion before transfer.</p><label className={`file-drop transfer-file ${file ? "selected" : ""}`}><input ref={input} type="file" accept=".m4b,.m4a,.mp3,.aax,audio/mp4,audio/x-m4a,audio/mpeg" onChange={chooseFile} /><span>{file ? "✓" : "＋"}</span><strong>{file ? file.name : "Select an M4B, M4A, MP3, or AAX"}</strong><small>{file ? `${(file.size / 1_000_000).toFixed(0)} MB selected` : "The original file remains on this computer."}</small></label>{file && <button className="primary transfer-action" type="button" onClick={beginTransfer}>Continue <span>→</span></button>}</>}
           {stage === "acknowledge" && <><h3>Confirm ownership</h3><p className="transfer-muted">Before continuing with an AAX file, confirm that you legally acquired it and have the right to convert it for personal use.</p><div className="ownership-card"><b>Ownership acknowledgement</b><p>By continuing, I confirm that I legally acquired this audiobook and have the right to convert it for my personal use. I will not use AudioChoice to copy, share, distribute, sell, or process content I do not lawfully own or control.</p><label><input type="checkbox" checked={acknowledged} onChange={event => setAcknowledged(event.target.checked)} /> I agree</label></div><button className="primary transfer-action" type="button" disabled={!acknowledged} onClick={() => setStage("convert")}>Continue to conversion <span>→</span></button></>}
           {stage === "convert" && <><h3>Convert your AAX to M4B</h3><p className="transfer-muted">AudioChoice does not distribute audiobook files. Use your authorized conversion method, then return here and attach the resulting M4B.</p><div className="conversion-callout"><b>1. Open your authorized converter</b><p>Keep this tab open so you can return after conversion.</p><a className="secondary transfer-action" href="https://audible-tools.kamsker.at/" target="_blank" rel="noreferrer">Open conversion page ↗</a></div><p className="transfer-return">When conversion is complete, return to this page and choose the resulting M4B.</p><label className="file-drop transfer-file"><input ref={input} type="file" accept=".m4b,audio/mp4" onChange={chooseFile} /><span>{file?.name.toLowerCase().endsWith(".m4b") ? "✓" : "＋"}</span><strong>{file?.name.toLowerCase().endsWith(".m4b") ? file.name : "Attach the resulting M4B"}</strong><small>The converted M4B is the file that will be transferred.</small></label>{file?.name.toLowerCase().endsWith(".m4b") && <button className="primary transfer-action" type="button" onClick={beginTransfer}>Prepare transfer <span>→</span></button>}</>}
           {stage === "uploading" && <div className="transfer-progress-panel"><div className="spinner"/><h3>Preparing your private transfer</h3><p>Uploading securely and creating a one-time handoff…</p><div className="progress-track"><i style={{ width: `${progress}%` }} /></div><strong>{progress}%</strong></div>}
