@@ -995,10 +995,26 @@ app.MapPost("/v1/companion/transfers", async (
     HttpContext context,
     ICompanionTransferStore transfers,
     ICompanionTransferStorage storage,
+    IEntitlementStore entitlements,
     CancellationToken cancellationToken) =>
 {
     var user = CurrentUser(context);
     if (user is null) return Results.Unauthorized();
+    // The transfer tool is part of the subscription, and this is the only place that rule
+    // actually holds. Both the website page and the desktop companion check access before
+    // offering the file picker, but either can be bypassed by calling this endpoint directly,
+    // and it is the endpoint that mints the upload authorization. CanUseCompanion is true for
+    // any unexpired grant, so a founder passes on their own grant rather than needing a case.
+    if (!entitlements.Access(user.ID).CanUseCompanion)
+    {
+        return Results.Json(
+            new
+            {
+                error = "An active AudioChoice subscription is required to transfer an audiobook " +
+                    "to your phone."
+            },
+            statusCode: StatusCodes.Status402PaymentRequired);
+    }
     if (!storage.IsAvailable)
         return Results.Problem("Companion transfers are not configured yet.", statusCode: StatusCodes.Status503ServiceUnavailable);
     var sha256 = request.Sha256?.Trim().ToUpperInvariant();
