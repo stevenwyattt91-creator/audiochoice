@@ -16,10 +16,10 @@ import { FormEvent, useEffect, useState } from "react";
 // facts, and conflating them is what produces a launch-week download button that lands on
 // an Apple or Google error page.
 //
-// Apple ID 6804652721 came from App Store Connect. Verified on 2026-09-03:
-// https://apps.apple.com/app/id6804652721 returns HTTP 404 and the iTunes lookup API
-// returns 0 results, because the build is still in review. Flip IOS_LISTING_LIVE to true
-// once it is approved and the button goes live with no other change.
+// Apple ID 6804652721 came from App Store Connect. The listing went live on 2026-09-09 at
+// 17:31 UTC: version 1.0 reads READY_FOR_SALE, https://apps.apple.com/app/id6804652721
+// answers 200, and the iTunes lookup API returns the app. It answered 404 while the build
+// was in review, which is why the flag existed.
 //
 // The Play URL is derived from the applicationId in android-app/app/build.gradle.kts.
 // Android ships October 1, so its flag stays false until then.
@@ -27,7 +27,7 @@ import { FormEvent, useEffect, useState } from "react";
 const APP_STORE_URL = "https://apps.apple.com/app/id6804652721";
 const PLAY_STORE_URL = "https://play.google.com/store/apps/details?id=com.audiochoice.mobile";
 
-const IOS_LISTING_LIVE = false;
+const IOS_LISTING_LIVE = true;
 const ANDROID_LISTING_LIVE = false;
 
 const IOS_RELEASE_DATE = "September 8";
