@@ -508,6 +508,11 @@ app.Use(async (context, next) =>
         path == "/v1/auth/password-reset/request" ||
         path == "/v1/auth/password-reset/confirm" ||
         path == "/v1/auth/external" ||
+        // Help text about nobody, and the screen showing it has to work before someone can sign in
+        // as much as after -- which matters most for the answer about not being able to sign in. The
+        // endpoint was written to be public and both apps' loaders say so, but it was never listed
+        // here, so it answered 401 and every client silently fell back to its own bundled copy.
+        path == "/v1/faq" ||
         path == "/v1/referrals/check" ||
         path == "/v1/purchases/apple/notifications" ||
         path == "/v1/purchases/google/notifications";

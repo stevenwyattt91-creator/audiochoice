@@ -61,7 +61,7 @@ enum FaqLoader {
     ///
     /// Deliberately short. It exists so the screen is never empty, not to be a second source of truth
     /// that drifts from the server the way the two apps' hardcoded copies drifted from each other.
-    static let bundled = FaqResponse(version: 1, sections: [
+    static let bundled = FaqResponse(version: 2, sections: [
         FaqSection(title: "Getting your audiobooks in", items: [
             FaqEntry(
                 question: "Where can I get audiobooks I can import?",
@@ -69,9 +69,19 @@ enum FaqLoader {
                     + "downloads, such as Libro.fm, are simplest: download the file and import it."),
             FaqEntry(
                 question: "Which file types work?",
-                answer: "MP3 and M4B are the usual ones. Audible AAX files can be converted on the "
-                    + "device using your own account's activation. EPUB files are imported as "
+                answer: "MP3, M4A and M4B are the usual ones. Audible AAX files can be converted on "
+                    + "the device using your own account's activation. EPUB files are imported as "
                     + "reading editions rather than audiobooks."),
+            FaqEntry(
+                question: "How do I use an audiobook I bought from Audible?",
+                answer: "On a computer, sign in at audible.com, open Library and choose Download "
+                    + "beside the title to get an AAX file. Move it to your phone and pick it in "
+                    + "Import; AudioChoice converts it on the device using your own activation."),
+            FaqEntry(
+                question: "The audiobook is on my computer, not my phone.",
+                answer: "Open audiochoiceapp.com/companion on the computer, sign in to the same "
+                    + "account, choose the file, then scan the QR code it shows using AudioChoice on "
+                    + "your phone. It accepts M4B, M4A and MP3; convert an AAX to M4B first."),
         ]),
         FaqSection(title: "Filters", items: [
             FaqEntry(

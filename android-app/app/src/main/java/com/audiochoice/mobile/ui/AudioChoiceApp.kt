@@ -1694,7 +1694,7 @@ private data class FaqItem(val question: String, val answer: String)
  * two apps' hardcoded copies drifted from each other.
  */
 private val bundledFaq = FaqResponse(
-    version = 1,
+    version = 2,
     sections = listOf(
         FaqSection(
             "Getting your audiobooks in",
@@ -1706,8 +1706,20 @@ private val bundledFaq = FaqResponse(
                 ),
                 FaqEntry(
                     "Which file types work?",
-                    "MP3 and M4B are the usual ones. Audible AAX files can be converted on the " +
+                    "MP3, M4A and M4B are the usual ones. Audible AAX files can be converted on the " +
                         "device using your own account's activation.",
+                ),
+                FaqEntry(
+                    "How do I use an audiobook I bought from Audible?",
+                    "On a computer, sign in at audible.com, open Library and choose Download beside " +
+                        "the title to get an AAX file. Move it to your phone and pick it in Import; " +
+                        "AudioChoice converts it on the device using your own activation.",
+                ),
+                FaqEntry(
+                    "The audiobook is on my computer, not my phone.",
+                    "Open audiochoiceapp.com/companion on the computer, sign in to the same account, " +
+                        "choose the file, then scan the QR code it shows using AudioChoice on your " +
+                        "phone. It accepts M4B, M4A and MP3; convert an AAX to M4B first.",
                 ),
             ),
         ),
