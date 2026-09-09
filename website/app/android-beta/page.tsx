@@ -1,6 +1,13 @@
 "use client";
 
+import Link from "next/link";
 import { FormEvent, useState } from "react";
+
+// The beta ran before the app shipped. The page is kept rather than deleted or redirected
+// because testers were given this URL directly and a dead link is a worse answer than an
+// explanation, and because the /api/android-beta endpoint and its stored applicant records
+// still exist. Flipping this back to true reopens the signup form untouched.
+const BETA_OPEN = false;
 
 const filterTypes = ["Sexual content", "Profanity", "Violence", "Blasphemy", "Drugs & alcohol", "Custom words or phrases"];
 const testItems = [
@@ -58,10 +65,20 @@ export default function AndroidBetaPage() {
 
       <header className="beta-hero shell">
         <div>
-          <span className="beta-kicker">LIMITED AUDIOCHOICE BETA</span>
-          <h1>ACOTAR GraphicAudio<br /><em>fans wanted.</em></h1>
-          <p>Help AudioChoice make audiobook filtering more accurate, reliable, and natural before launch.</p>
-          <a className="primary" href="#join-beta">Join the beta <span>↓</span></a>
+          <span className="beta-kicker">{BETA_OPEN ? "LIMITED AUDIOCHOICE BETA" : "THE BETA HAS ENDED"}</span>
+          {BETA_OPEN ? (
+            <>
+              <h1>ACOTAR GraphicAudio<br /><em>fans wanted.</em></h1>
+              <p>Help AudioChoice make audiobook filtering more accurate, reliable, and natural before launch.</p>
+              <a className="primary" href="#join-beta">Join the beta <span>↓</span></a>
+            </>
+          ) : (
+            <>
+              <h1>Thank you to<br /><em>every tester.</em></h1>
+              <p>The AudioChoice beta is closed. Your reports shaped how filters start, stop, and stay out of the way, and AudioChoice is now a released app.</p>
+              <Link className="primary" href="/#download">Get AudioChoice <span>→</span></Link>
+            </>
+          )}
         </div>
         <aside className="beta-book-card">
           <span>TEST EDITION</span>
@@ -120,13 +137,25 @@ export default function AndroidBetaPage() {
       <section className="beta-form-section" id="join-beta">
         <div className="shell beta-form-grid">
           <div>
-            <span className="label">JOIN THE BETA</span>
-            <h2>Help make every skip feel seamless.</h2>
-            <p>Complete the application below. We&apos;ll review it and contact selected testers using the email provided.</p>
+            <span className="label">{BETA_OPEN ? "JOIN THE BETA" : "WHAT HAPPENS NOW"}</span>
+            <h2>{BETA_OPEN ? "Help make every skip feel seamless." : "Your Founding Beta Tester rate stands."}</h2>
+            <p>
+              {BETA_OPEN
+                ? "Complete the application below. We'll review it and contact selected testers using the email provided."
+                : "Applications are closed, but nothing you were promised has changed. If you tested for us, the lifetime Founding Beta Tester rate is still yours."}
+            </p>
             <div className="ownership-note"><span>◇</span><p><b>Bring your own audiobook.</b><br />AudioChoice does not provide or distribute audiobook files. You must own a legitimate copy.</p></div>
           </div>
           <div className="beta-form-card">
-            {status === "success" ? (
+            {!BETA_OPEN ? (
+              <div className="beta-closed" role="status">
+                <span>✓</span>
+                <h3>Applications are closed.</h3>
+                <p>AudioChoice has launched, so there is nothing left to apply for. Download the app to start filtering the audiobooks you already own.</p>
+                <Link className="primary" href="/#download">Get AudioChoice <span>→</span></Link>
+                <small>Were you a tester with a question about your rate? Email support@audiochoiceapp.com.</small>
+              </div>
+            ) : status === "success" ? (
               <div className="beta-success" role="status"><span>✓</span><h3>Application received.</h3><p>You&apos;ve been added to the Android beta applicant group. We&apos;ll be in touch if you&apos;re selected.</p></div>
             ) : (
               <form onSubmit={submit}>

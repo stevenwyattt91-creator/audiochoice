@@ -1,8 +1,88 @@
+"use client";
+import Link from "next/link";
+import { FormEvent, useEffect, useState } from "react";
+
+// ---------------------------------------------------------------------------
+// Store availability. These two constants are the entire launch switch.
+//
+// Leave a URL as null and that platform renders as a plain dated badge instead of a
+// button. That is deliberate: a download button pointing at a store listing that is not
+// live yet sends people to an Apple or Google error page from the homepage, which is worse
+// than telling them the date. Filling a URL in turns the badge into a real button, and
+// nothing else needs to change.
+//
+// The store URLs are recorded here, but each is gated behind its own "listing is public"
+// flag. The URL and the question of whether the listing exists yet are two different
+// facts, and conflating them is what produces a launch-week download button that lands on
+// an Apple or Google error page.
+//
+// Apple ID 6804652721 came from App Store Connect. The listing went live on 2026-09-09 at
+// 17:31 UTC: version 1.0 reads READY_FOR_SALE, https://apps.apple.com/app/id6804652721
+// answers 200, and the iTunes lookup API returns the app. It answered 404 while the build
+// was in review, which is why the flag existed.
+//
+// The Play URL is derived from the applicationId in android-app/app/build.gradle.kts.
+// Android ships October 1, so its flag stays false until then.
+// ---------------------------------------------------------------------------
+const APP_STORE_URL = "https://apps.apple.com/app/id6804652721";
+const PLAY_STORE_URL = "https://play.google.com/store/apps/details?id=com.audiochoice.mobile";
+
+const IOS_LISTING_LIVE = true;
+const ANDROID_LISTING_LIVE = false;
+
+const IOS_RELEASE_DATE = "September 8";
+const ANDROID_RELEASE_DATE = "October 1";
+
+const iosLive = IOS_LISTING_LIVE && Boolean(APP_STORE_URL);
+const androidLive = ANDROID_LISTING_LIVE && Boolean(PLAY_STORE_URL);
+
+// One line that stays truthful in all four combinations rather than claiming a launch that
+// has not happened on the platform the visitor happens to be holding.
+const availabilityLine = iosLive && androidLive
+  ? "Available now on iPhone and Android"
+  : iosLive
+    ? `Available now on iPhone · Android ${ANDROID_RELEASE_DATE}`
+    : androidLive
+      ? `Available now on Android · iPhone ${IOS_RELEASE_DATE}`
+      : `iPhone ${IOS_RELEASE_DATE} · Android ${ANDROID_RELEASE_DATE}`;
+
+const stores = [
+  {
+    key: "ios",
+    href: iosLive ? APP_STORE_URL : null,
+    liveLabel: "Download for iPhone",
+    pendingLabel: `iPhone · ${IOS_RELEASE_DATE}`,
+  },
+  {
+    key: "android",
+    href: androidLive ? PLAY_STORE_URL : null,
+    liveLabel: "Download for Android",
+    pendingLabel: `Android · ${ANDROID_RELEASE_DATE}`,
+  },
+];
+
+// Rendered in both the hero and the closing section, so it lives in one place.
+function StoreActions({ id }: { id?: string }) {
+  return (
+    <div className="store-actions" id={id}>
+      {stores.map((store) =>
+        store.href ? (
+          <a key={store.key} className="primary" href={store.href}>
+            {store.liveLabel} <span>→</span>
+          </a>
+        ) : (
+          <span key={store.key} className="store-pending">{store.pendingLabel}</span>
+        ),
+      )}
+    </div>
+  );
+}
+
 const features = [
   {
     number: "01",
     title: "Bring your own audiobooks",
-    copy: "Import the audiobook files you already own. MP3, M4A, M4B, and AAX support is being built in.",
+    copy: "Import the audiobook files you already own, including MP3, M4A, M4B, and AAX.",
   },
   {
     number: "02",
@@ -71,22 +151,19 @@ export default function Home() {
           <a href="mailto:support@audiochoiceapp.com">Contact</a>
         </div>
         <div className="nav-actions">
-          <a className="beta-nav" href="/android-beta">Join Beta</a>
+          <a className="beta-nav" href="#download">Download</a>
         </div>
       </nav>
 
       <section className="hero shell" id="top">
         <div className="hero-copy">
-          <div className="eyebrow"><i /> Coming soon to Android and Apple</div>
+          <div className="eyebrow"><i /> {availabilityLine}</div>
           <h1>Your audiobooks.<br /><em>Your boundaries.</em></h1>
           <p className="hero-lede">
             AudioChoice is a private audiobook player that finds sensitive content and lets you decide what to hear, mute, or skip.
           </p>
-          <div className="hero-actions" id="updates">
-            <button className="primary" type="button" onClick={openUpdates}>Keep me updated <span>→</span></button>
-            <a className="secondary" href="#how">See how it works</a>
-          </div>
-          <p className="microcopy">No spam. Just meaningful launch updates.</p>
+          <StoreActions id="updates" />
+          <p className="microcopy">Works with the audiobooks you already own.</p>
         </div>
 
         <div className="hero-visual" aria-label="Preview of the AudioChoice player and filters">
@@ -192,12 +269,16 @@ export default function Home() {
         </div>
       </section>
 
-      <section className="final-cta shell">
+      <section className="final-cta shell" id="download">
         <img src="/audiochoice-logo.png" alt="" />
-        <span>COMING SOON</span>
+        <span>{iosLive || androidLive ? "AVAILABLE NOW" : "LAUNCHING SOON"}</span>
         <h2>Listen Your Way.</h2>
-        <p>AudioChoice is being carefully built for listeners who want more control without giving up the books they love.</p>
-        <button className="primary" type="button" onClick={openUpdates}>Keep me updated <span>→</span></button>
+        <p>AudioChoice is built for listeners who want more control without giving up the books they love.</p>
+        <StoreActions />
+        <p className="microcopy cta-microcopy">
+          Want release notes and new filter categories in your inbox?{" "}
+          <button className="link-button" type="button" onClick={openUpdates}>Get product updates</button>
+        </p>
       </section>
 
       <footer className="shell">
@@ -206,7 +287,7 @@ export default function Home() {
           © 2026 AudioChoice. Listen Your Way.
           <span>AudioChoice participates in affiliate programs, including Awin. We may earn a commission from qualifying purchases.</span>
         </p>
-        <div><a href="#privacy">Privacy</a><a href="mailto:support@audiochoiceapp.com">Support</a></div>
+        <div><Link href="/privacy">Privacy Policy</Link><a href="mailto:support@audiochoiceapp.com">Support</a></div>
       </footer>
 
       {updatesOpen && (
@@ -216,20 +297,20 @@ export default function Home() {
             {status === "success" ? (
               <div className="signup-success" role="status">
                 <span>✓</span>
-                <h2>You&apos;re on the list.</h2>
+                <h2>You&apos;re subscribed.</h2>
                 <p>We&apos;ll email you when there&apos;s meaningful AudioChoice news to share.</p>
                 <button className="primary" type="button" onClick={() => setUpdatesOpen(false)}>Done</button>
               </div>
             ) : (
               <>
-                <span className="modal-label">LAUNCH UPDATES</span>
-                <h2 id="updates-title">Be the first to know.</h2>
-                <p>Enter your email and we&apos;ll let you know when AudioChoice is ready for Android and Apple.</p>
+                <span className="modal-label">AUDIOCHOICE UPDATES</span>
+                <h2 id="updates-title">Keep up with what&apos;s new.</h2>
+                <p>Release notes, new filter categories, and format support as they ship. Nothing else.</p>
                 <form onSubmit={submitUpdates}>
                   <label htmlFor="updates-email">Email address</label>
                   <input id="updates-email" name="email" type="email" autoComplete="email" placeholder="you@example.com" value={email} onChange={(event) => setEmail(event.target.value)} required autoFocus />
                   <input className="honeypot" name="website" tabIndex={-1} autoComplete="off" aria-hidden="true" />
-                  <button className="primary" type="submit" disabled={status === "sending"}>{status === "sending" ? "Submitting…" : "Keep me updated"}<span>→</span></button>
+                  <button className="primary" type="submit" disabled={status === "sending"}>{status === "sending" ? "Submitting…" : "Subscribe"}<span>→</span></button>
                   {status === "error" && <p className="form-error" role="alert">We couldn&apos;t submit that right now. Please try again.</p>}
                 </form>
                 <small>No spam. Unsubscribe anytime.</small>
@@ -241,6 +322,3 @@ export default function Home() {
     </main>
   );
 }
-"use client";
-
-import { FormEvent, useEffect, useState } from "react";
