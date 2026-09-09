@@ -6,9 +6,13 @@ import android.net.Uri
 import android.provider.OpenableColumns
 import com.audiochoice.contracts.BookFingerprint
 import com.audiochoice.mobile.data.AudioChapter
+import java.io.File
 import java.security.MessageDigest
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+
+/** Used when no real filename can be recovered, and as the last-resort display title. */
+private const val PLACEHOLDER_FILE_NAME = "Imported audiobook"
 
 data class InspectedAudio(
     val fingerprint: BookFingerprint,
@@ -30,12 +34,25 @@ data class InspectedAudio(
 class AudioFileInspector(private val context: Context) {
     suspend fun inspect(uri: Uri): InspectedAudio = withContext(Dispatchers.IO) {
         val resolver = context.contentResolver
-        var name = "Imported audiobook"
+        var name = PLACEHOLDER_FILE_NAME
         var size = -1L
         resolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME, OpenableColumns.SIZE), null, null, null)?.use { cursor ->
             if (cursor.moveToFirst()) {
                 name = cursor.getString(0) ?: name
                 size = if (cursor.isNull(1)) -1L else cursor.getLong(1)
+            }
+        }
+        // No content provider stands behind a file:// URI, so the query above returns null
+        // outright and the name stays at its placeholder. That is not cosmetic: `extension` is
+        // derived from this name below and is what decides whether the MP4 atom readers run at
+        // all. A companion transfer arrives as file:// from app-private storage, so without
+        // this fallback a perfectly good M4B was classified as an unknown container and lost
+        // its tags, cover art and chapters even though the bytes were hash-verified on both
+        // ends. ImportViewModel.queryFileName already guards its own lookup the same way; this
+        // one was missing it.
+        if (name == PLACEHOLDER_FILE_NAME && uri.scheme.equals("file", ignoreCase = true)) {
+            uri.path?.let { path ->
+                name = File(path).name.takeIf { it.isNotBlank() } ?: name
             }
         }
         val digest = MessageDigest.getInstance("SHA-256")
@@ -122,7 +139,7 @@ class AudioFileInspector(private val context: Context) {
             ?: embeddedTitle?.trim()?.takeIf { it.isNotBlank() }
         val title = metadataTitle
             ?: EditionTitleCleaner.clean(name)
-            ?: "Imported audiobook"
+            ?: PLACEHOLDER_FILE_NAME
 
         InspectedAudio(
             fingerprint = BookFingerprint(
