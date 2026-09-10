@@ -224,9 +224,19 @@ final class AuthSession: ObservableObject {
     }
 
     func signOut() {
+        // The client and the device token are captured before the credential is cleared, because the
+        // unregister request needs the very session and token that are about to be discarded. Fired
+        // afterwards rather than awaited: signing out must not hang on the network, and a device
+        // that fails to unregister here is dropped server-side the next time APNs reports it gone.
+        let client = try? CloudScanClient.configured()
+        let deviceToken = PushNotificationRegistrar.shared.storedDeviceToken
+        PushNotificationRegistrar.shared.forgetDeviceToken()
         CloudCredentialStore.saveToken("")
         UserDefaults.standard.removeObject(forKey: userKey)
         user = nil
+        if let client, let deviceToken {
+            Task { try? await client.unregisterPushDevice(token: deviceToken) }
+        }
     }
 
     /// Deletes the account on the server, then clears this device the same way `signOut()` does.

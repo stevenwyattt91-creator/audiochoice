@@ -68,3 +68,13 @@ public sealed record EntitlementGrantRequest(
     string Source,
     DateTimeOffset? ExpiresAt,
     string? ExternalReference = null);
+
+/// <summary>
+/// A device asking to be told when something it is waiting for is ready.
+/// </summary>
+/// <remarks>
+/// Platform is sent rather than inferred from the token's shape. An APNs token and an FCM token are
+/// both opaque strings, and guessing which transport to use from their length is the sort of rule
+/// that holds until the day it does not.
+/// </remarks>
+public sealed record DevicePushTokenRequest(string? Token, string? Platform);

@@ -7,6 +7,9 @@ struct AudioChoiceApp: App {
     @StateObject private var authSession = AuthSession.shared
     @StateObject private var companionTransfers = CompanionTransferCoordinator.shared
     @Environment(\.scenePhase) private var scenePhase
+    /// Attached only so the APNs device token has somewhere to arrive: Apple delivers it through
+    /// UIApplicationDelegate and SwiftUI offers no equivalent.
+    @UIApplicationDelegateAdaptor(PushAppDelegate.self) private var pushDelegate
 
     init() {
         // Runs before any screen can read the lock, so a PIN set by an earlier build keeps
@@ -46,6 +49,10 @@ struct AudioChoiceApp: App {
                 // makes reporting work in a car with no signal. They only leave the device
                 // here, on launch and whenever the app comes back to the foreground.
                 .task { await FilterReportQueue.shared.flush() }
+                // Re-registers when permission already exists, so a token Apple reissued after a
+                // reinstall or a restore reaches the server. Never prompts from here: the ask
+                // happens when an import starts, where the reason for it is visible.
+                .task { await PushNotificationRegistrar.shared.registerIfAlreadyAuthorized() }
                 .onChange(of: scenePhase) { _, phase in
                     guard phase == .active else { return }
                     Task { await FilterReportQueue.shared.flush() }

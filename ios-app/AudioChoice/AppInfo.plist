@@ -62,6 +62,10 @@
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>audio</string>
+		<!-- Lets a scan-finished push wake the app briefly. The notification itself is shown by the
+		     system without this, so it is here for the silent refresh that follows rather than for
+		     the alert. -->
+		<string>remote-notification</string>
 	</array>
 	<key>UIRequiresFullScreen</key>
 	<true/>

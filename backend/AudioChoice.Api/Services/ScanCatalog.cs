@@ -49,6 +49,18 @@ public interface IScanCatalog
         string processingLane = ScanProcessingLanes.AzureOpenAI);
     ScanJobRecord? FindJob(Guid scanID);
     bool CanAccessJob(Guid scanID, Guid userID);
+
+    /// <summary>
+    /// Everyone waiting on this scan.
+    /// </summary>
+    /// <remarks>
+    /// More than one account can be waiting on a single job: a second listener importing the same
+    /// recording is attached to the scan already running rather than starting another, which is the
+    /// whole point of subscribers existing. Notifying only the job's owner would leave the others
+    /// watching a screen for a scan that had already finished.
+    /// </remarks>
+    IReadOnlyList<Guid> JobSubscribers(Guid scanID);
+
     bool SetJobStatus(Guid scanID, CloudScanStatus status);
     ScanProgress GetJobProgress(Guid scanID);
     bool UpdateJobProgress(Guid scanID, int percent, string stage);
@@ -269,6 +281,21 @@ public sealed class InMemoryScanCatalog : IScanCatalog
 
     public ScanJobRecord? FindJob(Guid scanID) =>
         _jobs.GetValueOrDefault(scanID);
+
+    public IReadOnlyList<Guid> JobSubscribers(Guid scanID)
+    {
+        lock (_subscriberLock)
+        {
+            var users = _jobSubscribers.TryGetValue(scanID, out var found)
+                ? new HashSet<Guid>(found)
+                : [];
+            // The owner is normally a subscriber too, but a job recovered from disk by an older
+            // build may predate that, and the person who started the scan is the one most likely
+            // to be waiting on it.
+            if (_jobs.TryGetValue(scanID, out var job)) users.Add(job.OwnerUserID);
+            return users.ToList();
+        }
+    }
 
     public bool CanAccessJob(Guid scanID, Guid userID)
     {
