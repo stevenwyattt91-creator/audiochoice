@@ -192,7 +192,7 @@
 				AUDIOCHOICE_API_BASE_URL = "https://audiochoice-stg-api.grayocean-b35d4bf9.eastus.azurecontainerapps.io";
 				CODE_SIGN_ENTITLEMENTS = AudioChoice/AudioChoice.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 32;
+				CURRENT_PROJECT_VERSION = 33;
 				DEVELOPMENT_TEAM = 8M67MANZ4S;
 				GENERATE_INFOPLIST_FILE = NO;
 				GOOGLE_IOS_CLIENT_ID = "105248861745-hikuiqttbh10okeksf972rk5osdf4d0c.apps.googleusercontent.com";
@@ -207,7 +207,7 @@
 				INFOPLIST_KEY_UIRequiresFullScreen = YES;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations = UIInterfaceOrientationPortrait;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
-				MARKETING_VERSION = 1.0.1;
+				MARKETING_VERSION = 1.0.2;
 				PRODUCT_BUNDLE_IDENTIFIER = com.audiochoice.mobile;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
@@ -224,7 +224,7 @@
 				AUDIOCHOICE_API_BASE_URL = "https://audiochoice-stg-api.grayocean-b35d4bf9.eastus.azurecontainerapps.io";
 				CODE_SIGN_ENTITLEMENTS = AudioChoice/AudioChoice.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 32;
+				CURRENT_PROJECT_VERSION = 33;
 				DEVELOPMENT_TEAM = 8M67MANZ4S;
 				GENERATE_INFOPLIST_FILE = NO;
 				GOOGLE_IOS_CLIENT_ID = "105248861745-hikuiqttbh10okeksf972rk5osdf4d0c.apps.googleusercontent.com";
@@ -239,7 +239,7 @@
 				INFOPLIST_KEY_UIRequiresFullScreen = YES;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations = UIInterfaceOrientationPortrait;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
-				MARKETING_VERSION = 1.0.1;
+				MARKETING_VERSION = 1.0.2;
 				PRODUCT_BUNDLE_IDENTIFIER = com.audiochoice.mobile;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";

@@ -675,7 +675,7 @@ struct NowPlayingScreen: View {
             if let record = playback.currentRecord {
                 PlayerScreen(book: record.book, isTabRoot: true)
             } else {
-                ContentUnavailableView("Nothing Playing", systemImage: "waveform", description: Text("Choose an audiobook from your Library to open the Beta-style player."))
+                ContentUnavailableView("Nothing Playing", systemImage: "waveform", description: Text("Choose an audiobook from your Library to start listening."))
                     .background(ACTheme.background.ignoresSafeArea())
             }
         }
