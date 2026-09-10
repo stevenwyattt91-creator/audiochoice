@@ -176,6 +176,30 @@ jobs:
             --template-file deploy/azure/api.bicep \
             --parameters location="$LOCATION" imageTag="$GITHUB_SHA" narrationAwsCredentialsPresent=${{ steps.secrets.outputs.aws }} resendApiKeyPresent=${{ steps.secrets.outputs.resend }} apnsAuthKeyPresent=${{ steps.secrets.outputs.apns }} apnsKeyID='${{ secrets.APNS_KEY_ID }}' googleClientID='105248861745-34kh2v9g9825kb1drs3jrgmijjum2p3o.apps.googleusercontent.com,105248861745-hikuiqttbh10okeksf972rk5osdf4d0c.apps.googleusercontent.com' appleClientID='com.audiochoice.website,com.audiochoice.mobile'
 
+      # A successful deployment is not a working API. Container Apps accepts a revision, keeps the
+      # previous healthy one serving, and reports success -- so a revision that starts and then
+      # throws while building its routes looked like a green deploy while none of the new endpoints
+      # existed. That happened, and cost a release. This fails the run instead.
+      - name: Verify the new revision serves traffic
+        shell: bash
+        run: |
+          host=$(az containerapp show --name audiochoice-stg-api \
+            --resource-group "${{ secrets.AZURE_RESOURCE_GROUP }}" \
+            --query properties.configuration.ingress.fqdn -o tsv)
+          # A route rather than /health: endpoint construction in minimal APIs is lazy and happens on
+          # the first matched request, so only a real route proves the routing table was built. /v1/faq
+          # is public, so a 200 means the whole pipeline came up.
+          for attempt in $(seq 1 30); do
+            code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 10 "https://$host/v1/faq" || echo 000)
+            if [ "$code" = "200" ]; then
+              echo "The new revision is serving traffic (/v1/faq answered 200 on attempt $attempt)."
+              exit 0
+            fi
+            sleep 10
+          done
+          echo "::error::The deployed revision never served /v1/faq successfully. The previous revision is probably still serving; check 'az containerapp logs show --revision' for a startup or routing failure."
+          exit 1
+
       - name: Report narration configuration
         shell: bash
         run: |
