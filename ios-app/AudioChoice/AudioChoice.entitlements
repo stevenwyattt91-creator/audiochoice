@@ -6,5 +6,12 @@
     <array>
         <string>Default</string>
     </array>
+    <!-- Push notifications, so the server can say a scan finished instead of the app having to be
+         open to find out. Set to production because the APNs key in use is scoped to production,
+         which is the environment App Store and TestFlight builds register against. A debug build
+         run from Xcode registers against sandbox and will not receive anything until a
+         sandbox-capable key exists; changing this string alone would not fix that. -->
+    <key>aps-environment</key>
+    <string>production</string>
 </dict>
 </plist>

@@ -30,6 +30,15 @@ param transactionalEmailEnabled bool = true
 @description('Whether resend-api-key exists in Key Vault. A deployment must not reference a secret that is absent -- it fails the whole revision -- so email stays off unless the key is there.')
 param resendApiKeyPresent bool = true
 
+@description('Whether apns-auth-key exists in Key Vault. Same rule as the email key: a revision that references an absent secret fails entirely, so push notifications stay off unless the key is there.')
+param apnsAuthKeyPresent bool = false
+
+@description('The 10-character App Store Connect key id for the APNs auth key. Not a secret -- it identifies which key signed a provider token, and Apple sends it in the clear in every JWT header.')
+param apnsKeyID string = ''
+
+@description('The Apple Developer team the APNs key belongs to. Not a secret; it appears in the provider token as the issuer.')
+param apnsTeamID string = '8M67MANZ4S'
+
 @description('Whether Apple purchase verification is turned on. Requires appleSigningKeyPresent, since there is nothing to verify a StoreKit2 transaction against otherwise.')
 param applePurchasesEnabled bool = false
 
@@ -208,6 +217,12 @@ resource api 'Microsoft.App/containerApps@2024-03-01' = {
         {
           name: 'resend-api-key'
           keyVaultUrl: '${vault.properties.vaultUri}secrets/resend-api-key'
+          identity: pullIdentity.id
+        }
+      ] : [], apnsAuthKeyPresent ? [
+        {
+          name: 'apns-auth-key'
+          keyVaultUrl: '${vault.properties.vaultUri}secrets/apns-auth-key'
           identity: pullIdentity.id
         }
       ] : [], narrationAwsCredentialsPresent ? [
@@ -401,6 +416,23 @@ resource api 'Microsoft.App/containerApps@2024-03-01' = {
               // there, and getting that wrong fails the whole revision rather than one variable.
               name: 'AudioChoice__TransactionalEmail__ApiKey'
               secretRef: 'resend-api-key'
+            }
+          ] : [], apnsAuthKeyPresent ? [
+            {
+              name: 'AudioChoice__Push__Enabled'
+              value: 'true'
+            }
+            {
+              name: 'AudioChoice__Push__PrivateKey'
+              secretRef: 'apns-auth-key'
+            }
+            {
+              name: 'AudioChoice__Push__KeyID'
+              value: apnsKeyID
+            }
+            {
+              name: 'AudioChoice__Push__TeamID'
+              value: apnsTeamID
             }
           ] : [], narrationAwsCredentialsPresent ? [
             {

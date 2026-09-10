@@ -188,6 +188,42 @@ else
     builder.Services.AddSingleton<IInternalAuditStore, DisabledInternalAuditStore>();
     builder.Services.AddSingleton<IEditionReferenceStore, UnavailableEditionReferenceStore>();
 }
+if (databaseOptions.Enabled)
+{
+#if POSTGRES
+    builder.Services.AddSingleton<IDevicePushTokenStore, PostgresDevicePushTokenStore>();
+#endif
+}
+else
+{
+    builder.Services.AddSingleton<IDevicePushTokenStore>(
+        new FileDevicePushTokenStore(dataPaths));
+}
+
+// Push notifications. Configured exactly like transactional email: present in the environment or
+// absent, with an inert implementation rather than a startup failure when absent, so a local or
+// preview deployment runs without an Apple key.
+var pushOptions = builder.Configuration.GetSection("AudioChoice:Push").Get<PushNotificationOptions>()
+    ?? new PushNotificationOptions();
+builder.Services.AddSingleton(pushOptions);
+if (pushOptions.Enabled &&
+    !string.IsNullOrWhiteSpace(pushOptions.PrivateKey) &&
+    !string.IsNullOrWhiteSpace(pushOptions.KeyID) &&
+    !string.IsNullOrWhiteSpace(pushOptions.TeamID))
+{
+    builder.Services.AddHttpClient("Apns");
+    builder.Services.AddSingleton<IPushNotificationSender>(services =>
+        new ApnsPushNotificationSender(
+            services.GetRequiredService<IHttpClientFactory>().CreateClient("Apns"),
+            pushOptions,
+            services.GetRequiredService<IDevicePushTokenStore>(),
+            services.GetRequiredService<ILogger<ApnsPushNotificationSender>>()));
+}
+else
+{
+    builder.Services.AddSingleton<IPushNotificationSender, DisabledPushNotificationSender>();
+}
+
 builder.Services.AddSingleton(externalAuthOptions);
 if (databaseOptions.Enabled)
 {
@@ -1107,6 +1143,42 @@ app.MapPost("/v1/companion/transfers/{transferID:guid}/received", async (
     if (transfer is null || transfer.OwnerUserID != user.ID || transfer.Status != "uploaded") return Results.NotFound();
     if (!transfers.MarkReceived(transferID)) return Results.BadRequest();
     await storage.Delete(transfer, cancellationToken);
+    return Results.NoContent();
+});
+
+// Registers this device so the server can tell it a scan finished, rather than the app having to
+// sit and poll. Idempotent: a client re-registers on every launch, because APNs reissues a token
+// after a reinstall or a restore and the old one stops working without warning.
+app.MapPost("/v1/notifications/devices", (
+    DevicePushTokenRequest request,
+    HttpContext context,
+    IDevicePushTokenStore devices) =>
+{
+    var user = CurrentUser(context);
+    if (user is null) return Results.Unauthorized();
+    var token = request.Token?.Trim() ?? string.Empty;
+    // A hex APNs token is 64 characters; an FCM token is longer and not hex. Bounded rather than
+    // pattern-matched so one endpoint serves both without the shape of one becoming a rule.
+    if (token.Length is < 32 or > 4096 || !DevicePushPlatforms.IsKnown(request.Platform))
+    {
+        return Results.BadRequest(new { error = "A valid device token and platform are required." });
+    }
+    devices.Register(user.ID, request.Platform!, token);
+    return Results.NoContent();
+});
+
+// Called on sign-out. Without it a shared or resold phone would keep receiving notifications about
+// an account that is no longer signed in on it.
+app.MapDelete("/v1/notifications/devices", (
+    DevicePushTokenRequest request,
+    HttpContext context,
+    IDevicePushTokenStore devices) =>
+{
+    var user = CurrentUser(context);
+    if (user is null) return Results.Unauthorized();
+    var token = request.Token?.Trim();
+    if (string.IsNullOrEmpty(token)) return Results.BadRequest(new { error = "A device token is required." });
+    devices.Remove(token);
     return Results.NoContent();
 });
 

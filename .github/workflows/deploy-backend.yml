@@ -88,6 +88,8 @@ jobs:
           AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+          APNS_AUTH_KEY: ${{ secrets.APNS_AUTH_KEY }}
+          APNS_KEY_ID: ${{ secrets.APNS_KEY_ID }}
         run: |
           # Kept stable across deploys once set, rather than regenerated every time. An admin
           # token handed out for one investigation would otherwise go stale on the very next
@@ -142,13 +144,37 @@ jobs:
             echo "::warning::resend-api-key is not in Key Vault, so transactional email stays off and password reset cannot send. Add it to enable account recovery."
           fi
 
+          # The APNs signing key, stored from the repository secret the same way the sending key is,
+          # so rotating it is one change here rather than a manual vault edit. The .p8 is multi-line
+          # PEM, which survives a Key Vault secret value unchanged.
+          if [ -n "$APNS_AUTH_KEY" ]; then
+            az keyvault secret set --vault-name "${{ steps.foundation.outputs.vault }}" \
+              --name apns-auth-key --value "$APNS_AUTH_KEY" >/dev/null
+            echo "Stored the APNs signing key from repository secrets."
+          fi
+
+          # Push needs both halves: the key to sign with and the id naming which key signed. Either
+          # one alone cannot produce a valid provider token, so both are required before the
+          # deployment is allowed to reference the secret -- referencing an absent one fails the
+          # whole revision. Without push, a scan still completes; the listener just has to open the
+          # app to see it, which is the behaviour this replaces.
+          if [ -n "$APNS_KEY_ID" ] && az keyvault secret show \
+              --vault-name "${{ steps.foundation.outputs.vault }}" \
+              --name apns-auth-key >/dev/null 2>&1; then
+            echo "apns=true" >> "$GITHUB_OUTPUT"
+            echo "APNs key found; scan-complete notifications will be sent."
+          else
+            echo "apns=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::apns-auth-key or APNS_KEY_ID is missing, so push notifications stay off and listeners must reopen the app to see a finished scan."
+          fi
+
       - name: Deploy API container
         shell: bash
         run: |
           az deployment group create \
             --resource-group "${{ secrets.AZURE_RESOURCE_GROUP }}" \
             --template-file deploy/azure/api.bicep \
-            --parameters location="$LOCATION" imageTag="$GITHUB_SHA" narrationAwsCredentialsPresent=${{ steps.secrets.outputs.aws }} resendApiKeyPresent=${{ steps.secrets.outputs.resend }} googleClientID='105248861745-34kh2v9g9825kb1drs3jrgmijjum2p3o.apps.googleusercontent.com,105248861745-hikuiqttbh10okeksf972rk5osdf4d0c.apps.googleusercontent.com' appleClientID='com.audiochoice.website,com.audiochoice.mobile'
+            --parameters location="$LOCATION" imageTag="$GITHUB_SHA" narrationAwsCredentialsPresent=${{ steps.secrets.outputs.aws }} resendApiKeyPresent=${{ steps.secrets.outputs.resend }} apnsAuthKeyPresent=${{ steps.secrets.outputs.apns }} apnsKeyID='${{ secrets.APNS_KEY_ID }}' googleClientID='105248861745-34kh2v9g9825kb1drs3jrgmijjum2p3o.apps.googleusercontent.com,105248861745-hikuiqttbh10okeksf972rk5osdf4d0c.apps.googleusercontent.com' appleClientID='com.audiochoice.website,com.audiochoice.mobile'
 
       - name: Report narration configuration
         shell: bash

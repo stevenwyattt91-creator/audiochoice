@@ -278,6 +278,25 @@ public sealed class PostgresScanCatalog(
         return (bool)(command.ExecuteScalar() ?? false);
     }
 
+    public IReadOnlyList<Guid> JobSubscribers(Guid scanID)
+    {
+        using var connection = dataSource.OpenConnection();
+        // Unions in the job's owner, since a job created before subscribers were recorded has no
+        // row of its own and its owner is the person most likely to be waiting.
+        using var command = new NpgsqlCommand("""
+            select user_id from scan_job_subscribers where scan_job_id = $1
+            union
+            select u.owner_user_id
+            from scan_jobs j join scan_uploads u on u.id = j.upload_id
+            where j.id = $1 and u.owner_user_id is not null;
+            """, connection);
+        command.Parameters.AddWithValue(scanID);
+        using var reader = command.ExecuteReader();
+        var users = new List<Guid>();
+        while (reader.Read()) users.Add(reader.GetGuid(0));
+        return users;
+    }
+
     public bool SetJobStatus(Guid scanID, CloudScanStatus status)
     {
         using var connection = dataSource.OpenConnection();

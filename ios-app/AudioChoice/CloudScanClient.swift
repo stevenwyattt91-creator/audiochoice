@@ -123,6 +123,34 @@ struct CloudScanClient {
         try await get(path: "v1/account/access")
     }
 
+    /// Registers this device so the server can say when a scan finished.
+    ///
+    /// Sent on every launch rather than once. APNs reissues a device token after a reinstall, a
+    /// restore onto a new phone, or occasionally on its own, and the previous one silently stops
+    /// working -- so the only safe assumption is that the token may have changed since last time.
+    func registerPushDevice(token: String) async throws {
+        try await postWithoutResponse(
+            DevicePushTokenRequest(token: token, platform: "apns"),
+            path: "v1/notifications/devices")
+    }
+
+    /// Forgets this device, so a phone signed out of an account stops hearing about its scans.
+    func unregisterPushDevice(token: String) async throws {
+        var request = URLRequest(url: endpoint("v1/notifications/devices"))
+        request.httpMethod = "DELETE"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        addAPIHeaders(to: &request)
+        request.httpBody = try JSONEncoder().encode(
+            DevicePushTokenRequest(token: token, platform: "apns"))
+        let (data, response) = try await session.data(for: request)
+        try validate(response: response, data: data)
+    }
+
+    private struct DevicePushTokenRequest: Encodable {
+        let token: String
+        let platform: String
+    }
+
     /// Submits a StoreKit2 transaction's signed JWS for server-side verification. The server
     /// decodes the product and expiry from Apple's own payload -- nothing about the purchase is
     /// trusted from the client beyond "here is a token, please check it."

@@ -36,6 +36,11 @@ final class CloudScanViewModel: ObservableObject {
         isReconnecting = false
         reconnectAttempt = 0
         connectionStatus = nil
+        // Asked here rather than at first launch. A scan runs for minutes, so this is the one moment
+        // where being offered a notification obviously answers a question the listener already has,
+        // and a permission prompt refused out of context is close to permanent -- iOS never asks
+        // again. Not awaited: the upload should not wait on a dialog, and registration catches up.
+        Task { await PushNotificationRegistrar.shared.requestAuthorizationAndRegister() }
         let hasAccess = fileURL.startAccessingSecurityScopedResource()
         defer { if hasAccess { fileURL.stopAccessingSecurityScopedResource() } }
 

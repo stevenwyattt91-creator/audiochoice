@@ -12,6 +12,8 @@ public sealed class ScanWorker(
     ITransactionalEmailSender emailSender,
     IInternalAuditStore audits,
     IEditionReferenceStore editionReferences,
+    IDevicePushTokenStore devicePushTokens,
+    IPushNotificationSender pushSender,
     OpenAIProcessingOptions options,
     ILogger<ScanWorker> logger) : BackgroundService
 {
@@ -103,6 +105,31 @@ public sealed class ScanWorker(
                 }
 
                 var completed = catalog.CompleteJob(scanID, result);
+                if (completed)
+                {
+                    // The point of the whole feature: a scan takes minutes, and this is the moment
+                    // the server knows it is over. Wrapped like the retarget and alert below, so a
+                    // push that cannot be delivered never turns a finished scan into a failed one.
+                    try
+                    {
+                        var waiting = catalog.JobSubscribers(scanID);
+                        var devices = devicePushTokens.ForUsers(waiting);
+                        if (devices.Count > 0)
+                        {
+                            await pushSender.NotifyScanReady(
+                                devices,
+                                job.Fingerprint.WorkTitle ?? string.Empty,
+                                stoppingToken);
+                        }
+                    }
+                    catch (Exception pushException)
+                    {
+                        logger.LogWarning(
+                            pushException,
+                            "Could not notify devices that scan job {ScanID} finished.",
+                            scanID);
+                    }
+                }
                 if (completed && !isNewCatalogEdition)
                 {
                     // A rescan or reanalysis of an edition that already had a result. Any
