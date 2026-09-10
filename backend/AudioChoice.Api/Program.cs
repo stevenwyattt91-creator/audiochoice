@@ -1169,16 +1169,21 @@ app.MapPost("/v1/notifications/devices", (
 
 // Called on sign-out. Without it a shared or resold phone would keep receiving notifications about
 // an account that is no longer signed in on it.
+//
+// The token arrives as a query parameter, not a body. Minimal APIs refuse to infer a body on DELETE
+// and throw while building the endpoint -- which happens on the first request rather than at
+// startup, so the container comes up and then fails to serve anything. A query parameter also
+// survives proxies that discard a DELETE body.
 app.MapDelete("/v1/notifications/devices", (
-    DevicePushTokenRequest request,
+    string token,
     HttpContext context,
     IDevicePushTokenStore devices) =>
 {
     var user = CurrentUser(context);
     if (user is null) return Results.Unauthorized();
-    var token = request.Token?.Trim();
-    if (string.IsNullOrEmpty(token)) return Results.BadRequest(new { error = "A device token is required." });
-    devices.Remove(token);
+    var value = token?.Trim();
+    if (string.IsNullOrEmpty(value)) return Results.BadRequest(new { error = "A device token is required." });
+    devices.Remove(value);
     return Results.NoContent();
 });
 

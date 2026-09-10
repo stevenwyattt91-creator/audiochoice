@@ -135,13 +135,17 @@ struct CloudScanClient {
     }
 
     /// Forgets this device, so a phone signed out of an account stops hearing about its scans.
+    ///
+    /// The token goes in the query string rather than a body: the server cannot accept a body on a
+    /// DELETE, and a percent-encoded query parameter survives intermediaries that discard one.
     func unregisterPushDevice(token: String) async throws {
-        var request = URLRequest(url: endpoint("v1/notifications/devices"))
+        var components = URLComponents(
+            url: endpoint("v1/notifications/devices"), resolvingAgainstBaseURL: false)
+        components?.queryItems = [URLQueryItem(name: "token", value: token)]
+        guard let url = components?.url else { throw CloudClientError.invalidConfiguration }
+        var request = URLRequest(url: url)
         request.httpMethod = "DELETE"
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         addAPIHeaders(to: &request)
-        request.httpBody = try JSONEncoder().encode(
-            DevicePushTokenRequest(token: token, platform: "apns"))
         let (data, response) = try await session.data(for: request)
         try validate(response: response, data: data)
     }
