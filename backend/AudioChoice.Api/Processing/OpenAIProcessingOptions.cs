@@ -137,7 +137,14 @@ public sealed class OpenAIProcessingOptions
     // Luna's own coverage gaps, so it may be missing a scene the safety net would have
     // caught. A cached scan_result from before this change must not be presented as though
     // it already had that second chance.
-    public string ScannerVersion { get; init; } = "5.2-sexual-safety-net";
+    //
+    // Bumped again: a real listener report confirmed a confirmed complete-scene event's own
+    // boundary was landing after real content had already started playing -- the refinement
+    // instruction asked the verifier for "the activity or its immediate unmistakable
+    // lead-in," which was read narrowly enough to skip the actual kissing/buildup that leads
+    // into a scene. A scan under the prior version must not be presented as though its
+    // boundaries already reflected the wider reading.
+    public string ScannerVersion { get; init; } = "5.3-scene-boundary-includes-buildup";
     /// <summary>Only jobs in this lane may be claimed by this worker instance.</summary>
     public string ProcessingLane { get; init; } = ScanProcessingLanes.AzureOpenAI;
     /// <summary>

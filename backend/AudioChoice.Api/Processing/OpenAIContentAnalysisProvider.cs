@@ -41,10 +41,18 @@ public sealed class OpenAIContentAnalysisProvider(
     // Bumped again: a keyword-safety-net candidate's Terra rejection now escalates to Sol
     // for a second opinion (see NeedsSolReview's remarks), which a cached Terra-only
     // checkpoint from before this change never had a chance to do.
+    //
+    // Bumped again: SceneVerificationClosingInstructions' startTime refinement now asks for
+    // the beginning of the continuous romantic/physical escalation into a scene, not only
+    // the sentence containing its own unmistakable moment. A real listener report confirmed
+    // the prior wording let a confirmed scene's boundary land well after the buildup a
+    // listener would also expect skipped had already started playing -- a cached quote from
+    // before this change reflects the old, narrower reading and must not be trusted as
+    // though it already applied the new one.
     private const string SceneVerificationVersion =
-        "5.2-sexual-safety-net-sol-second-opinion";
+        "5.3-scene-boundary-includes-buildup";
     private const string SceneEscalationVersion =
-        "5.2-sexual-safety-net-sol-second-opinion";
+        "5.3-scene-boundary-includes-buildup";
     private readonly string _checkpointFolder = dataPaths.AnalysisCheckpoints;
     public string ScannerVersion => options.ScannerVersion;
 
@@ -1782,8 +1790,14 @@ Candidates:
     /// counts as evidence, not about how a confirmed range is reported once accepted.
     /// </remarks>
     private const string SceneVerificationClosingInstructions = """
-For an accepted candidate, refine startTime to the beginning of the activity
-or its immediate unmistakable lead-in, and endTime where that activity clearly finishes.
+For an accepted candidate, refine startTime to the beginning of the continuous romantic or
+physical escalation that leads directly into the act -- kissing, embracing, undressing, or
+touching that builds without a break in the scene -- not only the single sentence containing
+the act's own unmistakable moment. A listener who wants this scene skipped is asking to miss
+the buildup that makes the scene recognizable as one, not to have the skip begin partway
+through it once the act itself is unambiguous. Only start later, at the act itself, when the
+scene truly opens there with no preceding kissing or touching that belongs to the same
+continuous moment. Set endTime where that activity clearly finishes.
 Keep timestamps within the supplied excerpt. Use a neutral, non-graphic but useful description.
 Do not include graphic details or quotations in safeDescription. Never name intimate
 anatomy or describe touching mechanics, positions, squeezing, or similar physical details.
