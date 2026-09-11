@@ -1,5 +1,5 @@
 {
-  "description": "Ground-truth eval set for comparing a candidate analysis model (e.g. a self-hosted Qwen3.6-27B) against the real, already-verified behavior of OpenAI's Terra/Sol verification lane on this app's sexual-content taxonomy. Every case here is a real transcript excerpt pulled directly from a production audiobook's saved transcript on the Lambda scanner (via /v1/admin/transcripts/content), not a synthetic example. The two positive cases are the exact real incidents found and fixed this session (PR #73 boundary wording, PR #74 Sol majority vote); the negative case is a real passage confirmed to contain no escalation, used to check the candidate model does not over-flag ordinary romantic tension.",
+  "description": "Ground-truth eval set for comparing a candidate analysis model (e.g. a self-hosted Qwen3.6-27B) against the real, already-verified behavior of OpenAI's Terra/Sol verification lane on this app's sexual-content taxonomy. Every case here is a real transcript excerpt pulled directly from a production audiobook's saved transcript on the Lambda scanner (via /v1/admin/transcripts/content), not a synthetic example. The first three ACOTAR cases are the exact real incidents found and fixed this session (PR #73 boundary wording, PR #74 Sol majority vote). The remaining cases were added to broaden coverage across more books and taxonomy edge cases: clean unambiguous explicit positives (The Deal, Fourth Wing), a positive with past-trauma context embedded in an otherwise consensual scene, an implied/faded-activity case with no ongoing act in the excerpt, and specificity checks (Leviathan Wakes' spaceship mechanics, Red Rising's child combat) where keyword-level cues are present but the correct answer is a clean reject.",
   "cases": [
     {
       "id": "acotar-part1-biting-grinding",
@@ -13,68 +13,291 @@
         "accepted": true,
         "label": "sexual_complete_scene",
         "notes": "Real failure this session: Terra accepted this at 0.98 confidence in the original 5.1 scan, then a fresh independent Terra call AND 29 independent Sol calls across 3 separate rescans all rejected the identical passage on this same transcript -- pure model non-determinism on a genuinely borderline call, not a taxonomy disagreement. This is the exact case PR #74's Sol majority vote (3-vote resolution instead of a single overriding Sol call) was built to stabilize. A candidate model should accept this consistently across repeated calls, not flip.",
-        "expected_start_time_range": [19940.5, 19962.2],
+        "expected_start_time_range": [
+          19940.5,
+          19962.2
+        ],
         "expected_start_time_notes": "The narration puts real escalation (bite, grind) starting around 'and bit my neck' (19951.4) through 'made me grind my hips against his' (19976.0). Under the PR #73 buildup-inclusive boundary rule, an acceptable startTime should fall at or before the clear physical escalation begins (bite / grind), not only at the single most explicit sentence."
       },
       "transcript_window": {
         "start_time": 19902.0,
         "end_time": 20081.3,
         "segments": [
-          {"startTime": 19902.0, "endTime": 19903.7, "text": "His teeth were bright in the moonlight."},
-          {"startTime": 19904.2, "endTime": 19906.2, "text": "He brought his lips to my ear."},
-          {"startTime": 19906.5, "endTime": 19908.7, "text": "I would have been gentle with you, though."},
-          {"startTime": 19909.1, "endTime": 19910.4, "text": "I closed my eyes."},
-          {"startTime": 19910.7, "endTime": 19912.6, "text": "Every inch of my body went taut"},
-          {"startTime": 19912.6, "endTime": 19914.3, "text": "as his words echoed through me."},
-          {"startTime": 19914.3, "endTime": 19917.3, "text": "I would have had you moaning my name throughout it all,"},
-          {"startTime": 19917.3, "endTime": 19919.5, "text": "and I would have taken a very,"},
-          {"startTime": 19919.8, "endTime": 19921.6, "text": "very long time."},
-          {"startTime": 19922.1, "endTime": 19922.6, "text": "Feyre."},
-          {"startTime": 19922.9, "endTime": 19924.7, "text": "His hot breath tickled my ear."},
-          {"startTime": 19925.4, "endTime": 19927.2, "text": "My back arched slightly."},
-          {"startTime": 19927.6, "endTime": 19929.7, "text": "He ripped his claws free from the wall,"},
-          {"startTime": 19929.8, "endTime": 19931.8, "text": "and my knees buckled as he let go."},
-          {"startTime": 19932.0, "endTime": 19934.8, "text": "I grasped the wall to keep from sinking to the floor,"},
-          {"startTime": 19935.0, "endTime": 19936.4, "text": "to keep from grabbing him,"},
-          {"startTime": 19936.6, "endTime": 19938.0, "text": "to strike or caress."},
-          {"startTime": 19938.0, "endTime": 19938.8, "text": "I didn't know."},
-          {"startTime": 19938.8, "endTime": 19940.5, "text": "I opened my eyes."},
-          {"startTime": 19940.6, "endTime": 19942.3, "text": "He still smiled."},
-          {"startTime": 19942.9, "endTime": 19944.5, "text": "Smiled like an animal."},
-          {"startTime": 19944.7, "endTime": 19946.5, "text": "Why should I want someone's leftovers?"},
-          {"startTime": 19946.9, "endTime": 19948.1, "text": "I pushed him away."},
-          {"startTime": 19948.4, "endTime": 19950.0, "text": "He grabbed my hands again,"},
-          {"startTime": 19950.1, "endTime": 19951.4, "text": "and bit my neck."},
-          {"startTime": 19951.6, "endTime": 19953.8, "text": "His teeth clamped onto the tender spot"},
-          {"startTime": 19953.8, "endTime": 19955.1, "text": "where my neck met my shoulder."},
-          {"startTime": 19955.5, "endTime": 19956.6, "text": "I couldn't move,"},
-          {"startTime": 19957.0, "endTime": 19957.7, "text": "couldn't think,"},
-          {"startTime": 19957.9, "endTime": 19959.6, "text": "and my world narrowed to the feeling"},
-          {"startTime": 19959.6, "endTime": 19961.8, "text": "of his lips and teeth against my skin."},
-          {"startTime": 19962.2, "endTime": 19964.0, "text": "He didn't pierce my flesh,"},
-          {"startTime": 19964.2, "endTime": 19966.1, "text": "but rather bit to keep me pinned."},
-          {"startTime": 19966.1, "endTime": 19968.8, "text": "The push of his body against mine,"},
-          {"startTime": 19969.1, "endTime": 19970.5, "text": "the hard and the soft,"},
-          {"startTime": 19970.7, "endTime": 19972.0, "text": "made me see red,"},
-          {"startTime": 19972.4, "endTime": 19973.2, "text": "see lightning,"},
-          {"startTime": 19973.8, "endTime": 19976.0, "text": "made me grind my hips against his."},
-          {"startTime": 19976.3, "endTime": 19977.6, "text": "I should hate him,"},
-          {"startTime": 19977.8, "endTime": 19979.5, "text": "hate him for his stupid ritual,"},
-          {"startTime": 19979.8, "endTime": 19981.4, "text": "for the female he'd been with tonight."},
-          {"startTime": 19981.7, "endTime": 19983.1, "text": "His bite lightened,"},
-          {"startTime": 19983.3, "endTime": 19986.3, "text": "and his tongue caressed the places his teeth had been."},
-          {"startTime": 19986.7, "endTime": 19987.9, "text": "He didn't move."},
-          {"startTime": 19988.1, "endTime": 19990.1, "text": "He just remained in that spot,"},
-          {"startTime": 19990.7, "endTime": 19991.9, "text": "kissing my neck,"},
-          {"startTime": 19992.6, "endTime": 19993.2, "text": "intently,"},
-          {"startTime": 19994.2, "endTime": 19994.8, "text": "territorially,"},
-          {"startTime": 19995.5, "endTime": 19996.1, "text": "lazily."},
-          {"startTime": 19996.5, "endTime": 19998.7, "text": "Heat pounded between my legs,"},
-          {"startTime": 19999.1, "endTime": 20001.5, "text": "and as he ground his body against me,"},
-          {"startTime": 20001.8, "endTime": 20003.4, "text": "against every aching spot,"},
-          {"startTime": 20004.4, "endTime": 20005.9, "text": "he jerked away."},
-          {"startTime": 20006.2, "endTime": 20009.2, "text": "The air was bitingly cold against my freed skin,"},
-          {"startTime": 20009.5, "endTime": 20010.8, "text": "and he stared at me."}
+          {
+            "startTime": 19902.0,
+            "endTime": 19903.7,
+            "text": "His teeth were bright in the moonlight."
+          },
+          {
+            "startTime": 19904.2,
+            "endTime": 19906.2,
+            "text": "He brought his lips to my ear."
+          },
+          {
+            "startTime": 19906.5,
+            "endTime": 19908.7,
+            "text": "I would have been gentle with you, though."
+          },
+          {
+            "startTime": 19909.1,
+            "endTime": 19910.4,
+            "text": "I closed my eyes."
+          },
+          {
+            "startTime": 19910.7,
+            "endTime": 19912.6,
+            "text": "Every inch of my body went taut"
+          },
+          {
+            "startTime": 19912.6,
+            "endTime": 19914.3,
+            "text": "as his words echoed through me."
+          },
+          {
+            "startTime": 19914.3,
+            "endTime": 19917.3,
+            "text": "I would have had you moaning my name throughout it all,"
+          },
+          {
+            "startTime": 19917.3,
+            "endTime": 19919.5,
+            "text": "and I would have taken a very,"
+          },
+          {
+            "startTime": 19919.8,
+            "endTime": 19921.6,
+            "text": "very long time."
+          },
+          {
+            "startTime": 19922.1,
+            "endTime": 19922.6,
+            "text": "Feyre."
+          },
+          {
+            "startTime": 19922.9,
+            "endTime": 19924.7,
+            "text": "His hot breath tickled my ear."
+          },
+          {
+            "startTime": 19925.4,
+            "endTime": 19927.2,
+            "text": "My back arched slightly."
+          },
+          {
+            "startTime": 19927.6,
+            "endTime": 19929.7,
+            "text": "He ripped his claws free from the wall,"
+          },
+          {
+            "startTime": 19929.8,
+            "endTime": 19931.8,
+            "text": "and my knees buckled as he let go."
+          },
+          {
+            "startTime": 19932.0,
+            "endTime": 19934.8,
+            "text": "I grasped the wall to keep from sinking to the floor,"
+          },
+          {
+            "startTime": 19935.0,
+            "endTime": 19936.4,
+            "text": "to keep from grabbing him,"
+          },
+          {
+            "startTime": 19936.6,
+            "endTime": 19938.0,
+            "text": "to strike or caress."
+          },
+          {
+            "startTime": 19938.0,
+            "endTime": 19938.8,
+            "text": "I didn't know."
+          },
+          {
+            "startTime": 19938.8,
+            "endTime": 19940.5,
+            "text": "I opened my eyes."
+          },
+          {
+            "startTime": 19940.6,
+            "endTime": 19942.3,
+            "text": "He still smiled."
+          },
+          {
+            "startTime": 19942.9,
+            "endTime": 19944.5,
+            "text": "Smiled like an animal."
+          },
+          {
+            "startTime": 19944.7,
+            "endTime": 19946.5,
+            "text": "Why should I want someone's leftovers?"
+          },
+          {
+            "startTime": 19946.9,
+            "endTime": 19948.1,
+            "text": "I pushed him away."
+          },
+          {
+            "startTime": 19948.4,
+            "endTime": 19950.0,
+            "text": "He grabbed my hands again,"
+          },
+          {
+            "startTime": 19950.1,
+            "endTime": 19951.4,
+            "text": "and bit my neck."
+          },
+          {
+            "startTime": 19951.6,
+            "endTime": 19953.8,
+            "text": "His teeth clamped onto the tender spot"
+          },
+          {
+            "startTime": 19953.8,
+            "endTime": 19955.1,
+            "text": "where my neck met my shoulder."
+          },
+          {
+            "startTime": 19955.5,
+            "endTime": 19956.6,
+            "text": "I couldn't move,"
+          },
+          {
+            "startTime": 19957.0,
+            "endTime": 19957.7,
+            "text": "couldn't think,"
+          },
+          {
+            "startTime": 19957.9,
+            "endTime": 19959.6,
+            "text": "and my world narrowed to the feeling"
+          },
+          {
+            "startTime": 19959.6,
+            "endTime": 19961.8,
+            "text": "of his lips and teeth against my skin."
+          },
+          {
+            "startTime": 19962.2,
+            "endTime": 19964.0,
+            "text": "He didn't pierce my flesh,"
+          },
+          {
+            "startTime": 19964.2,
+            "endTime": 19966.1,
+            "text": "but rather bit to keep me pinned."
+          },
+          {
+            "startTime": 19966.1,
+            "endTime": 19968.8,
+            "text": "The push of his body against mine,"
+          },
+          {
+            "startTime": 19969.1,
+            "endTime": 19970.5,
+            "text": "the hard and the soft,"
+          },
+          {
+            "startTime": 19970.7,
+            "endTime": 19972.0,
+            "text": "made me see red,"
+          },
+          {
+            "startTime": 19972.4,
+            "endTime": 19973.2,
+            "text": "see lightning,"
+          },
+          {
+            "startTime": 19973.8,
+            "endTime": 19976.0,
+            "text": "made me grind my hips against his."
+          },
+          {
+            "startTime": 19976.3,
+            "endTime": 19977.6,
+            "text": "I should hate him,"
+          },
+          {
+            "startTime": 19977.8,
+            "endTime": 19979.5,
+            "text": "hate him for his stupid ritual,"
+          },
+          {
+            "startTime": 19979.8,
+            "endTime": 19981.4,
+            "text": "for the female he'd been with tonight."
+          },
+          {
+            "startTime": 19981.7,
+            "endTime": 19983.1,
+            "text": "His bite lightened,"
+          },
+          {
+            "startTime": 19983.3,
+            "endTime": 19986.3,
+            "text": "and his tongue caressed the places his teeth had been."
+          },
+          {
+            "startTime": 19986.7,
+            "endTime": 19987.9,
+            "text": "He didn't move."
+          },
+          {
+            "startTime": 19988.1,
+            "endTime": 19990.1,
+            "text": "He just remained in that spot,"
+          },
+          {
+            "startTime": 19990.7,
+            "endTime": 19991.9,
+            "text": "kissing my neck,"
+          },
+          {
+            "startTime": 19992.6,
+            "endTime": 19993.2,
+            "text": "intently,"
+          },
+          {
+            "startTime": 19994.2,
+            "endTime": 19994.8,
+            "text": "territorially,"
+          },
+          {
+            "startTime": 19995.5,
+            "endTime": 19996.1,
+            "text": "lazily."
+          },
+          {
+            "startTime": 19996.5,
+            "endTime": 19998.7,
+            "text": "Heat pounded between my legs,"
+          },
+          {
+            "startTime": 19999.1,
+            "endTime": 20001.5,
+            "text": "and as he ground his body against me,"
+          },
+          {
+            "startTime": 20001.8,
+            "endTime": 20003.4,
+            "text": "against every aching spot,"
+          },
+          {
+            "startTime": 20004.4,
+            "endTime": 20005.9,
+            "text": "he jerked away."
+          },
+          {
+            "startTime": 20006.2,
+            "endTime": 20009.2,
+            "text": "The air was bitingly cold against my freed skin,"
+          },
+          {
+            "startTime": 20009.5,
+            "endTime": 20010.8,
+            "text": "and he stared at me."
+          }
         ]
       }
     },
@@ -90,39 +313,146 @@
         "accepted": true,
         "label": "sexual_complete_scene",
         "notes": "Real failure this session (~56:30 in the listener's report): Terra's original confirmed complete_scene boundary was startTime=3400.7s, which is 21s AFTER the actual kissing/buildup began, so audible content played before the skip engaged. Fixed by PR #73's SceneVerificationClosingInstructions rewording (buildup-inclusive startTime with a real few-shot example drawn from this exact passage).",
-        "expected_start_time_range": [3379.7, 3384.0],
+        "expected_start_time_range": [
+          3379.7,
+          3384.0
+        ],
         "expected_start_time_notes": "Correct startTime is at or very near 3379.7 ('He leaned forward and kissed me lightly') -- the kissing is the scene's own beginning, part of one unbroken escalation into 'I pushed Tamlin onto the bed, straddling him' at 3399.5. A startTime at or after 3399.5-3400.7 is the exact prior failure mode and should be scored as WRONG even if accepted=true."
       },
       "transcript_window": {
         "start_time": 3350.1,
         "end_time": 3420.2,
         "segments": [
-          {"startTime": 3350.1, "endTime": 3351.9, "text": "But I forced myself into neutrality."},
-          {"startTime": 3352.2, "endTime": 3352.7, "text": "A year?"},
-          {"startTime": 3353.0, "endTime": 3354.9, "text": "That much time away from him?"},
-          {"startTime": 3355.0, "endTime": 3355.8, "text": "I don't know."},
-          {"startTime": 3356.1, "endTime": 3357.5, "text": "But not forever, right?"},
-          {"startTime": 3357.8, "endTime": 3360.2, "text": "Even if the blight spread to the spring court again."},
-          {"startTime": 3360.4, "endTime": 3362.0, "text": "Even if it could shred me apart."},
-          {"startTime": 3362.3, "endTime": 3363.6, "text": "I would come back."},
-          {"startTime": 3364.1, "endTime": 3366.1, "text": "He brushed the hair from my face."},
-          {"startTime": 3366.3, "endTime": 3367.5, "text": "I shook him off."},
-          {"startTime": 3367.7, "endTime": 3369.5, "text": "I suppose it'll be easier if I'm gone."},
-          {"startTime": 3369.5, "endTime": 3370.7, "text": "I looked away from him."},
-          {"startTime": 3370.8, "endTime": 3373.7, "text": "Who wants someone around who's so covered in thorns?"},
-          {"startTime": 3374.3, "endTime": 3375.0, "text": "Thorns?"},
-          {"startTime": 3375.5, "endTime": 3376.1, "text": "Thorny."},
-          {"startTime": 3376.4, "endTime": 3377.0, "text": "Prickly."},
-          {"startTime": 3377.3, "endTime": 3377.9, "text": "Sour."},
-          {"startTime": 3378.9, "endTime": 3379.5, "text": "Contrary."},
-          {"startTime": 3379.7, "endTime": 3382.4, "text": "He leaned forward and kissed me lightly."},
-          {"startTime": 3382.8, "endTime": 3383.6, "text": "Not forever."},
-          {"startTime": 3384.0, "endTime": 3389.9, "text": "And though I knew it was a lie, I put my arms around his neck and kissed him."},
-          {"startTime": 3390.3, "endTime": 3395.1, "text": "He pulled me onto his lap, holding me tightly against him as his lips parted mine."},
-          {"startTime": 3395.1, "endTime": 3399.5, "text": "I became aware of every pore in my body when his tongue entered my mouth."},
-          {"startTime": 3399.5, "endTime": 3411.7, "text": "Though the horror of Rhysand's magic still tore at me, I pushed Tamlin onto the bed, straddling him, pinning him as if it would somehow keep me from leaving, as if it would make time stop entirely."},
-          {"startTime": 3411.7, "endTime": 3417.5, "text": "His hands rested on my hips, and their heat singed me through the thin silk of my nightgown."},
-          {"startTime": 3417.7, "endTime": 3420.2, "text": "My hair fell around our faces like a curtain."}
+          {
+            "startTime": 3350.1,
+            "endTime": 3351.9,
+            "text": "But I forced myself into neutrality."
+          },
+          {
+            "startTime": 3352.2,
+            "endTime": 3352.7,
+            "text": "A year?"
+          },
+          {
+            "startTime": 3353.0,
+            "endTime": 3354.9,
+            "text": "That much time away from him?"
+          },
+          {
+            "startTime": 3355.0,
+            "endTime": 3355.8,
+            "text": "I don't know."
+          },
+          {
+            "startTime": 3356.1,
+            "endTime": 3357.5,
+            "text": "But not forever, right?"
+          },
+          {
+            "startTime": 3357.8,
+            "endTime": 3360.2,
+            "text": "Even if the blight spread to the spring court again."
+          },
+          {
+            "startTime": 3360.4,
+            "endTime": 3362.0,
+            "text": "Even if it could shred me apart."
+          },
+          {
+            "startTime": 3362.3,
+            "endTime": 3363.6,
+            "text": "I would come back."
+          },
+          {
+            "startTime": 3364.1,
+            "endTime": 3366.1,
+            "text": "He brushed the hair from my face."
+          },
+          {
+            "startTime": 3366.3,
+            "endTime": 3367.5,
+            "text": "I shook him off."
+          },
+          {
+            "startTime": 3367.7,
+            "endTime": 3369.5,
+            "text": "I suppose it'll be easier if I'm gone."
+          },
+          {
+            "startTime": 3369.5,
+            "endTime": 3370.7,
+            "text": "I looked away from him."
+          },
+          {
+            "startTime": 3370.8,
+            "endTime": 3373.7,
+            "text": "Who wants someone around who's so covered in thorns?"
+          },
+          {
+            "startTime": 3374.3,
+            "endTime": 3375.0,
+            "text": "Thorns?"
+          },
+          {
+            "startTime": 3375.5,
+            "endTime": 3376.1,
+            "text": "Thorny."
+          },
+          {
+            "startTime": 3376.4,
+            "endTime": 3377.0,
+            "text": "Prickly."
+          },
+          {
+            "startTime": 3377.3,
+            "endTime": 3377.9,
+            "text": "Sour."
+          },
+          {
+            "startTime": 3378.9,
+            "endTime": 3379.5,
+            "text": "Contrary."
+          },
+          {
+            "startTime": 3379.7,
+            "endTime": 3382.4,
+            "text": "He leaned forward and kissed me lightly."
+          },
+          {
+            "startTime": 3382.8,
+            "endTime": 3383.6,
+            "text": "Not forever."
+          },
+          {
+            "startTime": 3384.0,
+            "endTime": 3389.9,
+            "text": "And though I knew it was a lie, I put my arms around his neck and kissed him."
+          },
+          {
+            "startTime": 3390.3,
+            "endTime": 3395.1,
+            "text": "He pulled me onto his lap, holding me tightly against him as his lips parted mine."
+          },
+          {
+            "startTime": 3395.1,
+            "endTime": 3399.5,
+            "text": "I became aware of every pore in my body when his tongue entered my mouth."
+          },
+          {
+            "startTime": 3399.5,
+            "endTime": 3411.7,
+            "text": "Though the horror of Rhysand's magic still tore at me, I pushed Tamlin onto the bed, straddling him, pinning him as if it would somehow keep me from leaving, as if it would make time stop entirely."
+          },
+          {
+            "startTime": 3411.7,
+            "endTime": 3417.5,
+            "text": "His hands rested on my hips, and their heat singed me through the thin silk of my nightgown."
+          },
+          {
+            "startTime": 3417.7,
+            "endTime": 3420.2,
+            "text": "My hair fell around our faces like a curtain."
+          }
         ]
       }
     },
@@ -138,71 +468,306 @@
         "accepted": true,
         "label": "sexual_complete_scene",
         "notes": "The second listener-reported incident (~5:36:55). Same failure mode as scene1: the original boundary landed after the buildup had already been playing.",
-        "expected_start_time_range": [20188.5, 20213.0],
+        "expected_start_time_range": [
+          20188.5,
+          20213.0
+        ],
         "expected_start_time_notes": "Buildup begins around 'I hooked my feet around his legs, drawing him closer' (20188.5) through the kissing beginning at 20208.8. An acceptable startTime should fall within or before this buildup window, not only at the later, more explicit unbuttoning at 20248.1."
       },
       "transcript_window": {
         "start_time": 20161.1,
         "end_time": 20327.0,
         "segments": [
-          {"startTime": 20161.1, "endTime": 20162.8, "text": "The bargain I had with Rhysand."},
-          {"startTime": 20163.3, "endTime": 20166.3, "text": "Another small concern compared to the stain on my soul."},
-          {"startTime": 20166.5, "endTime": 20167.8, "text": "The pit inside it."},
-          {"startTime": 20168.1, "endTime": 20170.5, "text": "But I didn't doubt I'd see Rhys again soon."},
-          {"startTime": 20171.1, "endTime": 20173.3, "text": "Tamlin's fingers traced the marks of my tattoo."},
-          {"startTime": 20173.7, "endTime": 20175.4, "text": "We'll find a way out of this."},
-          {"startTime": 20175.6, "endTime": 20178.1, "text": "His hand traveled up my arm to rest on my shoulder."},
-          {"startTime": 20178.5, "endTime": 20181.4, "text": "He opened his mouth, and I knew what he would say."},
-          {"startTime": 20181.8, "endTime": 20183.6, "text": "The subject he would try to broach."},
-          {"startTime": 20183.6, "endTime": 20185.3, "text": "I couldn't talk about it."},
-          {"startTime": 20185.8, "endTime": 20186.3, "text": "About them."},
-          {"startTime": 20186.8, "endTime": 20187.6, "text": "Not yet."},
-          {"startTime": 20187.9, "endTime": 20188.3, "text": "Later."},
-          {"startTime": 20188.5, "endTime": 20191.5, "text": "I hooked my feet around his legs, drawing him closer."},
-          {"startTime": 20192.0, "endTime": 20195.7, "text": "I placed my hands on his chest, feeling the heart beating beneath."},
-          {"startTime": 20196.1, "endTime": 20198.0, "text": "I needed this right now."},
-          {"startTime": 20198.2, "endTime": 20200.2, "text": "It wouldn't wash away what I'd done."},
-          {"startTime": 20200.2, "endTime": 20202.1, "text": "But I needed him near."},
-          {"startTime": 20202.5, "endTime": 20204.3, "text": "Needed to smell and taste him."},
-          {"startTime": 20204.7, "endTime": 20206.2, "text": "Remind myself that he was real."},
-          {"startTime": 20206.6, "endTime": 20207.8, "text": "This was real."},
-          {"startTime": 20208.1, "endTime": 20208.6, "text": "Later."},
-          {"startTime": 20208.8, "endTime": 20210.4, "text": "He leaned down to kiss me."},
-          {"startTime": 20210.7, "endTime": 20211.7, "text": "It was soft."},
-          {"startTime": 20212.0, "endTime": 20212.6, "text": "Tentative."},
-          {"startTime": 20213.0, "endTime": 20217.0, "text": "Nothing like the wild, hard kisses we'd shared in the hall of the throne room."},
-          {"startTime": 20217.2, "endTime": 20219.2, "text": "He brushed his lips against mine again."},
-          {"startTime": 20219.4, "endTime": 20220.9, "text": "I didn't want apologies."},
-          {"startTime": 20221.3, "endTime": 20223.3, "text": "Didn't want sympathy or coddling."},
-          {"startTime": 20223.8, "endTime": 20227.7, "text": "I gripped the front of his tunic, tugging him closer as I opened my mouth to him."},
-          {"startTime": 20228.1, "endTime": 20233.5, "text": "The sound of his grouse sent a wildfire blazing through me, pooling and burning in my core."},
-          {"startTime": 20233.8, "endTime": 20236.1, "text": "I let it burn through that hole in my chest."},
-          {"startTime": 20236.3, "endTime": 20236.9, "text": "My soul."},
-          {"startTime": 20237.2, "endTime": 20241.0, "text": "Let it raise through the wave of black that was starting to press around me."},
-          {"startTime": 20241.2, "endTime": 20244.6, "text": "Let it consume the phantom blood I could still feel on my hands."},
-          {"startTime": 20244.9, "endTime": 20246.9, "text": "I gave myself to that fire."},
-          {"startTime": 20247.2, "endTime": 20247.9, "text": "To him."},
-          {"startTime": 20248.1, "endTime": 20251.7, "text": "As his hands roved across me, unbuttoning as he went."},
-          {"startTime": 20251.7, "endTime": 20255.2, "text": "I pulled back, breaking the kiss to look into his face."},
-          {"startTime": 20255.4, "endTime": 20261.6, "text": "His eyes were bright, hungry, but his hands had stopped their exploring and rested firmly on my hips."},
-          {"startTime": 20261.9, "endTime": 20269.7, "text": "With a predator stillness, he waited and watched as I traced the contours of his face, as I kissed every place I touched."},
-          {"startTime": 20270.0, "endTime": 20276.1, "text": "His hands soon began roaming across my back and sides, caressing and teasing and bearing me to him."},
-          {"startTime": 20276.1, "endTime": 20282.3, "text": "When my traveling fingers reached his mouth, he bit down on one, sucking it into his mouth."},
-          {"startTime": 20282.5, "endTime": 20289.1, "text": "It didn't hurt, but the bite was hard enough for me to meet his eyes again, to realize that he was done waiting."},
-          {"startTime": 20289.4, "endTime": 20290.5, "text": "And so was I."},
-          {"startTime": 20290.8, "endTime": 20292.6, "text": "He eased me onto the bed."},
-          {"startTime": 20292.6, "endTime": 20293.4, "text": "Pharah."},
-          {"startTime": 20293.8, "endTime": 20298.1, "text": "Murmuring my name against my neck, the shell of my ear, the tips of my fingers."},
-          {"startTime": 20298.4, "endTime": 20299.6, "text": "I urged him."},
-          {"startTime": 20300.2, "endTime": 20300.7, "text": "Faster."},
-          {"startTime": 20300.9, "endTime": 20301.4, "text": "Harder."},
-          {"startTime": 20301.6, "endTime": 20305.5, "text": "His mouth explored the curve of my breast, the inside of my thigh."},
-          {"startTime": 20305.8, "endTime": 20308.0, "text": "A kiss for each day we'd spent apart."},
-          {"startTime": 20308.3, "endTime": 20310.3, "text": "A kiss for every wound and terror."},
-          {"startTime": 20310.7, "endTime": 20313.1, "text": "A kiss for the ink etched into my flesh."},
-          {"startTime": 20313.3, "endTime": 20316.0, "text": "And for all the days we would be together after this."},
-          {"startTime": 20316.4, "endTime": 20319.4, "text": "Days, perhaps, that I no longer deserved."},
-          {"startTime": 20319.4, "endTime": 20327.0, "text": "But I gave myself again to that fire, threw myself into it, into him, and let myself burn."}
+          {
+            "startTime": 20161.1,
+            "endTime": 20162.8,
+            "text": "The bargain I had with Rhysand."
+          },
+          {
+            "startTime": 20163.3,
+            "endTime": 20166.3,
+            "text": "Another small concern compared to the stain on my soul."
+          },
+          {
+            "startTime": 20166.5,
+            "endTime": 20167.8,
+            "text": "The pit inside it."
+          },
+          {
+            "startTime": 20168.1,
+            "endTime": 20170.5,
+            "text": "But I didn't doubt I'd see Rhys again soon."
+          },
+          {
+            "startTime": 20171.1,
+            "endTime": 20173.3,
+            "text": "Tamlin's fingers traced the marks of my tattoo."
+          },
+          {
+            "startTime": 20173.7,
+            "endTime": 20175.4,
+            "text": "We'll find a way out of this."
+          },
+          {
+            "startTime": 20175.6,
+            "endTime": 20178.1,
+            "text": "His hand traveled up my arm to rest on my shoulder."
+          },
+          {
+            "startTime": 20178.5,
+            "endTime": 20181.4,
+            "text": "He opened his mouth, and I knew what he would say."
+          },
+          {
+            "startTime": 20181.8,
+            "endTime": 20183.6,
+            "text": "The subject he would try to broach."
+          },
+          {
+            "startTime": 20183.6,
+            "endTime": 20185.3,
+            "text": "I couldn't talk about it."
+          },
+          {
+            "startTime": 20185.8,
+            "endTime": 20186.3,
+            "text": "About them."
+          },
+          {
+            "startTime": 20186.8,
+            "endTime": 20187.6,
+            "text": "Not yet."
+          },
+          {
+            "startTime": 20187.9,
+            "endTime": 20188.3,
+            "text": "Later."
+          },
+          {
+            "startTime": 20188.5,
+            "endTime": 20191.5,
+            "text": "I hooked my feet around his legs, drawing him closer."
+          },
+          {
+            "startTime": 20192.0,
+            "endTime": 20195.7,
+            "text": "I placed my hands on his chest, feeling the heart beating beneath."
+          },
+          {
+            "startTime": 20196.1,
+            "endTime": 20198.0,
+            "text": "I needed this right now."
+          },
+          {
+            "startTime": 20198.2,
+            "endTime": 20200.2,
+            "text": "It wouldn't wash away what I'd done."
+          },
+          {
+            "startTime": 20200.2,
+            "endTime": 20202.1,
+            "text": "But I needed him near."
+          },
+          {
+            "startTime": 20202.5,
+            "endTime": 20204.3,
+            "text": "Needed to smell and taste him."
+          },
+          {
+            "startTime": 20204.7,
+            "endTime": 20206.2,
+            "text": "Remind myself that he was real."
+          },
+          {
+            "startTime": 20206.6,
+            "endTime": 20207.8,
+            "text": "This was real."
+          },
+          {
+            "startTime": 20208.1,
+            "endTime": 20208.6,
+            "text": "Later."
+          },
+          {
+            "startTime": 20208.8,
+            "endTime": 20210.4,
+            "text": "He leaned down to kiss me."
+          },
+          {
+            "startTime": 20210.7,
+            "endTime": 20211.7,
+            "text": "It was soft."
+          },
+          {
+            "startTime": 20212.0,
+            "endTime": 20212.6,
+            "text": "Tentative."
+          },
+          {
+            "startTime": 20213.0,
+            "endTime": 20217.0,
+            "text": "Nothing like the wild, hard kisses we'd shared in the hall of the throne room."
+          },
+          {
+            "startTime": 20217.2,
+            "endTime": 20219.2,
+            "text": "He brushed his lips against mine again."
+          },
+          {
+            "startTime": 20219.4,
+            "endTime": 20220.9,
+            "text": "I didn't want apologies."
+          },
+          {
+            "startTime": 20221.3,
+            "endTime": 20223.3,
+            "text": "Didn't want sympathy or coddling."
+          },
+          {
+            "startTime": 20223.8,
+            "endTime": 20227.7,
+            "text": "I gripped the front of his tunic, tugging him closer as I opened my mouth to him."
+          },
+          {
+            "startTime": 20228.1,
+            "endTime": 20233.5,
+            "text": "The sound of his grouse sent a wildfire blazing through me, pooling and burning in my core."
+          },
+          {
+            "startTime": 20233.8,
+            "endTime": 20236.1,
+            "text": "I let it burn through that hole in my chest."
+          },
+          {
+            "startTime": 20236.3,
+            "endTime": 20236.9,
+            "text": "My soul."
+          },
+          {
+            "startTime": 20237.2,
+            "endTime": 20241.0,
+            "text": "Let it raise through the wave of black that was starting to press around me."
+          },
+          {
+            "startTime": 20241.2,
+            "endTime": 20244.6,
+            "text": "Let it consume the phantom blood I could still feel on my hands."
+          },
+          {
+            "startTime": 20244.9,
+            "endTime": 20246.9,
+            "text": "I gave myself to that fire."
+          },
+          {
+            "startTime": 20247.2,
+            "endTime": 20247.9,
+            "text": "To him."
+          },
+          {
+            "startTime": 20248.1,
+            "endTime": 20251.7,
+            "text": "As his hands roved across me, unbuttoning as he went."
+          },
+          {
+            "startTime": 20251.7,
+            "endTime": 20255.2,
+            "text": "I pulled back, breaking the kiss to look into his face."
+          },
+          {
+            "startTime": 20255.4,
+            "endTime": 20261.6,
+            "text": "His eyes were bright, hungry, but his hands had stopped their exploring and rested firmly on my hips."
+          },
+          {
+            "startTime": 20261.9,
+            "endTime": 20269.7,
+            "text": "With a predator stillness, he waited and watched as I traced the contours of his face, as I kissed every place I touched."
+          },
+          {
+            "startTime": 20270.0,
+            "endTime": 20276.1,
+            "text": "His hands soon began roaming across my back and sides, caressing and teasing and bearing me to him."
+          },
+          {
+            "startTime": 20276.1,
+            "endTime": 20282.3,
+            "text": "When my traveling fingers reached his mouth, he bit down on one, sucking it into his mouth."
+          },
+          {
+            "startTime": 20282.5,
+            "endTime": 20289.1,
+            "text": "It didn't hurt, but the bite was hard enough for me to meet his eyes again, to realize that he was done waiting."
+          },
+          {
+            "startTime": 20289.4,
+            "endTime": 20290.5,
+            "text": "And so was I."
+          },
+          {
+            "startTime": 20290.8,
+            "endTime": 20292.6,
+            "text": "He eased me onto the bed."
+          },
+          {
+            "startTime": 20292.6,
+            "endTime": 20293.4,
+            "text": "Pharah."
+          },
+          {
+            "startTime": 20293.8,
+            "endTime": 20298.1,
+            "text": "Murmuring my name against my neck, the shell of my ear, the tips of my fingers."
+          },
+          {
+            "startTime": 20298.4,
+            "endTime": 20299.6,
+            "text": "I urged him."
+          },
+          {
+            "startTime": 20300.2,
+            "endTime": 20300.7,
+            "text": "Faster."
+          },
+          {
+            "startTime": 20300.9,
+            "endTime": 20301.4,
+            "text": "Harder."
+          },
+          {
+            "startTime": 20301.6,
+            "endTime": 20305.5,
+            "text": "His mouth explored the curve of my breast, the inside of my thigh."
+          },
+          {
+            "startTime": 20305.8,
+            "endTime": 20308.0,
+            "text": "A kiss for each day we'd spent apart."
+          },
+          {
+            "startTime": 20308.3,
+            "endTime": 20310.3,
+            "text": "A kiss for every wound and terror."
+          },
+          {
+            "startTime": 20310.7,
+            "endTime": 20313.1,
+            "text": "A kiss for the ink etched into my flesh."
+          },
+          {
+            "startTime": 20313.3,
+            "endTime": 20316.0,
+            "text": "And for all the days we would be together after this."
+          },
+          {
+            "startTime": 20316.4,
+            "endTime": 20319.4,
+            "text": "Days, perhaps, that I no longer deserved."
+          },
+          {
+            "startTime": 20319.4,
+            "endTime": 20327.0,
+            "text": "But I gave myself again to that fire, threw myself into it, into him, and let myself burn."
+          }
         ]
       }
     },
@@ -223,34 +788,3036 @@
         "start_time": 16290.7,
         "end_time": 16363.4,
         "segments": [
-          {"startTime": 16290.7, "endTime": 16293.1, "text": "I looked at the pool of glittering starlight."},
-          {"startTime": 16295.0, "endTime": 16297.7, "text": "What would happen if I were to drink the water?"},
-          {"startTime": 16298.1, "endTime": 16300.4, "text": "Tamlin straightened a bit, then relaxed."},
-          {"startTime": 16300.6, "endTime": 16302.8, "text": "As if glad to release that old sadness."},
-          {"startTime": 16303.4, "endTime": 16306.2, "text": "Legend claims you'd be happy until your last breath."},
-          {"startTime": 16306.5, "endTime": 16308.2, "text": "Perhaps we both need a glass."},
-          {"startTime": 16308.5, "endTime": 16311.1, "text": "I don't think that entire pool would be enough for me."},
-          {"startTime": 16313.0, "endTime": 16314.9, "text": "Two jokes in one day."},
-          {"startTime": 16315.2, "endTime": 16317.1, "text": "A miracle sent from the cauldron."},
-          {"startTime": 16317.5, "endTime": 16318.7, "text": "I cracked a smile."},
-          {"startTime": 16318.9, "endTime": 16320.3, "text": "He came a step closer."},
-          {"startTime": 16320.4, "endTime": 16324.7, "text": "As if forcibly leaving behind the dark, sad stain of what had happened to Lucian."},
-          {"startTime": 16324.9, "endTime": 16327.2, "text": "And the starlight danced in his eyes."},
-          {"startTime": 16327.8, "endTime": 16330.1, "text": "What would be enough to make you happy?"},
-          {"startTime": 16330.8, "endTime": 16333.4, "text": "I blushed from my neck to the top of my head."},
-          {"startTime": 16333.9, "endTime": 16334.4, "text": "I..."},
-          {"startTime": 16334.4, "endTime": 16335.6, "text": "I don't know."},
-          {"startTime": 16335.9, "endTime": 16336.7, "text": "It was true."},
-          {"startTime": 16337.1, "endTime": 16341.7, "text": "I'd never given that sort of thing any thought beyond getting my sister safely married off"},
-          {"startTime": 16341.7, "endTime": 16343.5, "text": "and having enough food for me and my father."},
-          {"startTime": 16343.8, "endTime": 16345.4, "text": "And time to learn to paint."},
-          {"startTime": 16345.9, "endTime": 16346.3, "text": "Hmm."},
-          {"startTime": 16346.8, "endTime": 16348.8, "text": "What about the ringing of bluebells?"},
-          {"startTime": 16348.9, "endTime": 16350.3, "text": "Or a ribbon of sunshine?"},
-          {"startTime": 16351.2, "endTime": 16352.9, "text": "Or a garland of moonlight?"},
-          {"startTime": 16353.5, "endTime": 16355.3, "text": "High lord of Prithian indeed."},
-          {"startTime": 16355.7, "endTime": 16357.9, "text": "High lord of foolery was more like it."},
-          {"startTime": 16357.9, "endTime": 16363.4, "text": "He knew, he knew I'd say no, that I'd squirm a bit from merely being alone with him."}
+          {
+            "startTime": 16290.7,
+            "endTime": 16293.1,
+            "text": "I looked at the pool of glittering starlight."
+          },
+          {
+            "startTime": 16295.0,
+            "endTime": 16297.7,
+            "text": "What would happen if I were to drink the water?"
+          },
+          {
+            "startTime": 16298.1,
+            "endTime": 16300.4,
+            "text": "Tamlin straightened a bit, then relaxed."
+          },
+          {
+            "startTime": 16300.6,
+            "endTime": 16302.8,
+            "text": "As if glad to release that old sadness."
+          },
+          {
+            "startTime": 16303.4,
+            "endTime": 16306.2,
+            "text": "Legend claims you'd be happy until your last breath."
+          },
+          {
+            "startTime": 16306.5,
+            "endTime": 16308.2,
+            "text": "Perhaps we both need a glass."
+          },
+          {
+            "startTime": 16308.5,
+            "endTime": 16311.1,
+            "text": "I don't think that entire pool would be enough for me."
+          },
+          {
+            "startTime": 16313.0,
+            "endTime": 16314.9,
+            "text": "Two jokes in one day."
+          },
+          {
+            "startTime": 16315.2,
+            "endTime": 16317.1,
+            "text": "A miracle sent from the cauldron."
+          },
+          {
+            "startTime": 16317.5,
+            "endTime": 16318.7,
+            "text": "I cracked a smile."
+          },
+          {
+            "startTime": 16318.9,
+            "endTime": 16320.3,
+            "text": "He came a step closer."
+          },
+          {
+            "startTime": 16320.4,
+            "endTime": 16324.7,
+            "text": "As if forcibly leaving behind the dark, sad stain of what had happened to Lucian."
+          },
+          {
+            "startTime": 16324.9,
+            "endTime": 16327.2,
+            "text": "And the starlight danced in his eyes."
+          },
+          {
+            "startTime": 16327.8,
+            "endTime": 16330.1,
+            "text": "What would be enough to make you happy?"
+          },
+          {
+            "startTime": 16330.8,
+            "endTime": 16333.4,
+            "text": "I blushed from my neck to the top of my head."
+          },
+          {
+            "startTime": 16333.9,
+            "endTime": 16334.4,
+            "text": "I..."
+          },
+          {
+            "startTime": 16334.4,
+            "endTime": 16335.6,
+            "text": "I don't know."
+          },
+          {
+            "startTime": 16335.9,
+            "endTime": 16336.7,
+            "text": "It was true."
+          },
+          {
+            "startTime": 16337.1,
+            "endTime": 16341.7,
+            "text": "I'd never given that sort of thing any thought beyond getting my sister safely married off"
+          },
+          {
+            "startTime": 16341.7,
+            "endTime": 16343.5,
+            "text": "and having enough food for me and my father."
+          },
+          {
+            "startTime": 16343.8,
+            "endTime": 16345.4,
+            "text": "And time to learn to paint."
+          },
+          {
+            "startTime": 16345.9,
+            "endTime": 16346.3,
+            "text": "Hmm."
+          },
+          {
+            "startTime": 16346.8,
+            "endTime": 16348.8,
+            "text": "What about the ringing of bluebells?"
+          },
+          {
+            "startTime": 16348.9,
+            "endTime": 16350.3,
+            "text": "Or a ribbon of sunshine?"
+          },
+          {
+            "startTime": 16351.2,
+            "endTime": 16352.9,
+            "text": "Or a garland of moonlight?"
+          },
+          {
+            "startTime": 16353.5,
+            "endTime": 16355.3,
+            "text": "High lord of Prithian indeed."
+          },
+          {
+            "startTime": 16355.7,
+            "endTime": 16357.9,
+            "text": "High lord of foolery was more like it."
+          },
+          {
+            "startTime": 16357.9,
+            "endTime": 16363.4,
+            "text": "He knew, he knew I'd say no, that I'd squirm a bit from merely being alone with him."
+          }
+        ]
+      }
+    },
+    {
+      "id": "the-deal-explicit-intercourse-scene",
+      "source": "The Deal",
+      "fingerprint": {
+        "version": 1,
+        "sha256": "a151b60b648169861e2eb20af3183c597719705b16daa7634ef679bc1b558d49",
+        "fileSize": 711058857
+      },
+      "expected": {
+        "accepted": true,
+        "label": "sexual_complete_scene",
+        "notes": "Clean, unambiguous positive: consensual oral sex leading into intercourse through climax and aftermath, no consent ambiguity at all (contrast with the harder ACOTAR cases). Used as a baseline sanity check -- a candidate model that cannot accept this is not viable regardless of how it does on the harder cases.",
+        "expected_start_time_range": [
+          29303.7,
+          29321.5
+        ],
+        "expected_start_time_notes": "Buildup begins at 'My breath lodges in my throat when she climbs into my lap' (29303.7) through the kiss (29318.7-29321.5), before oral sex begins at 29328.4. An acceptable startTime should fall within or before this buildup, not only at the first unambiguous act."
+      },
+      "transcript_window": {
+        "start_time": 29286.64,
+        "end_time": 29975.2,
+        "segments": [
+          {
+            "startTime": 29286.64,
+            "endTime": 29293.36,
+            "text": "lazy to shave today. But you know what my therapist used to tell me? The best way to forget a bad"
+          },
+          {
+            "startTime": 29293.36,
+            "endTime": 29299.4,
+            "text": "memory is to replace it with a good one. I'm pretty sure that's easier said than done. Maybe,"
+          },
+          {
+            "startTime": 29299.54,
+            "endTime": 29301.4,
+            "text": "but there's no harm in trying, is there?"
+          },
+          {
+            "startTime": 29303.71,
+            "endTime": 29307.15,
+            "text": "My breath lodges in my throat when she climbs into my lap."
+          },
+          {
+            "startTime": 29308.11,
+            "endTime": 29310.59,
+            "text": "You'd think it would be impossible for me to get hard"
+          },
+          {
+            "startTime": 29310.59,
+            "endTime": 29313.61,
+            "text": "when we've just had the most depressing conversation known to man,"
+          },
+          {
+            "startTime": 29313.91,
+            "endTime": 29317.55,
+            "text": "but my dick thickens the moment her firm ass settles over it."
+          },
+          {
+            "startTime": 29318.69,
+            "endTime": 29321.33,
+            "text": "The kiss she gives me is soft and sweet,"
+          },
+          {
+            "startTime": 29321.51,
+            "endTime": 29325.01,
+            "text": "and I groan in disappointment when her mouth suddenly leaves mine."
+          },
+          {
+            "startTime": 29326.45,
+            "endTime": 29328.25,
+            "text": "I don't stay disappointed for long, though,"
+          },
+          {
+            "startTime": 29328.37,
+            "endTime": 29331.39,
+            "text": "because the next thing I know she's kneeling on the floor in front of me"
+          },
+          {
+            "startTime": 29331.39,
+            "endTime": 29333.53,
+            "text": "and freeing my cock from my sweatpants."
+          },
+          {
+            "startTime": 29335.56,
+            "endTime": 29337.64,
+            "text": "I've gotten a lot of blowjobs."
+          },
+          {
+            "startTime": 29338.02,
+            "endTime": 29340.12,
+            "text": "That's not a brag, it's just the truth."
+          },
+          {
+            "startTime": 29341.2,
+            "endTime": 29343.06,
+            "text": "But when Hannah's mouth finds me,"
+          },
+          {
+            "startTime": 29343.44,
+            "endTime": 29346.82,
+            "text": "my balls draw up tight and my cock throbs with excitement,"
+          },
+          {
+            "startTime": 29347.16,
+            "endTime": 29350.18,
+            "text": "pulsing like it's the first time a girl's tongue has ever touched it."
+          },
+          {
+            "startTime": 29351.32,
+            "endTime": 29353.7,
+            "text": "The tip of my dick damn near blows off"
+          },
+          {
+            "startTime": 29353.7,
+            "endTime": 29355.56,
+            "text": "when the wet heat of her mouth surrounds me."
+          },
+          {
+            "startTime": 29356.24,
+            "endTime": 29359.1,
+            "text": "One small, delicate hand caresses my thigh"
+          },
+          {
+            "startTime": 29359.1,
+            "endTime": 29361.04,
+            "text": "as she works me over with her mouth."
+          },
+          {
+            "startTime": 29361.84,
+            "endTime": 29364.36,
+            "text": "Her other hand is curled tightly around my shaft."
+          },
+          {
+            "startTime": 29364.36,
+            "endTime": 29367.52,
+            "text": "Her thumb rubbing the sweet spot under the head of my dick."
+          },
+          {
+            "startTime": 29367.52,
+            "endTime": 29372.96,
+            "text": "And each long suck pushes me deeper into pure, blissful oblivion."
+          },
+          {
+            "startTime": 29374.56,
+            "endTime": 29375.9,
+            "text": "My hips start to move."
+          },
+          {
+            "startTime": 29377.08,
+            "endTime": 29378.24,
+            "text": "I can't stop them."
+          },
+          {
+            "startTime": 29379.1,
+            "endTime": 29381.86,
+            "text": "Can't stop myself from driving deeper into her mouth"
+          },
+          {
+            "startTime": 29381.86,
+            "endTime": 29384,
+            "text": "and tangling my fingers in her hair to guide her."
+          },
+          {
+            "startTime": 29385.08,
+            "endTime": 29386.52,
+            "text": "She doesn't seem to mind, though."
+          },
+          {
+            "startTime": 29387.28,
+            "endTime": 29389.84,
+            "text": "My frantic thrusts bring a moan to her lips,"
+          },
+          {
+            "startTime": 29389.98,
+            "endTime": 29392.62,
+            "text": "and the sexy sound vibrates through my shaft"
+          },
+          {
+            "startTime": 29392.62,
+            "endTime": 29394.36,
+            "text": "and zings up my spine."
+          },
+          {
+            "startTime": 29395.88,
+            "endTime": 29397.8,
+            "text": "The hot suction drives me crazy."
+          },
+          {
+            "startTime": 29398.7,
+            "endTime": 29401.18,
+            "text": "I can't remember a time when I didn't want this girl,"
+          },
+          {
+            "startTime": 29401.5,
+            "endTime": 29403.9,
+            "text": "when I wasn't fucking desperate for her."
+          },
+          {
+            "startTime": 29405.56,
+            "endTime": 29408.24,
+            "text": "It's only when I open my eyes that I register where we are."
+          },
+          {
+            "startTime": 29409.18,
+            "endTime": 29410.62,
+            "text": "My roommates are at a party,"
+          },
+          {
+            "startTime": 29411.18,
+            "endTime": 29413.56,
+            "text": "but we have an early morning practice and a game tomorrow,"
+          },
+          {
+            "startTime": 29413.72,
+            "endTime": 29415.36,
+            "text": "which means they won't be out late tonight,"
+          },
+          {
+            "startTime": 29415.56,
+            "endTime": 29418.04,
+            "text": "which means they could walk into the living room at any second."
+          },
+          {
+            "startTime": 29419.52,
+            "endTime": 29421.36,
+            "text": "And I touch Hannah's cheek to stop her."
+          },
+          {
+            "startTime": 29422.74,
+            "endTime": 29423.66,
+            "text": "Let's go upstairs."
+          },
+          {
+            "startTime": 29424.38,
+            "endTime": 29426.28,
+            "text": "I have no idea when the guys are coming home."
+          },
+          {
+            "startTime": 29427.96,
+            "endTime": 29431.2,
+            "text": "She stands up without a word and holds out her hand to me."
+          },
+          {
+            "startTime": 29432.6,
+            "endTime": 29435.3,
+            "text": "I take it, and then I lead her upstairs."
+          },
+          {
+            "startTime": 29439.06,
+            "endTime": 29439.44,
+            "text": "Hannah."
+          },
+          {
+            "startTime": 29441.08,
+            "endTime": 29442.84,
+            "text": "Garrett leaves the light off."
+          },
+          {
+            "startTime": 29443.08,
+            "endTime": 29445,
+            "text": "He locks the door behind us,"
+          },
+          {
+            "startTime": 29445.1,
+            "endTime": 29447.3,
+            "text": "and I can see his eyes shining in the darkness."
+          },
+          {
+            "startTime": 29447.9,
+            "endTime": 29450.36,
+            "text": "He strips so fast it makes me laugh,"
+          },
+          {
+            "startTime": 29450.36,
+            "endTime": 29453.24,
+            "text": "and then he's naked in front of me,"
+          },
+          {
+            "startTime": 29453.44,
+            "endTime": 29456.12,
+            "text": "his muscular body a shadowy blur"
+          },
+          {
+            "startTime": 29456.12,
+            "endTime": 29458.02,
+            "text": "as he takes a step toward me."
+          },
+          {
+            "startTime": 29458.54,
+            "endTime": 29460.44,
+            "text": "Why are you still dressed?"
+          },
+          {
+            "startTime": 29460.76,
+            "endTime": 29462.06,
+            "text": "He grumbles."
+          },
+          {
+            "startTime": 29462.52,
+            "endTime": 29465.48,
+            "text": "Because not everybody is as proficient"
+          },
+          {
+            "startTime": 29465.48,
+            "endTime": 29467.5,
+            "text": "at getting naked as you are."
+          },
+          {
+            "startTime": 29467.94,
+            "endTime": 29469.82,
+            "text": "It's not that difficult, babe."
+          },
+          {
+            "startTime": 29470.3,
+            "endTime": 29471.9,
+            "text": "Here, let me help you."
+          },
+          {
+            "startTime": 29472.34,
+            "endTime": 29475.78,
+            "text": "I shiver when he snakes both hands beneath my shirt"
+          },
+          {
+            "startTime": 29475.78,
+            "endTime": 29478.16,
+            "text": "and slowly drags it up to my collarbone."
+          },
+          {
+            "startTime": 29478.16,
+            "endTime": 29481.86,
+            "text": "He plants a soft kiss between my bra cups"
+          },
+          {
+            "startTime": 29481.86,
+            "endTime": 29484,
+            "text": "before pulling the shirt over my head."
+          },
+          {
+            "startTime": 29484.46,
+            "endTime": 29486.72,
+            "text": "Rough fingertips skim my hips"
+          },
+          {
+            "startTime": 29486.72,
+            "endTime": 29488.42,
+            "text": "and tickle the top of my mound"
+          },
+          {
+            "startTime": 29488.42,
+            "endTime": 29489.96,
+            "text": "as he drops to his knees,"
+          },
+          {
+            "startTime": 29490.28,
+            "endTime": 29493.74,
+            "text": "drawing the cotton fabric of my yoga pants down with him."
+          },
+          {
+            "startTime": 29493.74,
+            "endTime": 29499.14,
+            "text": "All I can see is his dark head hovering inches from my thighs,"
+          },
+          {
+            "startTime": 29499.14,
+            "endTime": 29503.04,
+            "text": "and it's such an erotic sight so fucking hot"
+          },
+          {
+            "startTime": 29503.04,
+            "endTime": 29504.84,
+            "text": "that I can hardly breathe."
+          },
+          {
+            "startTime": 29505.18,
+            "endTime": 29508.08,
+            "text": "When his mouth grazes the sensitive nub"
+          },
+          {
+            "startTime": 29508.08,
+            "endTime": 29510.04,
+            "text": "that is already swelling with desire,"
+          },
+          {
+            "startTime": 29510.46,
+            "endTime": 29513.96,
+            "text": "a bolt of pleasure nearly knocks me off my feet,"
+          },
+          {
+            "startTime": 29514.16,
+            "endTime": 29516.9,
+            "text": "and I grip the top of his head to steady myself."
+          },
+          {
+            "startTime": 29517.82,
+            "endTime": 29521.3,
+            "text": "Okay, nope, I announce."
+          },
+          {
+            "startTime": 29521.68,
+            "endTime": 29523.82,
+            "text": "I'm never gonna be able to stay upright"
+          },
+          {
+            "startTime": 29523.82,
+            "endTime": 29525.14,
+            "text": "if you're doing that to me."
+          },
+          {
+            "startTime": 29525.8,
+            "endTime": 29528.46,
+            "text": "With a chuckle, Garrett stands up"
+          },
+          {
+            "startTime": 29528.46,
+            "endTime": 29530.14,
+            "text": "and scoops me into his arms"
+          },
+          {
+            "startTime": 29530.14,
+            "endTime": 29532.12,
+            "text": "as if I weigh absolutely nothing."
+          },
+          {
+            "startTime": 29532.62,
+            "endTime": 29534.7,
+            "text": "We land on the bed with a thud,"
+          },
+          {
+            "startTime": 29535.24,
+            "endTime": 29537.78,
+            "text": "laughing as we lie on our sides facing each other."
+          },
+          {
+            "startTime": 29538.16,
+            "endTime": 29539.36,
+            "text": "We're both naked,"
+          },
+          {
+            "startTime": 29539.36,
+            "endTime": 29543.1,
+            "text": "and it feels like the most natural thing in the world."
+          },
+          {
+            "startTime": 29543.1,
+            "endTime": 29546.92,
+            "text": "When he speaks, it's so nonsensical,"
+          },
+          {
+            "startTime": 29547.1,
+            "endTime": 29549.04,
+            "text": "I'm genuinely caught off guard."
+          },
+          {
+            "startTime": 29549.56,
+            "endTime": 29552.62,
+            "text": "I thought your name started with an M."
+          },
+          {
+            "startTime": 29553.32,
+            "endTime": 29556.18,
+            "text": "You thought my name was Manna?"
+          },
+          {
+            "startTime": 29556.86,
+            "endTime": 29558.12,
+            "text": "Garrett Snickers."
+          },
+          {
+            "startTime": 29558.96,
+            "endTime": 29563.92,
+            "text": "No, I thought your name was Mona or Molly or Mackenzie,"
+          },
+          {
+            "startTime": 29564.3,
+            "endTime": 29565.3,
+            "text": "anything with an M."
+          },
+          {
+            "startTime": 29565.9,
+            "endTime": 29569.16,
+            "text": "I don't know whether to be insulted or amused."
+          },
+          {
+            "startTime": 29569.52,
+            "endTime": 29570.18,
+            "text": "Okay."
+          },
+          {
+            "startTime": 29571.24,
+            "endTime": 29573.3,
+            "text": "For almost two months, Hannah."
+          },
+          {
+            "startTime": 29573.66,
+            "endTime": 29576.22,
+            "text": "I went two months without knowing your name."
+          },
+          {
+            "startTime": 29577.1,
+            "endTime": 29579.5,
+            "text": "Well, we didn't know each other."
+          },
+          {
+            "startTime": 29580.06,
+            "endTime": 29581.54,
+            "text": "You knew my name."
+          },
+          {
+            "startTime": 29582.14,
+            "endTime": 29583.2,
+            "text": "I sigh."
+          },
+          {
+            "startTime": 29584.02,
+            "endTime": 29585.8,
+            "text": "Everyone knows your name."
+          },
+          {
+            "startTime": 29586.52,
+            "endTime": 29589.72,
+            "text": "How did I go so long without noticing you, damn it?"
+          },
+          {
+            "startTime": 29590.18,
+            "endTime": 29593.74,
+            "text": "Why did it take seeing a stupid A on your midterm"
+          },
+          {
+            "startTime": 29593.74,
+            "endTime": 29594.64,
+            "text": "to make me notice?"
+          },
+          {
+            "startTime": 29595.56,
+            "endTime": 29597.84,
+            "text": "He sounds so genuinely upset"
+          },
+          {
+            "startTime": 29597.84,
+            "endTime": 29599.96,
+            "text": "that I scoot closer and kiss him."
+          },
+          {
+            "startTime": 29600.18,
+            "endTime": 29601.7,
+            "text": "It doesn't matter."
+          },
+          {
+            "startTime": 29602.04,
+            "endTime": 29603.38,
+            "text": "You know me now?"
+          },
+          {
+            "startTime": 29604.14,
+            "endTime": 29605.1,
+            "text": "I do."
+          },
+          {
+            "startTime": 29605.4,
+            "endTime": 29607.02,
+            "text": "He says fiercely,"
+          },
+          {
+            "startTime": 29607.3,
+            "endTime": 29611.46,
+            "text": "and then he slides lower and captures one of my nipples in his mouth."
+          },
+          {
+            "startTime": 29611.94,
+            "endTime": 29614.16,
+            "text": "I know that when I do this,"
+          },
+          {
+            "startTime": 29614.44,
+            "endTime": 29616.16,
+            "text": "he sucks hard."
+          },
+          {
+            "startTime": 29616.54,
+            "endTime": 29618.38,
+            "text": "A moan flies out of my mouth,"
+          },
+          {
+            "startTime": 29618.4,
+            "endTime": 29620.76,
+            "text": "and he releases my nipple with a wet pop."
+          },
+          {
+            "startTime": 29620.76,
+            "endTime": 29624.14,
+            "text": "You moan loud enough to wake the dead."
+          },
+          {
+            "startTime": 29624.72,
+            "endTime": 29626.64,
+            "text": "And I know that when I do this,"
+          },
+          {
+            "startTime": 29626.82,
+            "endTime": 29629.04,
+            "text": "your hips are going to start rocking,"
+          },
+          {
+            "startTime": 29629.36,
+            "endTime": 29631.52,
+            "text": "like they're searching for my cock."
+          },
+          {
+            "startTime": 29632.28,
+            "endTime": 29633.96,
+            "text": "He licks my other nipple,"
+          },
+          {
+            "startTime": 29634.22,
+            "endTime": 29635.56,
+            "text": "flicking his tongue over it,"
+          },
+          {
+            "startTime": 29635.64,
+            "endTime": 29636.58,
+            "text": "and sure enough,"
+          },
+          {
+            "startTime": 29636.84,
+            "endTime": 29638.78,
+            "text": "my hips rock involuntarily"
+          },
+          {
+            "startTime": 29638.78,
+            "endTime": 29642.02,
+            "text": "and my sex clamps around aching emptiness."
+          },
+          {
+            "startTime": 29642.68,
+            "endTime": 29645.34,
+            "text": "Garrett props himself up on one elbow,"
+          },
+          {
+            "startTime": 29645.6,
+            "endTime": 29648.62,
+            "text": "his biceps flexing against my shoulder."
+          },
+          {
+            "startTime": 29649.14,
+            "endTime": 29651.52,
+            "text": "I also know that I like you,"
+          },
+          {
+            "startTime": 29652,
+            "endTime": 29653.34,
+            "text": "he says gruffly."
+          },
+          {
+            "startTime": 29654.17,
+            "endTime": 29655.62,
+            "text": "A laugh shudders out."
+          },
+          {
+            "startTime": 29655.94,
+            "endTime": 29657.44,
+            "text": "I like you, too."
+          },
+          {
+            "startTime": 29658.18,
+            "endTime": 29659.48,
+            "text": "I'm serious."
+          },
+          {
+            "startTime": 29659.48,
+            "endTime": 29661.82,
+            "text": "I really fucking like you."
+          },
+          {
+            "startTime": 29662.6,
+            "endTime": 29664.66,
+            "text": "I'm not sure how to respond,"
+          },
+          {
+            "startTime": 29665.25,
+            "endTime": 29667.6,
+            "text": "so I simply grab the back of his head"
+          },
+          {
+            "startTime": 29667.6,
+            "endTime": 29669.08,
+            "text": "and bring him down for a kiss."
+          },
+          {
+            "startTime": 29669.54,
+            "endTime": 29670.56,
+            "text": "After that,"
+          },
+          {
+            "startTime": 29670.94,
+            "endTime": 29673,
+            "text": "everything becomes a blur."
+          },
+          {
+            "startTime": 29673.52,
+            "endTime": 29675.92,
+            "text": "His hands and lips are everywhere,"
+          },
+          {
+            "startTime": 29675.92,
+            "endTime": 29677.74,
+            "text": "and a wave of pleasure"
+          },
+          {
+            "startTime": 29677.74,
+            "endTime": 29679.74,
+            "text": "sweeps me away to a beautiful place"
+          },
+          {
+            "startTime": 29679.74,
+            "endTime": 29681.94,
+            "text": "where only Garrett and I exist."
+          },
+          {
+            "startTime": 29682.36,
+            "endTime": 29684.4,
+            "text": "He leaves me only to reach"
+          },
+          {
+            "startTime": 29684.4,
+            "endTime": 29685.9,
+            "text": "for the door next to his bed,"
+          },
+          {
+            "startTime": 29686.06,
+            "endTime": 29687.58,
+            "text": "and my pulse races"
+          },
+          {
+            "startTime": 29687.58,
+            "endTime": 29688.9,
+            "text": "because I know what he's getting,"
+          },
+          {
+            "startTime": 29689.24,
+            "endTime": 29690.48,
+            "text": "what's about to happen."
+          },
+          {
+            "startTime": 29690.96,
+            "endTime": 29693.6,
+            "text": "The tear of plastic breaks the darkness,"
+          },
+          {
+            "startTime": 29693.96,
+            "endTime": 29695.9,
+            "text": "and I glimpse a flash of him"
+          },
+          {
+            "startTime": 29695.9,
+            "endTime": 29697.12,
+            "text": "rolling on a condom."
+          },
+          {
+            "startTime": 29697.46,
+            "endTime": 29699.78,
+            "text": "But rather than get on top of me"
+          },
+          {
+            "startTime": 29699.78,
+            "endTime": 29700.62,
+            "text": "and take control,"
+          },
+          {
+            "startTime": 29701,
+            "endTime": 29702.84,
+            "text": "he moves on to his back"
+          },
+          {
+            "startTime": 29702.84,
+            "endTime": 29704.64,
+            "text": "and hands me the reins."
+          },
+          {
+            "startTime": 29705.7,
+            "endTime": 29706.72,
+            "text": "Ride me."
+          },
+          {
+            "startTime": 29707.4,
+            "endTime": 29709.28,
+            "text": "His voice is raspy,"
+          },
+          {
+            "startTime": 29709.54,
+            "endTime": 29710.64,
+            "text": "trembling with need."
+          },
+          {
+            "startTime": 29711.46,
+            "endTime": 29712.04,
+            "text": "Gulping,"
+          },
+          {
+            "startTime": 29712.44,
+            "endTime": 29714,
+            "text": "I climb onto his lap"
+          },
+          {
+            "startTime": 29714,
+            "endTime": 29716.06,
+            "text": "and grip his penis with one hand."
+          },
+          {
+            "startTime": 29716.94,
+            "endTime": 29719.24,
+            "text": "He is long and thick and imposing,"
+          },
+          {
+            "startTime": 29719.64,
+            "endTime": 29721.3,
+            "text": "but this position allows me"
+          },
+          {
+            "startTime": 29721.3,
+            "endTime": 29723.1,
+            "text": "to control how much of him to take."
+          },
+          {
+            "startTime": 29723.32,
+            "endTime": 29726.06,
+            "text": "My pulse gallops like a racehorse"
+          },
+          {
+            "startTime": 29726.06,
+            "endTime": 29727.38,
+            "text": "as I sink down on him."
+          },
+          {
+            "startTime": 29727.72,
+            "endTime": 29730.2,
+            "text": "I experience the most delicious"
+          },
+          {
+            "startTime": 29730.2,
+            "endTime": 29731.6,
+            "text": "stretching sensation"
+          },
+          {
+            "startTime": 29731.6,
+            "endTime": 29734.04,
+            "text": "as I lower myself inch by inch"
+          },
+          {
+            "startTime": 29734.04,
+            "endTime": 29736.28,
+            "text": "until he's all the way inside,"
+          },
+          {
+            "startTime": 29736.6,
+            "endTime": 29738.66,
+            "text": "and suddenly I'm full."
+          },
+          {
+            "startTime": 29739.08,
+            "endTime": 29741.46,
+            "text": "So damn full."
+          },
+          {
+            "startTime": 29741.94,
+            "endTime": 29744.7,
+            "text": "My inner muscles clutch his erection,"
+          },
+          {
+            "startTime": 29745.26,
+            "endTime": 29746.52,
+            "text": "ripple around him,"
+          },
+          {
+            "startTime": 29746.66,
+            "endTime": 29749.16,
+            "text": "and he unleashes a desperate sound"
+          },
+          {
+            "startTime": 29749.16,
+            "endTime": 29750.6,
+            "text": "that rings through my body."
+          },
+          {
+            "startTime": 29751.22,
+            "endTime": 29752.68,
+            "text": "Oh, fuck."
+          },
+          {
+            "startTime": 29753.36,
+            "endTime": 29755.72,
+            "text": "Garrett's fingers dig into my hips"
+          },
+          {
+            "startTime": 29755.72,
+            "endTime": 29756.82,
+            "text": "before I can move."
+          },
+          {
+            "startTime": 29757.82,
+            "endTime": 29759.94,
+            "text": "Tell me about your grandmother again."
+          },
+          {
+            "startTime": 29760.96,
+            "endTime": 29761.48,
+            "text": "Now?"
+          },
+          {
+            "startTime": 29762.42,
+            "endTime": 29764.56,
+            "text": "His voice comes out strained."
+          },
+          {
+            "startTime": 29765.48,
+            "endTime": 29766.52,
+            "text": "Yes, now,"
+          },
+          {
+            "startTime": 29766.68,
+            "endTime": 29767.28,
+            "text": "because I don't know"
+          },
+          {
+            "startTime": 29767.28,
+            "endTime": 29768.98,
+            "text": "if anyone has ever told you this before,"
+          },
+          {
+            "startTime": 29769.14,
+            "endTime": 29770.8,
+            "text": "but you are tighter than a..."
+          },
+          {
+            "startTime": 29771.56,
+            "endTime": 29772.52,
+            "text": "Okay, nope."
+          },
+          {
+            "startTime": 29772.72,
+            "endTime": 29774.28,
+            "text": "Not gonna think about how tight you are."
+          },
+          {
+            "startTime": 29774.56,
+            "endTime": 29775.94,
+            "text": "What's Nana's name?"
+          },
+          {
+            "startTime": 29777.2,
+            "endTime": 29777.72,
+            "text": "Sylvia."
+          },
+          {
+            "startTime": 29777.72,
+            "endTime": 29780.86,
+            "text": "I make a valiant effort not to laugh."
+          },
+          {
+            "startTime": 29781.36,
+            "endTime": 29783.9,
+            "text": "His breathing grows audibly labored."
+          },
+          {
+            "startTime": 29784.36,
+            "endTime": 29785.6,
+            "text": "Where does she live?"
+          },
+          {
+            "startTime": 29786.48,
+            "endTime": 29788.56,
+            "text": "Florida, retirement home."
+          },
+          {
+            "startTime": 29789.7,
+            "endTime": 29792.24,
+            "text": "Beads of sweat break out on my forehead"
+          },
+          {
+            "startTime": 29792.24,
+            "endTime": 29794.26,
+            "text": "because Garrett is not the only one"
+          },
+          {
+            "startTime": 29794.26,
+            "endTime": 29795.64,
+            "text": "close to losing it here."
+          },
+          {
+            "startTime": 29796.08,
+            "endTime": 29798.96,
+            "text": "The pressure between my legs is unbearable."
+          },
+          {
+            "startTime": 29799.24,
+            "endTime": 29800.84,
+            "text": "My hips want to move."
+          },
+          {
+            "startTime": 29801.34,
+            "endTime": 29803.54,
+            "text": "My body craves relief."
+          },
+          {
+            "startTime": 29804.24,
+            "endTime": 29806.92,
+            "text": "Garrett releases a long, ragged breath."
+          },
+          {
+            "startTime": 29807.78,
+            "endTime": 29809.82,
+            "text": "Okay, I'm good."
+          },
+          {
+            "startTime": 29810.52,
+            "endTime": 29813.14,
+            "text": "His white teeth gleam in the shadows"
+          },
+          {
+            "startTime": 29813.14,
+            "endTime": 29814.92,
+            "text": "as he grins up at me."
+          },
+          {
+            "startTime": 29815.78,
+            "endTime": 29817.36,
+            "text": "Permission to proceed."
+          },
+          {
+            "startTime": 29818.88,
+            "endTime": 29820.4,
+            "text": "Thank God."
+          },
+          {
+            "startTime": 29821.44,
+            "endTime": 29823.42,
+            "text": "I lift myself up"
+          },
+          {
+            "startTime": 29823.42,
+            "endTime": 29826.18,
+            "text": "and slam down so hard we both groan."
+          },
+          {
+            "startTime": 29826.7,
+            "endTime": 29829.86,
+            "text": "This kind of blinding need is new to me."
+          },
+          {
+            "startTime": 29830.16,
+            "endTime": 29833.16,
+            "text": "I ride him in a fast, furious pace,"
+          },
+          {
+            "startTime": 29833.42,
+            "endTime": 29835.1,
+            "text": "but it's still not enough."
+          },
+          {
+            "startTime": 29835.1,
+            "endTime": 29837.7,
+            "text": "I need more and more and more,"
+          },
+          {
+            "startTime": 29837.88,
+            "endTime": 29840.9,
+            "text": "and eventually I'm just grinding against him"
+          },
+          {
+            "startTime": 29840.9,
+            "endTime": 29844.4,
+            "text": "because I've discovered that when I lean forward and do that,"
+          },
+          {
+            "startTime": 29844.68,
+            "endTime": 29848.42,
+            "text": "my clit brushes his pubic bone and intensifies the pleasure."
+          },
+          {
+            "startTime": 29848.42,
+            "endTime": 29852.6,
+            "text": "My breasts are crushed against his rock-hard chest."
+          },
+          {
+            "startTime": 29852.86,
+            "endTime": 29855.88,
+            "text": "He's so masculine, so fucking addictive."
+          },
+          {
+            "startTime": 29856.32,
+            "endTime": 29860.7,
+            "text": "I kiss his neck and find his skin hot beneath my lips."
+          },
+          {
+            "startTime": 29861.08,
+            "endTime": 29862.22,
+            "text": "He's burning up,"
+          },
+          {
+            "startTime": 29862.44,
+            "endTime": 29866.08,
+            "text": "his heartbeat hammering wildly against my breasts,"
+          },
+          {
+            "startTime": 29866.08,
+            "endTime": 29869.18,
+            "text": "and when I lift my head slightly and see his face,"
+          },
+          {
+            "startTime": 29869.46,
+            "endTime": 29871.94,
+            "text": "I'm held captive by his expression,"
+          },
+          {
+            "startTime": 29872.18,
+            "endTime": 29874.42,
+            "text": "the taut stretch of his features"
+          },
+          {
+            "startTime": 29874.42,
+            "endTime": 29877.44,
+            "text": "and the intense pleasure glittering in his eyes."
+          },
+          {
+            "startTime": 29877.74,
+            "endTime": 29879.46,
+            "text": "I'm so focused on him"
+          },
+          {
+            "startTime": 29879.46,
+            "endTime": 29881.74,
+            "text": "that when the orgasm hits me,"
+          },
+          {
+            "startTime": 29881.92,
+            "endTime": 29883.92,
+            "text": "it catches me by total surprise."
+          },
+          {
+            "startTime": 29886.28,
+            "endTime": 29888.22,
+            "text": "I cry out,"
+          },
+          {
+            "startTime": 29888.54,
+            "endTime": 29890.14,
+            "text": "sagging against him"
+          },
+          {
+            "startTime": 29890.14,
+            "endTime": 29893.34,
+            "text": "as a rush of sweet bliss races through my body."
+          },
+          {
+            "startTime": 29894.02,
+            "endTime": 29897.36,
+            "text": "Garrett rubs my back as I gasp in pleasure."
+          },
+          {
+            "startTime": 29897.74,
+            "endTime": 29899.62,
+            "text": "My sex contracts,"
+          },
+          {
+            "startTime": 29900,
+            "endTime": 29905.74,
+            "text": "milking his hard shaft, and his fingers dig between my shoulder blades as he curses."
+          },
+          {
+            "startTime": 29900.38,
+            "endTime": 29901.64,
+            "text": "milking his hard shaft."
+          },
+          {
+            "startTime": 29901.64,
+            "endTime": 29901.74,
+            "text": "what's going on?"
+          },
+          {
+            "startTime": 29901.74,
+            "endTime": 29901.78,
+            "text": "what's going on?"
+          },
+          {
+            "startTime": 29901.84,
+            "endTime": 29901.92,
+            "text": "left."
+          },
+          {
+            "startTime": 29906.38,
+            "endTime": 29913.42,
+            "text": "Hannah, fuck, baby, that's hot. I'm still catching my breath when he starts thrusting"
+          },
+          {
+            "startTime": 29913.42,
+            "endTime": 29920.26,
+            "text": "upward fast and deep, his hips snapping up as he fills me over and over again until finally he"
+          },
+          {
+            "startTime": 29920.26,
+            "endTime": 29927.86,
+            "text": "gives one final thrust and groans. His features tighten, dark brows drawn together as if he's"
+          },
+          {
+            "startTime": 29927.86,
+            "endTime": 29935.1,
+            "text": "in pain but I know he's not. I kiss his neck again, sucking on his feverish flesh as he trembles"
+          },
+          {
+            "startTime": 29935.1,
+            "endTime": 29943.4,
+            "text": "beneath me, holding me so tight he traps all the air in my lungs. After we've both recovered and"
+          },
+          {
+            "startTime": 29943.4,
+            "endTime": 29950.3,
+            "text": "the condom is disposed of, Garrett crawls beside me and spoons me from behind. The heavy weight of his"
+          },
+          {
+            "startTime": 29950.3,
+            "endTime": 29956.84,
+            "text": "arm makes me feel safe and warm and treasured. So does the way he flattens his palm on my belly"
+          },
+          {
+            "startTime": 29956.84,
+            "endTime": 29964.84,
+            "text": "and absently strokes my naked flesh. His lips press into the nape of my neck and I can honestly say"
+          },
+          {
+            "startTime": 29964.84,
+            "endTime": 29975.2,
+            "text": "I've never been more content in my life. Stay over tonight, he murmurs. Can't, I murmur back."
+          }
+        ]
+      }
+    },
+    {
+      "id": "the-deal-mutual-masturbation-with-trauma-context",
+      "source": "The Deal",
+      "fingerprint": {
+        "version": 1,
+        "sha256": "a151b60b648169861e2eb20af3183c597719705b16daa7634ef679bc1b558d49",
+        "fileSize": 711058857
+      },
+      "expected": {
+        "accepted": true,
+        "label": "sexual_complete_scene",
+        "notes": "Harder positive case: earlier in this book (not shown in this excerpt), the character has a graphic flashback mid-intimacy to being raped, which stops the encounter cold. This excerpt begins right after that flashback ends ('the last traces of desire inside me' gone, 'This isn't working, he says hoarsely') and covers the couple stopping, talking through trust and her past, and then choosing to continue into a clearly consensual mutual-masturbation scene. Tests whether a candidate model can correctly read a present-day consensual scene that explicitly discusses and follows a past assault without the discussion itself causing a false sexual_violence read -- there is no non-consensual act depicted anywhere in this window, only conversation about one that already happened off-page relative to this excerpt.",
+        "expected_start_time_range": [
+          24704.2,
+          24758.0
+        ],
+        "expected_start_time_notes": "The actual physical scene begins once Garrett undresses (24704.2, 'he hops off the bed and peels his shirt over his head') through mutual undressing and the start of watching each other (24758.0). The preceding dialogue about trust and past trauma (24449-24704) is emotional buildup/conversation, not part of the physical escalation itself, so a startTime anywhere in that earlier dialogue would be too early under the same rule that ACOTAR's buildup-inclusive boundary uses -- kissing/touching/undressing marks the start, not conversation alone."
+      },
+      "transcript_window": {
+        "start_time": 24483.94,
+        "end_time": 24923.32,
+        "segments": [
+          {
+            "startTime": 24483.94,
+            "endTime": 24490.3,
+            "text": "attack, stealing away the last traces of desire inside me. I know Garrett feels the change in"
+          },
+          {
+            "startTime": 24490.3,
+            "endTime": 24497.1,
+            "text": "my body that I'm no longer warm and wet and pliant, that I'm stiffer than a board and colder"
+          },
+          {
+            "startTime": 24497.1,
+            "endTime": 24507.5,
+            "text": "than ice. This isn't working, he says hoarsely. I sit up, fighting hard not to cry. I know,"
+          },
+          {
+            "startTime": 24507.72,
+            "endTime": 24517.74,
+            "text": "I'm sorry, it's just you're looking at me and... He offers a crooked grin. Would it help if I"
+          },
+          {
+            "startTime": 24517.74,
+            "endTime": 24519.8,
+            "text": "close my eyes? No."
+          },
+          {
+            "startTime": 24518,
+            "endTime": 24525.64,
+            "text": "my eyes? No, I say miserably, because I'll know you're still picturing me in your head."
+          },
+          {
+            "startTime": 24526.64,
+            "endTime": 24532.78,
+            "text": "With a sigh, he slides up and rests his head on the bed frame. He's still hard. I can see his"
+          },
+          {
+            "startTime": 24532.78,
+            "endTime": 24538.32,
+            "text": "erection straining beneath his track pants, but he seems oblivious to his own state of arousal"
+          },
+          {
+            "startTime": 24538.32,
+            "endTime": 24546.84,
+            "text": "as he slowly meets my eyes. You don't trust me. I'm quick to deny it. I do trust you. I wouldn't"
+          },
+          {
+            "startTime": 24546.84,
+            "endTime": 24553.8,
+            "text": "be here if I didn't. Fine, I'll amend that. You don't trust me enough to fully let go."
+          },
+          {
+            "startTime": 24554.56,
+            "endTime": 24562.02,
+            "text": "My teeth sink into my bottom lip. I want to tell him he's wrong, but a part of me doesn't think he is."
+          },
+          {
+            "startTime": 24562.9,
+            "endTime": 24570.18,
+            "text": "Sex is all about trust, he says. Even if you don't love the other person, even if it's just a hookup,"
+          },
+          {
+            "startTime": 24570.46,
+            "endTime": 24575.52,
+            "text": "it still takes a serious amount of trust to open yourself up and let yourself go to that vulnerable"
+          },
+          {
+            "startTime": 24575.52,
+            "endTime": 24582,
+            "text": "place, you know? And there's nothing more vulnerable than coming. His mouth lifts in a dry smile."
+          },
+          {
+            "startTime": 24582.34,
+            "endTime": 24591.28,
+            "text": "At least that's what my Google search taught me. You researched this? I yell. Embarrassment reddens"
+          },
+          {
+            "startTime": 24591.28,
+            "endTime": 24601.08,
+            "text": "his cheeks. I had to. I've never slept with anyone who's been, you know. I know. I bite my lip even"
+          },
+          {
+            "startTime": 24601.08,
+            "endTime": 24607.44,
+            "text": "harder to stop myself from bursting into tears. After what happened to you, it's not surprising"
+          },
+          {
+            "startTime": 24607.44,
+            "endTime": 24615.8,
+            "text": "that you're scared to let yourself be vulnerable. He hesitates. Were you a virgin? I press my lips"
+          },
+          {
+            "startTime": 24615.8,
+            "endTime": 24625.1,
+            "text": "together and nod. Yeah, I thought so. Garrett goes quiet for another beat. I have an idea,"
+          },
+          {
+            "startTime": 24625.1,
+            "endTime": 24631.9,
+            "text": "if you're willing to hear it. I can't talk because I'm too close to the I'm gonna bawl my eyes out"
+          },
+          {
+            "startTime": 24631.9,
+            "endTime": 24638.56,
+            "text": "brink, so I settle for another nod. Instead of me giving you an orgasm, why don't you try to give"
+          },
+          {
+            "startTime": 24638.56,
+            "endTime": 24645.32,
+            "text": "one to yourself? I thought I'd maxed out my embarrassment credit card tonight, but clearly"
+          },
+          {
+            "startTime": 24645.32,
+            "endTime": 24653.46,
+            "text": "there's humiliation left to spare. I do it all the time. My cheeks are flaming as I avoid his eyes."
+          },
+          {
+            "startTime": 24653.46,
+            "endTime": 24665.46,
+            "text": "In front of me. He corrects. Make yourself come in front of me. He pauses, and I'll make myself come"
+          },
+          {
+            "startTime": 24665.46,
+            "endTime": 24674.58,
+            "text": "in front of you. Oh my God. I can't believe we're even having this discussion that he's suggesting we"
+          },
+          {
+            "startTime": 24674.58,
+            "endTime": 24682.28,
+            "text": "pleasure ourselves in front of each other. Please excuse me while I go hang myself, I mutter,"
+          },
+          {
+            "startTime": 24682.28,
+            "endTime": 24689.72,
+            "text": "because I am so mortified right now. You shouldn't be. His gray eyes harden with intensity."
+          },
+          {
+            "startTime": 24690.4,
+            "endTime": 24696.94,
+            "text": "It'll be an exercise in trust. Seriously, I think it will be good. We'll both be making ourselves"
+          },
+          {
+            "startTime": 24696.94,
+            "endTime": 24704.24,
+            "text": "vulnerable, and you'll see that there's nothing to be afraid of. Before I can respond, he hops off the"
+          },
+          {
+            "startTime": 24704.24,
+            "endTime": 24711.12,
+            "text": "bed and peels his shirt over his head. Then, without missing a beat, he yanks his pants off his hips."
+          },
+          {
+            "startTime": 24711.76,
+            "endTime": 24719.06,
+            "text": "My breath lodges in my lungs. I had been touching his erection before, but I hadn't actually seen it,"
+          },
+          {
+            "startTime": 24719.14,
+            "endTime": 24728.64,
+            "text": "and now I am seeing it, and he's long and hard and perfect. My body tingles at the sight of his naked body,"
+          },
+          {
+            "startTime": 24728.64,
+            "endTime": 24735.3,
+            "text": "and when my gaze slides up to meet his eyes, I glimpse nothing but healthy desire and sweet"
+          },
+          {
+            "startTime": 24735.3,
+            "endTime": 24743.78,
+            "text": "encouragement in those silvery gray depths. No dirty lust, no gleam of power, no savagery or"
+          },
+          {
+            "startTime": 24743.78,
+            "endTime": 24751.4,
+            "text": "malevolence. He's not Aaron. He's Garrett, and he's putting himself on display for me,"
+          },
+          {
+            "startTime": 24751.4,
+            "endTime": 24757.96,
+            "text": "showing me, showing me that it's okay to let down your guard. Take off your shirt, Anna. Let me see"
+          },
+          {
+            "startTime": 24757.96,
+            "endTime": 24768.14,
+            "text": "you. He grins. I promise not to leer too hard at your stripper tits. An unwitting smile springs to my"
+          },
+          {
+            "startTime": 24768.14,
+            "endTime": 24775.84,
+            "text": "lips, but I still don't move. Show me what you do to yourself when you're alone. He coaxes."
+          },
+          {
+            "startTime": 24777.46,
+            "endTime": 24785.38,
+            "text": "I... The lump in my throat is too big to speak past. His voice grows hoarse and seductive."
+          },
+          {
+            "startTime": 24786.06,
+            "endTime": 24795.02,
+            "text": "Show me, and I'll show you. He wraps his fist around his cock, and a moan shudders out of my mouth."
+          },
+          {
+            "startTime": 24795.24,
+            "endTime": 24801.48,
+            "text": "I meet his gaze, and something about the certainty of his expression spurs me to action."
+          },
+          {
+            "startTime": 24802,
+            "endTime": 24809,
+            "text": "My fingers shake uncontrollably as I reach for the bottom of my t-shirt and drag it over my head,"
+          },
+          {
+            "startTime": 24809.38,
+            "endTime": 24816.78,
+            "text": "leaving me in nothing but my bra. Then I draw a deep breath and take the bra off too."
+          },
+          {
+            "startTime": 24821.81,
+            "endTime": 24829.36,
+            "text": "25. Garrett, I've never jerked off in front of a girl before. I mean, I've given it a stroke or two"
+          },
+          {
+            "startTime": 24829.36,
+            "endTime": 24834.82,
+            "text": "before putting my cock in a more desirable place than my fist, but whacking it from start to finish?"
+          },
+          {
+            "startTime": 24835.74,
+            "endTime": 24841.72,
+            "text": "It's a first for me, and I'm nervous. But I'd be lying if I said I also wasn't turned on something"
+          },
+          {
+            "startTime": 24841.72,
+            "endTime": 24850.74,
+            "text": "fierce. I can't believe that Hannah is lying naked on my bed. She's fucking beautiful. Her body is soft"
+          },
+          {
+            "startTime": 24850.74,
+            "endTime": 24857.68,
+            "text": "and curvy in all the right places. Her breasts are absolute perfection, round and perky, and tipped"
+          },
+          {
+            "startTime": 24857.68,
+            "endTime": 24864.08,
+            "text": "with reddish-brown nipples. My gaze lowers to the narrow strip of hair between her legs, and I'm dying for"
+          },
+          {
+            "startTime": 24864.08,
+            "endTime": 24870.64,
+            "text": "her to part them. I want to see every inch of her. But I don't want to come off like a perv, and I"
+          },
+          {
+            "startTime": 24870.64,
+            "endTime": 24876.68,
+            "text": "don't want to scare her off, so I keep my mouth shut. I'm hard as a rock, my cock throbbing in my"
+          },
+          {
+            "startTime": 24876.68,
+            "endTime": 24884.18,
+            "text": "fist as I try not to ogle this sexy naked girl on my bed. You're not talking, she accuses, her tone"
+          },
+          {
+            "startTime": 24884.18,
+            "endTime": 24891.1,
+            "text": "both teasing and nervous. I don't want to scare you off, I say hoarsely. Dude, you're standing there"
+          },
+          {
+            "startTime": 24891.1,
+            "endTime": 24896.52,
+            "text": "naked in front of me with your dick in your hand. If that doesn't scare me, I doubt anything you say"
+          },
+          {
+            "startTime": 24896.52,
+            "endTime": 24905.42,
+            "text": "will. Good point. And damned if my dick doesn't tingle when she calls me dude. In fact, every word"
+          },
+          {
+            "startTime": 24905.42,
+            "endTime": 24913.94,
+            "text": "that comes out of her mouth gets me hot. Spread your legs, I tell her. I want to see you. She hesitates."
+          },
+          {
+            "startTime": 24914.78,
+            "endTime": 24923.32,
+            "text": "And then she does it. And my breath spirals out of my lungs. Fucking perfection. She's pink and"
+          }
+        ]
+      }
+    },
+    {
+      "id": "fourthwing2-explicit-scene-with-fantasy-elements",
+      "source": "Fourth Wing (Part 2 of 2) (Dramatized Adaptation)",
+      "fingerprint": {
+        "version": 1,
+        "sha256": "3ab3fbe994e2a44552288e7b0f9efa70a58ecc114a04bf1ff1f552f0e6273aef",
+        "fileSize": 609680979
+      },
+      "expected": {
+        "accepted": true,
+        "label": "sexual_complete_scene",
+        "notes": "Unambiguous consensual explicit scene, but interleaved with fantasy-genre elements (magical 'power' surging, lightning, shadows splitting a target) as a side effect of the character's abilities during climax. Tests whether a candidate model can separate genuine sexual content from surrounding fantasy narration rather than being distracted by the unusual context, and does not under-flag confidence just because the scene reads unconventionally.",
+        "expected_start_time_range": [
+          18243.8,
+          18277.6
+        ],
+        "expected_start_time_notes": "Buildup begins at the start of the excerpt (already-underway touching, 18243.8) through 'Touch me' (18276.6-18277.6) before escalating further. Since the excerpt opens mid-scene, an acceptable startTime should be at or very near the excerpt's own first segment (18243.8), consistent with the app's own rule that a scene already underway at the first supplied segment starts there."
+      },
+      "transcript_window": {
+        "start_time": 18243.82,
+        "end_time": 18899.29,
+        "segments": [
+          {
+            "startTime": 18243.82,
+            "endTime": 18251.96,
+            "text": "on, just like that. He glides the fabric of my underwear across my clit, and my back arches"
+          },
+          {
+            "startTime": 18251.96,
+            "endTime": 18258.44,
+            "text": "at the burst of pleasure that radiates through my body, so sweet I can taste it. He captures"
+          },
+          {
+            "startTime": 18258.44,
+            "endTime": 18263.62,
+            "text": "my mouth with his again, in a hungry assault, his tongue sliding against mine as his fingers"
+          },
+          {
+            "startTime": 18263.62,
+            "endTime": 18268.94,
+            "text": "stroke me through the fabric, expertly using it for friction. I try to rock my hips against"
+          },
+          {
+            "startTime": 18268.94,
+            "endTime": 18273.94,
+            "text": "his hand for more, but my feet dangle off the desk, robbing me of leverage. I can only"
+          },
+          {
+            "startTime": 18273.94,
+            "endTime": 18276.16,
+            "text": "have what he decides to give."
+          },
+          {
+            "startTime": 18276.56,
+            "endTime": 18277.32,
+            "text": "Touch me."
+          },
+          {
+            "startTime": 18277.6,
+            "endTime": 18280.44,
+            "text": "My fingernails bite into the back of his strong neck."
+          },
+          {
+            "startTime": 18283.04,
+            "endTime": 18285.18,
+            "text": "Desire pounding through me like a drumbeat."
+          },
+          {
+            "startTime": 18286.4,
+            "endTime": 18292.92,
+            "text": "If I get my hands on you, really, honestly, get my hands on you, I don't know if I'll be"
+          },
+          {
+            "startTime": 18292.92,
+            "endTime": 18293.78,
+            "text": "able to stop."
+          },
+          {
+            "startTime": 18294.12,
+            "endTime": 18298.68,
+            "text": "He would. I know it in my soul. That's why I trust him with my body."
+          },
+          {
+            "startTime": 18298.94,
+            "endTime": 18302.02,
+            "text": "My heart? It isn't playing into this decision."
+          },
+          {
+            "startTime": 18302.74,
+            "endTime": 18306.64,
+            "text": "Stop being so fucking honorable, and fuck me, Zayden."
+          },
+          {
+            "startTime": 18309.52,
+            "endTime": 18313.16,
+            "text": "His fingers slide under my underwear and stroke my slickened core."
+          },
+          {
+            "startTime": 18316.54,
+            "endTime": 18318.42,
+            "text": "So damn soft."
+          },
+          {
+            "startTime": 18321.7,
+            "endTime": 18327.52,
+            "text": "His fingers touch and tease, making that sweet coil of pleasure tighten in my core. I dig"
+          },
+          {
+            "startTime": 18327.52,
+            "endTime": 18332.34,
+            "text": "my nails into his shoulder, my back arching as he makes tighter and tighter circles against"
+          },
+          {
+            "startTime": 18332.34,
+            "endTime": 18333.26,
+            "text": "my swollen clit."
+          },
+          {
+            "startTime": 18333.26,
+            "endTime": 18337.78,
+            "text": "I bet you taste just as good as you feel."
+          },
+          {
+            "startTime": 18338.16,
+            "endTime": 18343.36,
+            "text": "Uh-huh. Pleasure shudders through me. A living, breathing fire beneath my skin."
+          },
+          {
+            "startTime": 18343.96,
+            "endTime": 18344.64,
+            "text": "More."
+          },
+          {
+            "startTime": 18346.14,
+            "endTime": 18351.96,
+            "text": "My skin flushes, and my pulse skyrockets. I'm going to combust, to burst into flames."
+          },
+          {
+            "startTime": 18352.38,
+            "endTime": 18357.64,
+            "text": "He slides one finger inside me. My muscles clench around him, and he works in a second."
+          },
+          {
+            "startTime": 18358,
+            "endTime": 18366.92,
+            "text": "You're so fucking hot. And my dam is both. But I can't wait to feel you come around my cock."
+          },
+          {
+            "startTime": 18366.92,
+            "endTime": 18376.91,
+            "text": "I throw my hands back against the wall for leverage, knocking something loose as my hips roll."
+          },
+          {
+            "startTime": 18377.09,
+            "endTime": 18383.63,
+            "text": "I ride his thrusting fingers. He curls them against my inner walls, and my thighs locking"
+          },
+          {
+            "startTime": 18383.63,
+            "endTime": 18388.39,
+            "text": "around his leather-clad hips. And when he uses his thumb to stroke my clit, the friction and"
+          },
+          {
+            "startTime": 18388.39,
+            "endTime": 18398.51,
+            "text": "pressure push me to the edge of mindless bliss. Power surges, rippling through my bones, and I grab"
+          },
+          {
+            "startTime": 18398.51,
+            "endTime": 18403.47,
+            "text": "onto Zayden even harder, surprised at the unexpected rush of crackling energy."
+          },
+          {
+            "startTime": 18403.67,
+            "endTime": 18408.39,
+            "text": "Look at you. You're fucking beautiful, Violet. Let go from me."
+          },
+          {
+            "startTime": 18408.57,
+            "endTime": 18413.33,
+            "text": "His words curl around my mind. His mouth fused to mine, and the intimacy of it"
+          },
+          {
+            "startTime": 18413.33,
+            "endTime": 18417.33,
+            "text": "pushes me to the limit of pleasure. And then right over it."
+          },
+          {
+            "startTime": 18418.51,
+            "endTime": 18424.33,
+            "text": "He swallows my cry as my back bows, the first wave of my orgasm washing over me,"
+          },
+          {
+            "startTime": 18424.33,
+            "endTime": 18429.25,
+            "text": "releasing that tight coil of tension in a burst of sparks at the edge of my vision,"
+          },
+          {
+            "startTime": 18429.63,
+            "endTime": 18435.65,
+            "text": "breaking me into a million scattered stars. Lightning strikes outside my window, flashing"
+          },
+          {
+            "startTime": 18435.65,
+            "endTime": 18441.23,
+            "text": "light through the room again and again as he strokes me with an expertise that kicks the first climax."
+          },
+          {
+            "startTime": 18442.01,
+            "endTime": 18442.61,
+            "text": "Zayden!"
+          },
+          {
+            "startTime": 18444.49,
+            "endTime": 18445.67,
+            "text": "Into a second."
+          },
+          {
+            "startTime": 18446.61,
+            "endTime": 18452.47,
+            "text": "He grins and slides his fingers from my body, and I'm nothing but ragged breaths and raw hunger"
+          },
+          {
+            "startTime": 18452.47,
+            "endTime": 18459.01,
+            "text": "as I reach for his shirt. I want it off, now. He accommodates my urgency, ripping off the fabric,"
+          },
+          {
+            "startTime": 18459.13,
+            "endTime": 18466.25,
+            "text": "and then we're kissing again. All swirling tongues and roaming hands. The feel of his skin under my"
+          },
+          {
+            "startTime": 18466.25,
+            "endTime": 18472.39,
+            "text": "fingertips is divine, impossibly soft over yards of hard muscle. I trace the lines of his back,"
+          },
+          {
+            "startTime": 18472.79,
+            "endTime": 18477.09,
+            "text": "memorizing the dips and hollows as sinew ripples with every move he makes."
+          },
+          {
+            "startTime": 18478.31,
+            "endTime": 18483.41,
+            "text": "I need you, now. I reach for the buttons of his leathers."
+          },
+          {
+            "startTime": 18483.75,
+            "endTime": 18485.05,
+            "text": "You know what you're saying."
+          },
+          {
+            "startTime": 18485.25,
+            "endTime": 18490.67,
+            "text": "I shove the fabric and any cloth beneath past his hips, freeing the thick length of his cock."
+          },
+          {
+            "startTime": 18490.67,
+            "endTime": 18501.23,
+            "text": "It's hot and hard in my hand. That moan makes me feel invincible. I'm asking you to fuck me."
+          },
+          {
+            "startTime": 18503.53,
+            "endTime": 18507.85,
+            "text": "He drags my hips to the edge of the desk, then works my underwear down my legs,"
+          },
+          {
+            "startTime": 18507.91,
+            "endTime": 18510.61,
+            "text": "leaving me bare. I take the fertility suppressant."
+          },
+          {
+            "startTime": 18510.89,
+            "endTime": 18511.51,
+            "text": "Same."
+          },
+          {
+            "startTime": 18511.89,
+            "endTime": 18515.21,
+            "text": "The last thing anyone wants are little quadrant babies running around,"
+          },
+          {
+            "startTime": 18515.21,
+            "endTime": 18520.69,
+            "text": "but it's better said than sorry. He grips my hips, lifting me for a better angle,"
+          },
+          {
+            "startTime": 18520.85,
+            "endTime": 18528.87,
+            "text": "and the head of his cock rubs against my clit. His eyes lock with mine. The hunger I see etched in"
+          },
+          {
+            "startTime": 18528.87,
+            "endTime": 18536.09,
+            "text": "every tense line of his body is my undoing. I don't care if it damns us. I need him. No more holding"
+          },
+          {
+            "startTime": 18536.09,
+            "endTime": 18539.97,
+            "text": "back. Not anymore. I reach between us, guiding the head of his cock rubs."
+          },
+          {
+            "startTime": 18538,
+            "endTime": 18542.32,
+            "text": "I reach between us, guiding the head of his cock to my entrance, but this position is shit."
+          },
+          {
+            "startTime": 18542.54,
+            "endTime": 18547.16,
+            "text": "He's considerably taller than the desk, and if I wasn't so desperate for him, I'd laugh."
+          },
+          {
+            "startTime": 18547.32,
+            "endTime": 18548.06,
+            "text": "But I am."
+          },
+          {
+            "startTime": 18548.36,
+            "endTime": 18549.22,
+            "text": "I arch."
+          },
+          {
+            "startTime": 18551.28,
+            "endTime": 18552.4,
+            "text": "But it doesn't help."
+          },
+          {
+            "startTime": 18552.78,
+            "endTime": 18555.94,
+            "text": "Every second we wait feels like it stretches on for a decade."
+          },
+          {
+            "startTime": 18557.72,
+            "endTime": 18558.76,
+            "text": "Fucking desk."
+          },
+          {
+            "startTime": 18559.24,
+            "endTime": 18560.5,
+            "text": "My thoughts exactly."
+          },
+          {
+            "startTime": 18560.84,
+            "endTime": 18564.36,
+            "text": "His biceps flex as he lifts me by the backs of my thighs."
+          },
+          {
+            "startTime": 18565.24,
+            "endTime": 18571.24,
+            "text": "And I wrap my arms around his neck, and my legs around his waist, my dressing gown caught between us as he pivots."
+          },
+          {
+            "startTime": 18573.22,
+            "endTime": 18576,
+            "text": "My back hits the armoire, but I barely blink."
+          },
+          {
+            "startTime": 18576.68,
+            "endTime": 18577.7,
+            "text": "Shit, are you alright?"
+          },
+          {
+            "startTime": 18578.32,
+            "endTime": 18579.18,
+            "text": "I'm fine."
+          },
+          {
+            "startTime": 18580.26,
+            "endTime": 18581.56,
+            "text": "You won't break me."
+          },
+          {
+            "startTime": 18581.82,
+            "endTime": 18584.92,
+            "text": "He pushes inside that first, tight inch of me."
+          },
+          {
+            "startTime": 18586,
+            "endTime": 18586.52,
+            "text": "More."
+          },
+          {
+            "startTime": 18589.12,
+            "endTime": 18590.36,
+            "text": "I need all of you."
+          },
+          {
+            "startTime": 18591.22,
+            "endTime": 18593.42,
+            "text": "You're going to be the death of me, Violet."
+          },
+          {
+            "startTime": 18593.42,
+            "endTime": 18598.68,
+            "text": "Whatever's left of his control slips, and he takes me completely, with one hard thrust."
+          },
+          {
+            "startTime": 18599.7,
+            "endTime": 18600.38,
+            "text": "Deep."
+          },
+          {
+            "startTime": 18600.64,
+            "endTime": 18603.44,
+            "text": "He's so fucking deep that I feel him everywhere."
+          },
+          {
+            "startTime": 18603.78,
+            "endTime": 18604.98,
+            "text": "Tell me you're alright."
+          },
+          {
+            "startTime": 18605.44,
+            "endTime": 18607.38,
+            "text": "He's already moving, thank gods."
+          },
+          {
+            "startTime": 18608.56,
+            "endTime": 18609.74,
+            "text": "I'm perfect."
+          },
+          {
+            "startTime": 18610.22,
+            "endTime": 18611.32,
+            "text": "Better than perfect."
+          },
+          {
+            "startTime": 18611.7,
+            "endTime": 18615.94,
+            "text": "Power blazes beneath my skin again, buzzing in wordless, frenzied demand."
+          },
+          {
+            "startTime": 18617.9,
+            "endTime": 18620.06,
+            "text": "You feel so fucking good."
+          },
+          {
+            "startTime": 18620.48,
+            "endTime": 18624.1,
+            "text": "His mouth slides down my neck, as his hand rises to cut my breast."
+          },
+          {
+            "startTime": 18624.54,
+            "endTime": 18629.84,
+            "text": "I can't even think around the maddening pleasure, as my back pounds the armoire door with every thrust,"
+          },
+          {
+            "startTime": 18630.14,
+            "endTime": 18633.32,
+            "text": "filling the room with the sound of our straining bodies and creaking wood."
+          },
+          {
+            "startTime": 18633.72,
+            "endTime": 18635.56,
+            "text": "Every stroke is better than the last."
+          },
+          {
+            "startTime": 18639.74,
+            "endTime": 18640.26,
+            "text": "Fuck."
+          },
+          {
+            "startTime": 18640.88,
+            "endTime": 18643.4,
+            "text": "I'm never going to get enough of you, am I?"
+          },
+          {
+            "startTime": 18643.62,
+            "endTime": 18646.02,
+            "text": "Shut up and fuck me, Ryerson."
+          },
+          {
+            "startTime": 18647.38,
+            "endTime": 18649.08,
+            "text": "Tomorrow is soon enough for regrets."
+          },
+          {
+            "startTime": 18649.54,
+            "endTime": 18652.6,
+            "text": "The armoire door groans, then splinters off the hinges,"
+          },
+          {
+            "startTime": 18652.8,
+            "endTime": 18654.96,
+            "text": "and Zayden's shadow whips out protecting me,"
+          },
+          {
+            "startTime": 18655.04,
+            "endTime": 18657.68,
+            "text": "as the frame snaps and wood crashes around us."
+          },
+          {
+            "startTime": 18657.88,
+            "endTime": 18661.12,
+            "text": "My power flares, rising in answer to his,"
+          },
+          {
+            "startTime": 18661.38,
+            "endTime": 18664.08,
+            "text": "sizzling beneath my skin as I grab a hold of his shoulders,"
+          },
+          {
+            "startTime": 18664.08,
+            "endTime": 18665.34,
+            "text": "my mouth finding his."
+          },
+          {
+            "startTime": 18665.54,
+            "endTime": 18666.92,
+            "text": "There's no stopping."
+          },
+          {
+            "startTime": 18667.16,
+            "endTime": 18668.76,
+            "text": "We can't stop."
+          },
+          {
+            "startTime": 18669.36,
+            "endTime": 18670.36,
+            "text": "Oh, fuck."
+          },
+          {
+            "startTime": 18670.68,
+            "endTime": 18673.52,
+            "text": "He curses, as he takes me over and over,"
+          },
+          {
+            "startTime": 18673.8,
+            "endTime": 18676.92,
+            "text": "never stopping, turning us again so there's cloth against my back."
+          },
+          {
+            "startTime": 18677.04,
+            "endTime": 18680.28,
+            "text": "But it's not the bed, it's the curtains, shoved to the side of the window."
+          },
+          {
+            "startTime": 18681.28,
+            "endTime": 18684.06,
+            "text": "Energy crackles again as our mouths meet,"
+          },
+          {
+            "startTime": 18684.1,
+            "endTime": 18688.22,
+            "text": "and still he drives on, winding that knot inside me painfully tighter,"
+          },
+          {
+            "startTime": 18688.44,
+            "endTime": 18689.42,
+            "text": "with every movement."
+          },
+          {
+            "startTime": 18689.64,
+            "endTime": 18690.58,
+            "text": "And the power?"
+          },
+          {
+            "startTime": 18690.8,
+            "endTime": 18691.86,
+            "text": "It's too much."
+          },
+          {
+            "startTime": 18691.86,
+            "endTime": 18695.28,
+            "text": "Shh, it's burning me, heating my blood with the need for release."
+          },
+          {
+            "startTime": 18696.84,
+            "endTime": 18697.4,
+            "text": "Zayden!"
+          },
+          {
+            "startTime": 18698.14,
+            "endTime": 18699.6,
+            "text": "I've got you, Violet."
+          },
+          {
+            "startTime": 18699.9,
+            "endTime": 18700.84,
+            "text": "Let it out."
+          },
+          {
+            "startTime": 18701.66,
+            "endTime": 18705.5,
+            "text": "Lightning whips through me, flashing so bright that my eyes slam shut."
+          },
+          {
+            "startTime": 18705.88,
+            "endTime": 18707.32,
+            "text": "Heat flares above me."
+          },
+          {
+            "startTime": 18713.72,
+            "endTime": 18715.06,
+            "text": "And I smell smoke."
+          },
+          {
+            "startTime": 18715.5,
+            "endTime": 18716.02,
+            "text": "Shit."
+          },
+          {
+            "startTime": 18717.26,
+            "endTime": 18721.34,
+            "text": "Zayden's power fills the room, eclipsing what light we had, and the curtain falls."
+          },
+          {
+            "startTime": 18721.58,
+            "endTime": 18724.86,
+            "text": "But we're moving before the charred fabric can so much as touch my skin."
+          },
+          {
+            "startTime": 18725.06,
+            "endTime": 18729.46,
+            "text": "That knot of pleasure builds to a breaking point as he takes me to the floor."
+          },
+          {
+            "startTime": 18730.32,
+            "endTime": 18734.58,
+            "text": "And finally, I have all of his weight as he drives into me."
+          },
+          {
+            "startTime": 18734.58,
+            "endTime": 18741.16,
+            "text": "Shadows fall away, and the sight of him above me, his dark gaze locked on mine in intense concentration,"
+          },
+          {
+            "startTime": 18741.16,
+            "endTime": 18744.58,
+            "text": "is the most beautiful sight I've ever seen."
+          },
+          {
+            "startTime": 18750.62,
+            "endTime": 18757.06,
+            "text": "He draws back, his eyes searching mine for a heartbeat or two, before he devastates me with another kiss."
+          },
+          {
+            "startTime": 18757.8,
+            "endTime": 18761.82,
+            "text": "That has me straining for more, rocking my hips against his."
+          },
+          {
+            "startTime": 18761.82,
+            "endTime": 18768.14,
+            "text": "This man kisses with his whole body, rolling his hips in time with the thrust of his tongue,"
+          },
+          {
+            "startTime": 18768.56,
+            "endTime": 18773.98,
+            "text": "bracing just enough of his weight so I can breathe while stroking his chest over my hypersensitive nipples."
+          },
+          {
+            "startTime": 18774.24,
+            "endTime": 18781.98,
+            "text": "He keeps me on the same edge he's riding, and I don't know how much longer I can take it before I set this entire room on fire."
+          },
+          {
+            "startTime": 18782.44,
+            "endTime": 18784.72,
+            "text": "I need... I need..."
+          },
+          {
+            "startTime": 18784.72,
+            "endTime": 18786.9,
+            "text": "My frantic eyes search his."
+          },
+          {
+            "startTime": 18787.2,
+            "endTime": 18788.24,
+            "text": "Where are my words?"
+          },
+          {
+            "startTime": 18788.86,
+            "endTime": 18789.78,
+            "text": "I know."
+          },
+          {
+            "startTime": 18789.78,
+            "endTime": 18796.92,
+            "text": "He claims my mouth again, and reaches between us, using those talented fingers to stroke me into another orgasm."
+          },
+          {
+            "startTime": 18799.44,
+            "endTime": 18804.52,
+            "text": "And light flashes again, followed by darkness, as I come apart under him."
+          },
+          {
+            "startTime": 18805.12,
+            "endTime": 18809.32,
+            "text": "Pleasure takes me in waves, rolling through me again and again,"
+          },
+          {
+            "startTime": 18809.52,
+            "endTime": 18814.38,
+            "text": "until all I can do is clutch Zayden's shoulders and ride it out in blissful surrender."
+          },
+          {
+            "startTime": 18814.84,
+            "endTime": 18815.44,
+            "text": "Beautiful."
+          },
+          {
+            "startTime": 18815.44,
+            "endTime": 18822.92,
+            "text": "The second I come down, his rhythm breaks, and he presses my knee up toward my chest and takes me even deeper."
+          },
+          {
+            "startTime": 18823.2,
+            "endTime": 18829.32,
+            "text": "I rock my hips up to meet his, sweat beating on our skin as I watch him unravel with rapt fascination."
+          },
+          {
+            "startTime": 18829.32,
+            "endTime": 18840.3,
+            "text": "I love his loss of control just as much as I fear my own, and when I swirl my hips, he groans, arching his neck as he thrusts once, twice, on the third."
+          },
+          {
+            "startTime": 18841.86,
+            "endTime": 18849.84,
+            "text": "Then he shudders within me, and his power lashes out into streaks of shadows, the force splitting the wooden target on the other side of the window."
+          },
+          {
+            "startTime": 18850.26,
+            "endTime": 18856.14,
+            "text": "Pieces fly, and Zayden throws out another wave of darkness that lasts just long enough to shield us from the debris."
+          },
+          {
+            "startTime": 18856.14,
+            "endTime": 18861.04,
+            "text": "Then, the shadows retreat, and daggers clatter to the ground behind me."
+          },
+          {
+            "startTime": 18861.94,
+            "endTime": 18868.66,
+            "text": "He looks as shocked and as enthralled as I feel as we lay there, staring at each other,"
+          },
+          {
+            "startTime": 18869.04,
+            "endTime": 18875.2,
+            "text": "our chests heaving in the aftermath of what can only be described as complete and utter madness."
+          },
+          {
+            "startTime": 18875.52,
+            "endTime": 18880.55,
+            "text": "I've never lost control like that."
+          },
+          {
+            "startTime": 18880.55,
+            "endTime": 18885.37,
+            "text": "He braces his weight on one arm, and brushes my hair back from my face with the other."
+          },
+          {
+            "startTime": 18885.69,
+            "endTime": 18893.37,
+            "text": "The move is so gentle, so at odds with what we've just experienced, that I can't help but blink, then smile."
+          },
+          {
+            "startTime": 18893.79,
+            "endTime": 18895.41,
+            "text": "Yeah, me neither."
+          },
+          {
+            "startTime": 18896.13,
+            "endTime": 18899.29,
+            "text": "Not that I've ever had power to lose control of before."
+          }
+        ]
+      }
+    },
+    {
+      "id": "leviathan-negative-spaceship-mechanics-false-cue",
+      "source": "Leviathan Wakes",
+      "fingerprint": {
+        "version": 1,
+        "sha256": "b0432a16488fbf9e380216a72902e4ce6cc0a8393aee579c38bfa1f21c72accb",
+        "fileSize": 1095182402
+      },
+      "expected": {
+        "accepted": false,
+        "label": null,
+        "notes": "Specificity check: this passage describes a spaceship's engine burn under G-force strain ('a lot of thrust', 'the ship... moaned and shrieked') -- words that superficially match sexual-content keyword cues but have zero sexual content. A candidate model that accepts this, or assigns it any non-trivial confidence, is pattern-matching on vocabulary rather than actually reading the passage's real subject."
+      },
+      "transcript_window": {
+        "start_time": 6403.91,
+        "end_time": 6560.3,
+        "segments": [
+          {
+            "startTime": 6403.91,
+            "endTime": 6407.35,
+            "text": "Below decks, the others were getting the drugs that kept them from dying,"
+          },
+          {
+            "startTime": 6407.71,
+            "endTime": 6409.67,
+            "text": "but kept them sedated through the worst of it."
+          },
+          {
+            "startTime": 6410.69,
+            "endTime": 6411.73,
+            "text": "Alex said,"
+          },
+          {
+            "startTime": 6412.53,
+            "endTime": 6413.23,
+            "text": "One."
+          },
+          {
+            "startTime": 6413.91,
+            "endTime": 6416.49,
+            "text": "And Holden weighed five hundred kilos."
+          },
+          {
+            "startTime": 6417.33,
+            "endTime": 6422.21,
+            "text": "The nerves at the back of his eye socket screamed at the massive load of his eyeballs."
+          },
+          {
+            "startTime": 6422.63,
+            "endTime": 6425.55,
+            "text": "His testicles crushed themselves against his thighs."
+          },
+          {
+            "startTime": 6426.05,
+            "endTime": 6428.73,
+            "text": "He concentrated on not swallowing his tongue."
+          },
+          {
+            "startTime": 6429.75,
+            "endTime": 6432.67,
+            "text": "Around him, the ship creaked and groaned."
+          },
+          {
+            "startTime": 6433.43,
+            "endTime": 6437.87,
+            "text": "There was a disconcerting bang from below decks, but nothing on his panel went red."
+          },
+          {
+            "startTime": 6438.45,
+            "endTime": 6444.35,
+            "text": "The night's torch drive could deliver a lot of thrust, but at the cost of a prodigious fuel burn rate."
+          },
+          {
+            "startTime": 6444.97,
+            "endTime": 6448.05,
+            "text": "But if they could save the cant, it wouldn't matter."
+          },
+          {
+            "startTime": 6449.55,
+            "endTime": 6455.49,
+            "text": "Over the blood pounding in his ears, Holden could hear Ade's gentle breathing and the click of her keyboard."
+          },
+          {
+            "startTime": 6456.45,
+            "endTime": 6461.95,
+            "text": "He wished he could just go to sleep to that sound, but the juice was singing and burning in his blood."
+          },
+          {
+            "startTime": 6462.73,
+            "endTime": 6464.55,
+            "text": "He was more awake than he'd ever been."
+          },
+          {
+            "startTime": 6465.65,
+            "endTime": 6468.25,
+            "text": "Yes, sir, Ade said over the comm."
+          },
+          {
+            "startTime": 6469.33,
+            "endTime": 6472.73,
+            "text": "It took Holden a second to realize she was talking to McDowell."
+          },
+          {
+            "startTime": 6473.43,
+            "endTime": 6476.13,
+            "text": "He turned up the volume to hear what the captain was saying."
+          },
+          {
+            "startTime": 6477.49,
+            "endTime": 6479.29,
+            "text": "The main's on line, full power."
+          },
+          {
+            "startTime": 6480.23,
+            "endTime": 6481.55,
+            "text": "We're fully loaded, sir."
+          },
+          {
+            "startTime": 6481.83,
+            "endTime": 6484.71,
+            "text": "If we try to burn that hard, we'll tear the drive right off the mounts."
+          },
+          {
+            "startTime": 6485.35,
+            "endTime": 6486.13,
+            "text": "Ade replied."
+          },
+          {
+            "startTime": 6487.37,
+            "endTime": 6489.65,
+            "text": "McDowell must have asked her to fire up the Eepstein."
+          },
+          {
+            "startTime": 6491.13,
+            "endTime": 6493.79,
+            "text": "Mr. Chukunbo, McDowell said."
+          },
+          {
+            "startTime": 6494.11,
+            "endTime": 6495.6900000000005,
+            "text": "We have four minutes."
+          },
+          {
+            "startTime": 6496.03,
+            "endTime": 6497.71,
+            "text": "If you break it, I won't bill you."
+          },
+          {
+            "startTime": 6498.47,
+            "endTime": 6499.17,
+            "text": "Yes, sir."
+          },
+          {
+            "startTime": 6499.83,
+            "endTime": 6500.87,
+            "text": "Bringing mains on line."
+          },
+          {
+            "startTime": 6501.43,
+            "endTime": 6503.79,
+            "text": "Setting for maximum burn, Ade said."
+          },
+          {
+            "startTime": 6504.53,
+            "endTime": 6508.21,
+            "text": "And in the background, Holden could hear the high G warning klaxon."
+          },
+          {
+            "startTime": 6508.99,
+            "endTime": 6512.25,
+            "text": "There was a louder clicking as Ade strapped herself in."
+          },
+          {
+            "startTime": 6514.16,
+            "endTime": 6515.58,
+            "text": "Mains on line in three."
+          },
+          {
+            "startTime": 6516.02,
+            "endTime": 6516.64,
+            "text": "Two."
+          },
+          {
+            "startTime": 6517.12,
+            "endTime": 6517.66,
+            "text": "One."
+          },
+          {
+            "startTime": 6518.34,
+            "endTime": 6520.18,
+            "text": "Execute, Ade said."
+          },
+          {
+            "startTime": 6521.12,
+            "endTime": 6525.52,
+            "text": "The Canterbury groaned so loud Holden had to turn the comm volume down."
+          },
+          {
+            "startTime": 6526,
+            "endTime": 6531.34,
+            "text": "It moaned and shrieked like a banshee for several seconds, and then there was a shattering crash."
+          },
+          {
+            "startTime": 6532.0599999999995,
+            "endTime": 6537.58,
+            "text": "He pulled up the exterior visual, fighting against the G-induced blackout at the edge of his vision."
+          },
+          {
+            "startTime": 6538.04,
+            "endTime": 6540.4400000000005,
+            "text": "The Canterbury was in one piece."
+          },
+          {
+            "startTime": 6541.36,
+            "endTime": 6543.2,
+            "text": "Ade, what the hell was that?"
+          },
+          {
+            "startTime": 6543.68,
+            "endTime": 6545.84,
+            "text": "McDowell said, his speech slurred."
+          },
+          {
+            "startTime": 6546.76,
+            "endTime": 6548.52,
+            "text": "The drive tearing a strut."
+          },
+          {
+            "startTime": 6548.82,
+            "endTime": 6555.22,
+            "text": "Mains are off line, sir, Ade replied, not saying exactly like I said would happen."
+          },
+          {
+            "startTime": 6556.4400000000005,
+            "endTime": 6557.7,
+            "text": "What of that bias?"
+          },
+          {
+            "startTime": 6558.0599999999995,
+            "endTime": 6559.0599999999995,
+            "text": "McDowell asked."
+          },
+          {
+            "startTime": 6559.8,
+            "endTime": 6560.3,
+            "text": "Not much."
+          }
+        ]
+      }
+    },
+    {
+      "id": "redrising1-negative-child-combat-false-cue",
+      "source": "Red Rising (Part 1 of 2)",
+      "fingerprint": {
+        "version": 1,
+        "sha256": "acff6963456baed44d9a57723198ad7796556b955097e1ae2d7f19396c918fca",
+        "fileSize": 453734399
+      },
+      "expected": {
+        "accepted": false,
+        "label": null,
+        "notes": "Specificity check: 'naked' appears here describing two children forced into unarmed combat ('I am a naked child slapping at another naked child in a cold room') -- nudity incidental to a violent, non-sexual context (likely relevant to violence_children rather than any sexual label). A candidate model must not accept this for any sexual_* label; correctly rejecting confirms it is reading nudity in context rather than keying on the word alone."
+      },
+      "transcript_window": {
+        "start_time": 19654.72,
+        "end_time": 19753.08,
+        "segments": [
+          {
+            "startTime": 19654.72,
+            "endTime": 19657.24,
+            "text": "I am Darwin's scythe."
+          },
+          {
+            "startTime": 19657.72,
+            "endTime": 19660.72,
+            "text": "Nature scraping away the chaff."
+          },
+          {
+            "startTime": 19661.56,
+            "endTime": 19664.74,
+            "text": "I don't know how to kill."
+          },
+          {
+            "startTime": 19665.3,
+            "endTime": 19667.32,
+            "text": "I've never killed a man."
+          },
+          {
+            "startTime": 19667.82,
+            "endTime": 19669.46,
+            "text": "I have no blade."
+          },
+          {
+            "startTime": 19669.74,
+            "endTime": 19670.9,
+            "text": "No thumper."
+          },
+          {
+            "startTime": 19671.22,
+            "endTime": 19672.2,
+            "text": "No scorcher."
+          },
+          {
+            "startTime": 19672.2,
+            "endTime": 19681.64,
+            "text": "It seems impossible that I could make this boy of meat and muscle bleed dry just with my hands."
+          },
+          {
+            "startTime": 19682.33,
+            "endTime": 19683.42,
+            "text": "I want to laugh."
+          },
+          {
+            "startTime": 19683.62,
+            "endTime": 19684.9,
+            "text": "And Julian does."
+          },
+          {
+            "startTime": 19685.71,
+            "endTime": 19691.2,
+            "text": "I am a naked child slapping at another naked child in a cold room."
+          },
+          {
+            "startTime": 19692.49,
+            "endTime": 19694.08,
+            "text": "His hesitancy is obvious."
+          },
+          {
+            "startTime": 19695.05,
+            "endTime": 19698.4,
+            "text": "His feet move like he's trying to remember a dance."
+          },
+          {
+            "startTime": 19698.4,
+            "endTime": 19703.02,
+            "text": "But when his elbows come to eye level, I panic."
+          },
+          {
+            "startTime": 19703.62,
+            "endTime": 19706.26,
+            "text": "I don't know how he is fighting."
+          },
+          {
+            "startTime": 19706.6,
+            "endTime": 19711.66,
+            "text": "He strikes half-heartedly at me in a foreign, artistic way."
+          },
+          {
+            "startTime": 19712.59,
+            "endTime": 19713.44,
+            "text": "He's tentative."
+          },
+          {
+            "startTime": 19713.88,
+            "endTime": 19714.56,
+            "text": "Slow."
+          },
+          {
+            "startTime": 19714.9,
+            "endTime": 19717.74,
+            "text": "But his timid fist gets my nose."
+          },
+          {
+            "startTime": 19719.64,
+            "endTime": 19721.38,
+            "text": "Rage overtakes me."
+          },
+          {
+            "startTime": 19722.32,
+            "endTime": 19723.92,
+            "text": "My face goes numb."
+          },
+          {
+            "startTime": 19724.61,
+            "endTime": 19726.2,
+            "text": "My heart thunders."
+          },
+          {
+            "startTime": 19726.6,
+            "endTime": 19727.84,
+            "text": "It's in my throat."
+          },
+          {
+            "startTime": 19728.4,
+            "endTime": 19730.06,
+            "text": "My veins prickle."
+          },
+          {
+            "startTime": 19731.3,
+            "endTime": 19733.62,
+            "text": "I break his nose with a straight."
+          },
+          {
+            "startTime": 19734,
+            "endTime": 19736.32,
+            "text": "God, my hands are strong."
+          },
+          {
+            "startTime": 19734.08,
+            "endTime": 19735.98,
+            "text": "God, my hands are so..."
+          },
+          {
+            "startTime": 19736.98,
+            "endTime": 19742.06,
+            "text": "He wails and ducks into me, grappling my arm into an odd angle."
+          },
+          {
+            "startTime": 19742.48,
+            "endTime": 19743.36,
+            "text": "It pops."
+          },
+          {
+            "startTime": 19744.08,
+            "endTime": 19745.66,
+            "text": "I use my forehead."
+          },
+          {
+            "startTime": 19746.26,
+            "endTime": 19749.16,
+            "text": "It takes him, just at the bridge of his nose."
+          },
+          {
+            "startTime": 19749.48,
+            "endTime": 19753.08,
+            "text": "I grab the back of his neck and hit him again with my forehead."
+          }
+        ]
+      }
+    },
+    {
+      "id": "leviathan-implied-activity-aftermath-only",
+      "source": "Leviathan Wakes",
+      "fingerprint": {
+        "version": 1,
+        "sha256": "b0432a16488fbf9e380216a72902e4ce6cc0a8393aee579c38bfa1f21c72accb",
+        "fileSize": 1095182402
+      },
+      "expected": {
+        "accepted": false,
+        "label": "sexual_implied_activity",
+        "notes": "Taxonomy-boundary case, not a consensual-lane complete_scene accept: this excerpt is ENTIRELY aftermath and pillow talk after sex already happened off-page ('half-nude', 'embarrassingly sudden erection', ending with 'They had sex again in...' cutting off mid-sentence into what follows). There is no ongoing sexual act described anywhere in this window -- the act is implied/faded, matching sexual_implied_activity's definition ('the act is certain, the description is absent'), not sexual_complete_scene's definition (a scene containing implied OR explicit activity from lead-in through return to non-sexual action -- this excerpt has no activity depicted within it at all, only its own aftermath and a forward reference to a second, undescribed instance). Under the app's own consensual-lane verifier prompt used by this harness (which only ever answers accepted=true/false for a complete_scene-style candidate), the correct answer is accepted=false, since there is no act to verify within this specific window. This case exists to check a candidate model does not hallucinate an ongoing act into a purely aftermath passage just because arousal/nudity words are present."
+      },
+      "transcript_window": {
+        "start_time": 55391.44,
+        "end_time": 55561.02,
+        "segments": [
+          {
+            "startTime": 55391.44,
+            "endTime": 55399.79,
+            "text": "first time wasn't just a fluke. Her room was laid out differently than his, and the unfamiliarity made"
+          },
+          {
+            "startTime": 55399.79,
+            "endTime": 55406.39,
+            "text": "him clumsy in the dark. He fumbled around for a few minutes in her small kitchen nook, looking for a"
+          },
+          {
+            "startTime": 55406.39,
+            "endTime": 55413.53,
+            "text": "glass. By the time he found it, filled it, and headed back into the bedroom, Naomi was sitting up in bed."
+          },
+          {
+            "startTime": 55413.53,
+            "endTime": 55420.55,
+            "text": "The sheet lay pooled on her lap. The sight of her half-nude in the dimly lit room gave him an"
+          },
+          {
+            "startTime": 55420.55,
+            "endTime": 55427.85,
+            "text": "embarrassingly sudden erection. Naomi panned her gaze up his body, pausing at his midsection,"
+          },
+          {
+            "startTime": 55428.27,
+            "endTime": 55435.61,
+            "text": "then at the water glass, and said, Is that for me? Holden didn't know which thing she was asking"
+          },
+          {
+            "startTime": 55435.61,
+            "endTime": 55448.88,
+            "text": "about, so he just said, Yes. You asleep? Naomi's face was on his belly, her breathing slow and deep, but to"
+          },
+          {
+            "startTime": 55448.88,
+            "endTime": 55458.12,
+            "text": "his surprise, she said, No. Can we talk? Naomi rolled off him and pulled herself up until her face lay next to"
+          },
+          {
+            "startTime": 55458.12,
+            "endTime": 55464.48,
+            "text": "his on the pillow. Her hair fell across her eyes, and Holden reached out and brushed it away in a move"
+          },
+          {
+            "startTime": 55464.48,
+            "endTime": 55468.82,
+            "text": "that felt so intimate and proprietary that he had to swallow a lump in his throat."
+          },
+          {
+            "startTime": 55470.38,
+            "endTime": 55479.58,
+            "text": "Are you about to get serious on me? She asked, her eyes half-lidded. Yeah, I am, he said, and kissed her forehead."
+          },
+          {
+            "startTime": 55481.06,
+            "endTime": 55487.78,
+            "text": "My last lover was over a year ago, she said. I'm a serial monogamist, so as far as I'm concerned,"
+          },
+          {
+            "startTime": 55488.04,
+            "endTime": 55493.84,
+            "text": "this is an exclusive rights deal until one of us decides it isn't. As long as I get advance"
+          },
+          {
+            "startTime": 55493.84,
+            "endTime": 55499.86,
+            "text": "warning that you've decided to end the deal, there won't be any hard feelings. I'm open to the idea of"
+          },
+          {
+            "startTime": 55499.86,
+            "endTime": 55505.76,
+            "text": "it being more than just sex, but in my experience, that will happen on its own if it's going to."
+          },
+          {
+            "startTime": 55506.52,
+            "endTime": 55510.22,
+            "text": "I have eggs in storage on Europa and Luna, if that matters to you."
+          },
+          {
+            "startTime": 55511.34,
+            "endTime": 55515.3,
+            "text": "She rolled up onto her elbow, her face hovering over his."
+          },
+          {
+            "startTime": 55516.3,
+            "endTime": 55519.18,
+            "text": "Did I cover all the bases? She asked."
+          },
+          {
+            "startTime": 55520.02,
+            "endTime": 55523.4,
+            "text": "No, he said, but I agree to the conditions."
+          },
+          {
+            "startTime": 55524.46,
+            "endTime": 55528.54,
+            "text": "She flopped onto her back, letting out a long, contented sigh."
+          },
+          {
+            "startTime": 55529.52,
+            "endTime": 55530.16,
+            "text": "Good."
+          },
+          {
+            "startTime": 55531.74,
+            "endTime": 55537.14,
+            "text": "Holden wanted to hold her, but he felt too hot and sticky with sweat, so he just reached down"
+          },
+          {
+            "startTime": 55537.14,
+            "endTime": 55543.48,
+            "text": "and held her hand instead. He wanted to tell her that this meant something, that it was already"
+          },
+          {
+            "startTime": 55543.48,
+            "endTime": 55549.24,
+            "text": "more than sex for him. But all the words he tried out in his head came off sounding phony"
+          },
+          {
+            "startTime": 55549.24,
+            "endTime": 55561.02,
+            "text": "or maudlin. Thank you, he said instead. But she was already snoring quietly. They had sex again in"
+          }
         ]
       }
     }
