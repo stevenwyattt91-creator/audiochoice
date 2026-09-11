@@ -902,6 +902,78 @@ Assert(abbreviationBetween.Count == 1,
         "A keyword-safety-net candidate's confident Terra accept was still sent to Sol.");
 }
 
+// ResolveMajorityVote: the three-vote combination (Terra plus two independent Sol calls)
+// that replaced a single Sol call fully overriding Terra's decision. Motivated by a real
+// rescan finding the same passage accepted by Terra on one call and rejected by Sol on
+// another with nothing else in the pipeline changed -- a single Sol call had the final word
+// on exactly the candidates (needsEscalation, keyword-safety-net rejections) that exist
+// because the first opinion was already uncertain.
+{
+    OpenAIContentAnalysisProvider.VerifiedSceneCandidate Vote(
+        bool accepted, double confidence, double start = 10, double end = 20,
+        string quote = "some quote") => new(
+        "candidate", accepted, false, accepted, accepted, start, end, confidence,
+        "description", quote);
+
+    // 2 accepts (Terra + one Sol) outvote 1 reject (the other Sol) -- a real majority, not
+    // unanimity, decides the outcome. This is the exact geometry that would have caught the
+    // real incident: Terra's own accept must not be silently discarded just because one Sol
+    // call happened to disagree.
+    var terraAcceptsSolSplits = OpenAIContentAnalysisProvider.ResolveMajorityVote(
+        "candidate",
+        Vote(accepted: true, confidence: .9),
+        [Vote(accepted: true, confidence: .88)],
+        [Vote(accepted: false, confidence: .3)]);
+    Assert(
+        terraAcceptsSolSplits is { Accepted: true },
+        "A 2-1 majority (Terra accept, one Sol accept, one Sol reject) did not resolve to " +
+        "accepted -- a real majority must decide the outcome, not require unanimity.");
+
+    // The reverse: 2 rejects (Terra + one Sol) outvote 1 accept.
+    var terraRejectsSolSplits = OpenAIContentAnalysisProvider.ResolveMajorityVote(
+        "candidate",
+        Vote(accepted: false, confidence: .3),
+        [Vote(accepted: false, confidence: .35)],
+        [Vote(accepted: true, confidence: .9)]);
+    Assert(
+        terraRejectsSolSplits is { Accepted: false },
+        "A 2-1 majority against acceptance (Terra reject, one Sol reject, one Sol accept) " +
+        "still resolved to accepted.");
+
+    // Unanimous accept resolves to accepted, using the highest-confidence accepting vote's
+    // own fields (boundary, quote) for the finalized result.
+    var unanimousAccept = OpenAIContentAnalysisProvider.ResolveMajorityVote(
+        "candidate",
+        Vote(accepted: true, confidence: .9, start: 10, end: 20, quote: "terra quote"),
+        [Vote(accepted: true, confidence: .97, start: 9, end: 21, quote: "most confident quote")],
+        [Vote(accepted: true, confidence: .86, start: 11, end: 19, quote: "third quote")]);
+    Assert(
+        unanimousAccept is { Accepted: true, Quote: "most confident quote" },
+        "A unanimous accept did not resolve to accepted using the most confident accepting " +
+        "vote's own boundary and quote.");
+
+    // Terra missing entirely (e.g. a candidate that only ever reaches Sol) still resolves
+    // from the two real Sol votes alone -- a missing vote must not count as a rejection by
+    // starvation.
+    var terraMissingSolAgrees = OpenAIContentAnalysisProvider.ResolveMajorityVote(
+        "candidate",
+        null,
+        [Vote(accepted: true, confidence: .9)],
+        [Vote(accepted: true, confidence: .88)]);
+    Assert(
+        terraMissingSolAgrees is { Accepted: true },
+        "Two agreeing Sol votes with no Terra vote at all did not resolve to accepted.");
+
+    // No votes at all (should not happen in practice, but must not throw or fabricate a
+    // result) returns null rather than a fabricated decision.
+    var noVotesAtAll = OpenAIContentAnalysisProvider.ResolveMajorityVote(
+        "candidate", null, [], []);
+    Assert(
+        noVotesAtAll is null,
+        "ResolveMajorityVote fabricated a decision when no vote at all was available for " +
+        "the candidate key.");
+}
+
 // Sexual-violence lane: a separate finalized label from the consensual scene lane, requiring
 // its own consent-related evidence, and mutually exclusive with it.
 {
@@ -1734,18 +1806,18 @@ Assert(retainedSceneEvents.Count == 1,
             $"Expected exactly one Terra call for the safety-net candidate but got " +
             $"{solSecondOpinionModelClient.TerraCallCount}.");
         Assert(
-            solSecondOpinionModelClient.SolCallCount == 1,
-            $"A safety-net candidate Terra rejected outright was not escalated to Sol for a " +
-            $"second opinion (got {solSecondOpinionModelClient.SolCallCount} Sol call(s), " +
-            "expected 1).");
+            solSecondOpinionModelClient.SolCallCount == 2,
+            $"A safety-net candidate Terra rejected outright was not given two independent " +
+            $"Sol votes as its majority-vote second opinion (got " +
+            $"{solSecondOpinionModelClient.SolCallCount} Sol call(s), expected 2).");
 
         var sceneEvent = solSecondOpinionResult.SingleOrDefault(
             item => item.EventID == ContentTaxonomy.Mappings["sexual_complete_scene"].EventID);
         Assert(
             sceneEvent is not null,
-            "Sol accepted the safety-net candidate on its second-opinion review, but no " +
-            "sexual_complete_scene event was produced -- Sol's override of Terra's rejection " +
-            "did not take effect.");
+            "Both Sol votes accepted the safety-net candidate (a 2-1 majority over Terra's " +
+            "rejection), but no sexual_complete_scene event was produced -- the majority " +
+            "vote's override of Terra's rejection did not take effect.");
     }
     finally
     {

@@ -144,7 +144,13 @@ public sealed class OpenAIProcessingOptions
     // lead-in," which was read narrowly enough to skip the actual kissing/buildup that leads
     // into a scene. A scan under the prior version must not be presented as though its
     // boundaries already reflected the wider reading.
-    public string ScannerVersion { get; init; } = "5.3-scene-boundary-includes-buildup";
+    //
+    // Bumped again: an escalated sexual-content candidate's outcome is now a three-vote
+    // majority (Terra plus two independent Sol calls) rather than a single Sol call
+    // overriding Terra outright, guarding against the same-passage-different-verdict
+    // variance a real rescan exposed on this pipeline. A scan made under the prior version
+    // had only one Sol opinion behind an escalated result, not a majority.
+    public string ScannerVersion { get; init; } = "5.4-sol-majority-vote";
     /// <summary>Only jobs in this lane may be claimed by this worker instance.</summary>
     public string ProcessingLane { get; init; } = ScanProcessingLanes.AzureOpenAI;
     /// <summary>
