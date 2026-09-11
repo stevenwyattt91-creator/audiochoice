@@ -955,6 +955,40 @@ Assert(abbreviationBetween.Count == 1,
         "Coalescing did not preserve each candidate's own first-pass lane.");
 }
 
+// Lane separation, keyword safety net: a real Luna-proposed sexual_complete_scene candidate
+// and a nearby keyword-safety-net seed (see AddUncoveredSexualCandidates) must also never be
+// merged into one Terra review window, for the same reason as the sexual_violence/consensual
+// separation above -- proven necessary by a real incident, not only a hypothetical one:
+// merging a seed with a real, tightly-bounded candidate nearby diluted a scene Terra had
+// confirmed cleanly on its own into a wider, noisier passage Terra then rejected outright,
+// which silently undid the scene the fix was meant to catch. This is a regression test for
+// that exact failure.
+{
+    var realSceneCandidateSegment = new TranscriptSegment(0, 5, "he bit down as she moaned against him");
+    var safetyNetSeedSegment = new TranscriptSegment(20, 25, "she blushed at the memory of that night");
+
+    var mixedLunaAndSeedCandidates = new[]
+    {
+        new OpenAIContentAnalysisProvider.SceneVerificationCandidate(
+            "real-luna-scene-1", 0, 5, [realSceneCandidateSegment], "sexual_complete_scene"),
+        new OpenAIContentAnalysisProvider.SceneVerificationCandidate(
+            "safety-net-seed-1", 20, 25, [safetyNetSeedSegment], "sexual_keyword_safety_net"),
+    };
+    var coalescedWithSeed = OpenAIContentAnalysisProvider.CoalesceSceneCandidates(
+        mixedLunaAndSeedCandidates);
+    Assert(
+        coalescedWithSeed.Count == 2,
+        $"A real Luna-proposed sexual_complete_scene candidate and a nearby keyword-safety-" +
+        $"net seed, only fifteen seconds apart, were merged into one Terra review window " +
+        $"(got {coalescedWithSeed.Count} window(s) instead of 2) -- this is the exact " +
+        "regression that silently hid a real missed-scene incident's confirmed event behind " +
+        "a diluted, wider passage Terra then rejected.");
+    Assert(
+        coalescedWithSeed.Select(item => item.FirstPassLane).Distinct().Count() == 2,
+        "Coalescing did not preserve the real Luna candidate's lane separately from the " +
+        "keyword-safety-net seed's own lane.");
+}
+
 var narrowSceneEvents = SceneEventPostProcessor.Process(
     [
         new ScanEvent(Guid.NewGuid(), 300, 308, completeSceneMapping.CategoryID,
@@ -1456,6 +1490,162 @@ Assert(retainedSceneEvents.Count == 1,
     finally
     {
         if (Directory.Exists(noDuplicateRoot)) Directory.Delete(noDuplicateRoot, true);
+    }
+}
+
+// Keyword safety net, regression for the real failure this fix originally introduced: a real
+// Luna-confirmed scene sitting close in time to an uncovered keyword-cue window (both inside
+// CoalesceSceneCandidates' 45-second merge gap) must NOT have its own Terra review diluted by
+// the nearby seed. Proven end-to-end: Luna proposes a real scene, the keyword scan also finds
+// an uncovered window sixteen seconds later, and Terra must still receive the real scene's
+// candidate on its own -- unmerged, at its own tight boundary -- exactly as it would if the
+// keyword safety net did not exist at all for this book.
+{
+    var laneIsolationRoot = Path.Combine(
+        Path.GetTempPath(), $"audiochoice-safety-net-lane-isolation-{Guid.NewGuid():N}");
+    try
+    {
+        var laneIsolationOptions = new OpenAIProcessingOptions
+        {
+            AnalysisModel = "gpt-5.6-luna",
+            SceneVerificationModel = "gpt-5.6-terra",
+            SceneEscalationModel = "gpt-5.6-sol",
+            ViolenceVerificationModel = "gpt-5.6-terra",
+            SolEscalationConfidenceThreshold = .95,
+            MinimumEventConfidence = .55,
+        };
+
+        // "kissed him slowly" triggers Luna's real-scene branch at 10-30s (see
+        // FixtureAnalysisModelClient.RespondToLuna). "spread her legs" is deliberately a
+        // second, independent keyword cue Luna's fixture answer does not cover on its own,
+        // landing at 46-50s -- sixteen seconds past the real scene's own end, inside the
+        // 45-second merge gap, so this is exactly the geometry that caused the regression.
+        var laneIsolationSegments = new[]
+        {
+            new TranscriptSegment(0, 5, "Damn it, he muttered, and slammed the car door.", new[]
+            {
+                new TranscriptWord("Damn", 0.2, 0.6),
+                new TranscriptWord("it,", 0.6, 0.8),
+            }),
+            new TranscriptSegment(5, 10, "They argued for a while about the schedule."),
+            new TranscriptSegment(
+                10, 20, "She crossed the room and kissed him slowly by the fire.", new[]
+                {
+                    new TranscriptWord("She", 10.0, 10.3),
+                    new TranscriptWord("crossed", 10.3, 10.7),
+                    new TranscriptWord("the", 10.7, 10.9),
+                    new TranscriptWord("room", 10.9, 11.3),
+                    new TranscriptWord("and", 11.3, 11.5),
+                    new TranscriptWord("kissed", 11.5, 12.0),
+                    new TranscriptWord("him", 12.0, 12.2),
+                    new TranscriptWord("slowly", 12.2, 12.7),
+                    new TranscriptWord("by", 12.7, 12.9),
+                    new TranscriptWord("the", 12.9, 13.1),
+                    new TranscriptWord("fire.", 13.1, 13.6),
+                }),
+            new TranscriptSegment(
+                20, 30, "Clothes fell away as they moved together on the rug for a while.", new[]
+                {
+                    new TranscriptWord("Clothes", 20.0, 20.5),
+                    new TranscriptWord("fell", 20.5, 20.8),
+                    new TranscriptWord("away", 20.8, 21.2),
+                    new TranscriptWord("as", 21.2, 21.4),
+                    new TranscriptWord("they", 21.4, 21.6),
+                    new TranscriptWord("moved", 21.6, 22.0),
+                    new TranscriptWord("together", 22.0, 22.6),
+                    new TranscriptWord("on", 22.6, 22.8),
+                    new TranscriptWord("the", 22.8, 23.0),
+                    new TranscriptWord("rug", 23.0, 23.5),
+                    new TranscriptWord("for", 23.5, 23.7),
+                    new TranscriptWord("a", 23.7, 23.8),
+                    new TranscriptWord("while.", 25.8, 26.3),
+                }),
+            new TranscriptSegment(30, 40, "Morning came, and with it the ordinary day."),
+        };
+        // The geometry here has to satisfy three distance rules at once, or this test
+        // silently proves nothing (as it did the first two times this fixture was built):
+        //   1. CandidateWindows' OWN internal merge (it merges two keyword matches' expanded
+        //      ±12-segment windows together if they overlap) must NOT already combine the
+        //      real scene's own "kissed" cue (at segment index 2, expanding to index 15)
+        //      with the trigger phrase below -- otherwise AddUncoveredSexualCandidates never
+        //      even sees two separate windows to begin with. The trigger must sit past
+        //      segment index 27 for its own -12 expansion to land past index 15.
+        //   2. AddUncoveredSexualCandidates' "already covered" check (30s proximity) must
+        //      NOT suppress the seed once it is a separate window -- its start time must
+        //      land more than 30s past the real scene's own end (t=30).
+        //   3. CoalesceSceneCandidates' merge gap (45s) must still treat the seed as close
+        //      enough to merge with the real scene if the two were left in the same lane --
+        //      this is what actually reproduces the original bug when lane separation is
+        //      disabled, and is what distinguishes this test from a geometry that would
+        //      pass regardless of whether the fix exists at all.
+        // 30 one-second filler segments (indices 5-34) push the trigger to index 35, whose
+        // own expanded window starts at index 23 -- past the real scene's cue window (ends
+        // at 15) for rule 1, while its start time (t=61, filler index 18) sits inside the
+        // narrow 60-75s band rules 2 and 3 both require.
+        var fillerSegments = Enumerable.Range(0, 30)
+            .Select(index => new TranscriptSegment(
+                43 + index * 1.0, 43 + index * 1.0 + 0.8,
+                $"An ordinary, unrelated sentence number {index} about the weather."))
+            .ToArray();
+        var triggerSegment = new TranscriptSegment(
+            104, 108, "Years later she recalled how he spread her legs that night.", new[]
+            {
+                new TranscriptWord("Years", 104.0, 104.4),
+                new TranscriptWord("later", 104.4, 104.8),
+                new TranscriptWord("she", 104.8, 105.0),
+                new TranscriptWord("recalled", 105.0, 105.5),
+                new TranscriptWord("how", 105.5, 105.7),
+                new TranscriptWord("he", 105.7, 105.9),
+                new TranscriptWord("spread", 105.9, 106.3),
+                new TranscriptWord("her", 106.3, 106.5),
+                new TranscriptWord("legs", 106.5, 106.9),
+                new TranscriptWord("that", 106.9, 107.1),
+                new TranscriptWord("night.", 107.1, 107.6),
+            });
+        laneIsolationSegments = laneIsolationSegments
+            .Concat(fillerSegments)
+            .Append(triggerSegment)
+            .ToArray();
+
+        var laneIsolationModelClient = new FixtureAnalysisModelClient();
+        var laneIsolationDataPaths = new AudioChoiceDataPaths(
+            new FakeWebHostEnvironment(laneIsolationRoot),
+            new ConfigurationBuilder().Build());
+        var laneIsolationProvider = new OpenAIContentAnalysisProvider(
+            laneIsolationModelClient, laneIsolationOptions, laneIsolationDataPaths,
+            NullLogger<OpenAIContentAnalysisProvider>.Instance);
+
+        var laneIsolationResult = await laneIsolationProvider.Analyze(
+            laneIsolationSegments, null, CancellationToken.None);
+
+        var realSceneEvent = laneIsolationResult.SingleOrDefault(
+            item => item.EventID == ContentTaxonomy.Mappings["sexual_complete_scene"].EventID);
+        Assert(
+            realSceneEvent is not null,
+            "A real Luna-confirmed scene disappeared entirely once a keyword-safety-net " +
+            "seed existed nearby -- this is the exact regression the fix's own lane " +
+            "isolation exists to prevent.");
+        Assert(
+            realSceneEvent!.StartTime < 30 && realSceneEvent.EndTime <= 30,
+            $"The real scene's confirmed boundary ({realSceneEvent.StartTime}-" +
+            $"{realSceneEvent.EndTime}) extended past its own passage into the nearby " +
+            "keyword-safety-net seed's window -- the two were coalesced into one wider, " +
+            "diluted Terra review rather than kept in separate lanes.");
+        // The real discriminator between "kept separate" and "merged": two independent
+        // Terra calls (the real scene, and the safety-net seed) versus one call covering
+        // both. The fixture's Terra mock always accepts unconditionally regardless of what
+        // is merged into its input, so only the call count -- not the returned decision --
+        // actually distinguishes the fixed geometry from the regressed one.
+        Assert(
+            laneIsolationModelClient.TerraCallCount == 2,
+            $"Expected two independent Terra calls (the real scene and the nearby keyword-" +
+            $"safety-net seed reviewed separately) but got {laneIsolationModelClient.TerraCallCount} " +
+            "-- the two candidates were coalesced into one merged Terra review window " +
+            "instead of being kept in their own lanes.");
+    }
+    finally
+    {
+        if (Directory.Exists(laneIsolationRoot)) Directory.Delete(laneIsolationRoot, true);
     }
 }
 

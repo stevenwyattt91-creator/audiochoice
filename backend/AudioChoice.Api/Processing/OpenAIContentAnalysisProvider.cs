@@ -111,7 +111,7 @@ public sealed class OpenAIContentAnalysisProvider(
                 .OrderBy(item => item.StartTime)
                 .ToArray();
             var lambdaVerified = await VerifyCompleteSexualScenes(
-                lambdaEvents, segments,
+                lambdaEvents, segments, new HashSet<Guid>(),
                 progress => reportProgress?.Invoke(.75 + progress * .25),
                 cancellationToken);
             var lambdaResult = SceneEventPostProcessor.Process(lambdaVerified, segments).ToArray();
@@ -176,9 +176,11 @@ public sealed class OpenAIContentAnalysisProvider(
         // torture, violence involving children or animals, and suicide/self-harm.
         uniqueEvents = ApplyNarrowViolencePolicy(uniqueEvents);
         uniqueEvents = await VerifyGraphicViolence(uniqueEvents, segments, cancellationToken);
-        uniqueEvents = AddUncoveredSexualCandidates(uniqueEvents, segments).ToArray();
+        var (supplementedEvents, keywordSafetyNetSeedIDs) =
+            AddUncoveredSexualCandidates(uniqueEvents, segments);
+        uniqueEvents = supplementedEvents.ToArray();
         var verifiedEvents = await VerifyCompleteSexualScenes(
-            uniqueEvents, segments,
+            uniqueEvents, segments, keywordSafetyNetSeedIDs,
             progress => reportProgress?.Invoke(.75 + progress * .25),
             cancellationToken);
         var result = SceneEventPostProcessor.Process(verifiedEvents, segments).ToArray();
@@ -1030,11 +1032,20 @@ Candidates:
     /// Skips a window Luna already has a nearby sexual-content event for, so a book Luna
     /// covered thoroughly pays no extra Terra requests for this pass -- only a genuine gap
     /// in Luna's own coverage produces a new candidate.
+    ///
+    /// Returns the seeded events' own IDs alongside the supplemented list so
+    /// <see cref="VerifyCompleteSexualScenes"/> can give them their own Terra-review lane,
+    /// distinct from a real Luna-proposed candidate. Coalescing a seed together with a real,
+    /// tightly-bounded candidate nearby was diluting a scene Terra had confirmed cleanly on
+    /// its own into a wider, noisier passage Terra then rejected outright -- actively hiding
+    /// the very scene this method exists to catch, not merely failing to add a new one.
     /// </remarks>
-    private IReadOnlyList<ScanEvent> AddUncoveredSexualCandidates(
-        IReadOnlyList<ScanEvent> events,
-        IReadOnlyList<TranscriptSegment> segments)
+    private (IReadOnlyList<ScanEvent> Events, IReadOnlySet<Guid> SeedIDs)
+        AddUncoveredSexualCandidates(
+            IReadOnlyList<ScanEvent> events,
+            IReadOnlyList<TranscriptSegment> segments)
     {
+        var seedIDs = new HashSet<Guid>();
         var completeSceneMapping = ContentTaxonomy.Mappings["sexual_complete_scene"];
         var sexualEventIDs = new[]
         {
@@ -1049,7 +1060,7 @@ Candidates:
             .ToArray();
 
         var keywordWindows = DeterministicContentDetector.CandidateWindows(segments);
-        if (keywordWindows.Count == 0) return events;
+        if (keywordWindows.Count == 0) return (events, seedIDs);
 
         var supplemented = new List<ScanEvent>(events);
         var added = 0;
@@ -1071,14 +1082,16 @@ Candidates:
             if (alreadyCovered) continue;
 
             var description = "Sexual references or suggestive dialogue detected";
+            var seedID = Guid.NewGuid();
             supplemented.Add(new ScanEvent(
-                Guid.NewGuid(), windowStart, windowEnd,
+                seedID, windowStart, windowEnd,
                 completeSceneMapping.CategoryID, completeSceneMapping.GroupID,
                 completeSceneMapping.EventID, .35,
                 StableEventKey(
                     completeSceneMapping, windowStart, windowEnd, description,
                     $"keyword-safety-net-{index}"),
                 description, null, null));
+            seedIDs.Add(seedID);
             added += 1;
         }
 
@@ -1090,12 +1103,13 @@ Candidates:
                 "Luna's own pass had not already covered.",
                 added, keywordWindows.Count);
         }
-        return supplemented;
+        return (supplemented, seedIDs);
     }
 
     private async Task<IReadOnlyList<ScanEvent>> VerifyCompleteSexualScenes(
         IReadOnlyList<ScanEvent> events,
         IReadOnlyList<TranscriptSegment> segments,
+        IReadOnlySet<Guid> keywordSafetyNetSeedIDs,
         Action<double>? reportProgress,
         CancellationToken cancellationToken)
     {
@@ -1130,8 +1144,17 @@ Candidates:
                 // below. This only keeps a real assault scene's supporting context separate
                 // from an unrelated nearby consensual scene when the two are coalesced for
                 // review, so one request is never asked to judge both at once.
+                //
+                // A keyword-safety-net seed (see AddUncoveredSexualCandidates) gets a third,
+                // equally isolated lane for the same reason: coalescing it together with a
+                // real Luna-proposed candidate nearby was diluting a scene Terra had already
+                // confirmed cleanly on its own into a wider, noisier passage Terra then
+                // rejected outright.
                 item.EventID == sexualViolenceMapping.EventID
-                    ? "sexual_violence" : "sexual_complete_scene"))
+                    ? "sexual_violence"
+                    : keywordSafetyNetSeedIDs.Contains(item.Id)
+                        ? "sexual_keyword_safety_net"
+                        : "sexual_complete_scene"))
             .ToArray();
 
         var retained = events
