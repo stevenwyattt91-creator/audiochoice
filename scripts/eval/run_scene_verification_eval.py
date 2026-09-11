@@ -1,23 +1,31 @@
 #!/usr/bin/env python3
 """Shadow-evaluates a candidate OpenAI-compatible model (e.g. the self-hosted Qwen3.6-27B
-vLLM sidecar) against ground_truth_scenes.json, using the REAL Terra/Sol consensual-lane
-verification prompt this app runs in production.
+vLLM sidecar) against ground_truth_scenes.json, using the REAL production prompts this app
+runs for each category a case belongs to.
 
 Why this exists
 ----------------
 Phase 4/5 of the self-host feasibility checklist: before any production wiring is even
 considered, this answers one question on real data -- does a candidate model classify this
-app's exact sexual-content taxonomy (accept/reject, and the buildup-inclusive boundary rule)
-the way the already-verified OpenAI pipeline does, on the exact real scenes this session
-found and fixed.
+app's exact content taxonomy the way the already-verified OpenAI pipeline does, on real
+scenes.
 
-The prompt text embedded below (CONSENSUAL_LANE_INSTRUCTIONS + CLOSING_INSTRUCTIONS) is
-copied verbatim from OpenAIContentAnalysisProvider.cs's VerifySceneBatch/
-SceneVerificationClosingInstructions as of PR #74 (5.4-sol-majority-vote). If those prompts
-change, update this copy too -- there is no runtime coupling between this script and the C#
-source, so the two can silently drift apart if the app's own prompt changes without this
-being updated. Grep OpenAIContentAnalysisProvider.cs for "SceneVerificationClosingInstructions"
-to check.
+Three prompt paths, dispatched by each case's "category" field:
+  - No category (or "sexual"): the Terra/Sol consensual-lane sexual-scene verification
+    prompt, copied verbatim from OpenAIContentAnalysisProvider.cs's VerifySceneBatch /
+    SceneVerificationClosingInstructions (as of PR #74, 5.4-sol-majority-vote).
+  - category starts with "violence_": the dedicated graphic-violence/torture verification
+    prompt, copied verbatim from VerifyViolenceBatch. This is the one other category in the
+    app that gets a real second-opinion verification pass, distinct from Luna's first pass.
+  - category starts with "self_harm": Luna's own first-pass classifier prompt (the general
+    "Act as an audiobook content-preference classifier..." instructions), because self-harm
+    has NO dedicated verification pass in the app at all -- Luna's first-pass judgment is
+    the only judgment this category ever gets. This also means self-harm has no written
+    rubric distinguishing e.g. a passing reference from an active attempt, unlike violence
+    and sexual content -- see the self_harm cases' own notes for why that gap matters.
+
+If any of these prompts change in the C# source, update the copy here too -- there is no
+runtime coupling between this script and the app, so the two can silently drift apart.
 
 Usage
 -----
@@ -129,9 +137,92 @@ Respond with ONLY a single JSON object, no other text, matching exactly this sha
 Return exactly one entry in "candidates" for the one candidateKey given below.
 """
 
+# Copied verbatim from OpenAIContentAnalysisProvider.cs's VerifyViolenceBatch. This is the
+# app's other real second-opinion verification pass (violence_graphic/violence_torture),
+# separate from Luna's first-pass classification.
+VIOLENCE_VERIFICATION_INSTRUCTIONS = """
+Decide, for each candidate, whether the narration dwells on the physical detail of a body being
+damaged. That is the only question.
+
+Confirm it when the passage describes flesh being cut, torn or opened; blood flowing or pooling;
+bones breaking; organs, entrails or brain matter; a limb or head severed; or a wound described
+closely enough that a listener pictures the injury itself.
+
+Do not confirm an act of violence stated without that detail. A punch, a slap, a shove, a
+slammed door, a stabbing or shooting reported without describing the wound, a battle or duel, a
+threat, someone being hurt or killed, a body discovered, bruises, scars, blood mentioned in
+passing, medical treatment, pain, an injury's aftermath, grief, or fantasy peril are all not
+confirmed. Captivity and beating are not confirmed either, however unpleasant: a character tied
+to a chair and punched does not qualify.
+
+Most fight scenes are not confirmed. If you are weighing whether the description is detailed
+enough, it is not. Answer for every candidateKey.
+"""
+
+VIOLENCE_RESPONSE_FORMAT_INSTRUCTIONS = """
+Respond with ONLY a single JSON object, no other text, matching exactly this shape:
+{"candidates": [{"candidateKey": string, "dwellsOnPhysicalDamage": boolean,
+"confidence": number}]}
+Return exactly one entry in "candidates" for the one candidateKey given below.
+"""
+
+# Copied verbatim from OpenAIContentAnalysisProvider.cs's Luna first-pass classifier
+# (BuildAnalysisPrompt's closing instructions) -- self-harm has no dedicated verification
+# pass anywhere in the app, so this first-pass prompt is the ONLY judgment this category
+# ever receives in production. Deliberately narrowed here to a single self-harm-labeled
+# candidate rather than a full transcript batch, matching how a sexual/violence candidate is
+# already isolated for review in this harness -- self-harm just never gets that isolation in
+# the real pipeline, which is itself part of what these cases are testing.
+SELF_HARM_CLASSIFIER_INSTRUCTIONS = """
+Act as an audiobook content-preference classifier. Identify only events that are explicitly
+supported by the supplied transcript.
+
+Decide whether this passage should be labeled with one of: self_harm_reference (a passing
+mention of self-harm or suicide, not depicted), self_harm_suicidal_thoughts (a character
+expressing thoughts of suicide), self_harm_suicide_attempt (an active attempt at suicide or
+serious self-harm depicted or clearly imminent), self_harm_depiction (self-harm actively
+depicted, not suicide). If none of these apply -- including if the passage merely uses a
+word like "suicide" or "kill myself" in a non-literal, genre-trope, or unrelated context --
+return accepted=false and label null.
+
+No word is content by itself. A word is evidence only in the sense the passage actually uses
+it -- judge the passage by what is actually happening in it, never by the presence of a word.
+"""
+
+SELF_HARM_RESPONSE_FORMAT_INSTRUCTIONS = """
+Respond with ONLY a single JSON object, no other text, matching exactly this shape:
+{"candidates": [{"candidateKey": string, "accepted": boolean, "label": string or null,
+"confidence": number, "safeDescription": string}]}
+Return exactly one entry in "candidates" for the one candidateKey given below.
+"""
+
 
 def build_prompt(case: dict) -> str:
     window = case["transcript_window"]
+    category = case.get("category", "sexual")
+    candidate_base = {
+        "candidateKey": case["id"],
+        "startTime": window["start_time"],
+        "endTime": window["end_time"],
+        "segments": window["segments"],
+    }
+
+    if category.startswith("violence_"):
+        return (
+            VIOLENCE_VERIFICATION_INSTRUCTIONS
+            + VIOLENCE_RESPONSE_FORMAT_INSTRUCTIONS
+            + "\nCandidates:\n"
+            + json.dumps([candidate_base])
+        )
+
+    if category.startswith("self_harm"):
+        return (
+            SELF_HARM_CLASSIFIER_INSTRUCTIONS
+            + SELF_HARM_RESPONSE_FORMAT_INSTRUCTIONS
+            + "\nCandidates:\n"
+            + json.dumps([candidate_base])
+        )
+
     candidate = {
         "candidateKey": case["id"],
         "proposedStartTime": window["start_time"],
@@ -194,6 +285,7 @@ def extract_json_object(text: str) -> dict | None:
 
 def score_case(case: dict, parsed: dict | None) -> dict:
     expected = case["expected"]
+    category = case.get("category", "sexual")
     outcome = {"id": case["id"], "raw_parsed": parsed}
 
     # A case whose expected["accepted"] is explicitly None is a genuinely ambiguous
@@ -207,8 +299,11 @@ def score_case(case: dict, parsed: dict | None) -> dict:
             return outcome
         candidates = parsed.get("candidates") or []
         result = candidates[0] if candidates else {}
+        accepted_field = "dwellsOnPhysicalDamage" if category.startswith("violence_") \
+            else "accepted"
         outcome["verdict"] = (
-            f"AMBIGUOUS (not scored -- model answered accepted={result.get('accepted')}, "
+            f"AMBIGUOUS (not scored -- model answered "
+            f"{accepted_field}={result.get(accepted_field)}, "
             f"see case notes for why this has no single correct answer)"
         )
         return outcome
@@ -223,7 +318,10 @@ def score_case(case: dict, parsed: dict | None) -> dict:
         return outcome
 
     result = candidates[0]
-    accepted = result.get("accepted")
+    # The violence-verification prompt's own response shape uses dwellsOnPhysicalDamage
+    # rather than accepted, matching VerifyViolenceBatch's real schema exactly.
+    accepted = result.get("dwellsOnPhysicalDamage") if category.startswith("violence_") \
+        else result.get("accepted")
     expected_accepted = expected["accepted"]
 
     if accepted != expected_accepted:
@@ -290,10 +388,20 @@ def main() -> int:
         print(f"[{case['id']}] {outcome['verdict']}")
         if parsed and parsed.get("candidates"):
             result = parsed["candidates"][0]
-            print(f"    accepted={result.get('accepted')} "
-                  f"startTime={result.get('startTime')} "
-                  f"confidence={result.get('confidence')} "
-                  f"safeDescription={result.get('safeDescription')!r}")
+            category = case.get("category", "sexual")
+            if category.startswith("violence_"):
+                print(f"    dwellsOnPhysicalDamage={result.get('dwellsOnPhysicalDamage')} "
+                      f"confidence={result.get('confidence')}")
+            elif category.startswith("self_harm"):
+                print(f"    accepted={result.get('accepted')} "
+                      f"label={result.get('label')} "
+                      f"confidence={result.get('confidence')} "
+                      f"safeDescription={result.get('safeDescription')!r}")
+            else:
+                print(f"    accepted={result.get('accepted')} "
+                      f"startTime={result.get('startTime')} "
+                      f"confidence={result.get('confidence')} "
+                      f"safeDescription={result.get('safeDescription')!r}")
         elif parsed is None:
             print(f"    raw response (truncated): {raw_response[:300]!r}")
         print()
