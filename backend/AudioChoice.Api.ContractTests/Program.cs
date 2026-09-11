@@ -1273,6 +1273,192 @@ Assert(retainedSceneEvents.Count == 1,
     }
 }
 
+// Keyword safety net: a fixture where Luna's own first pass reports nothing at all for a
+// passage that a listener actually reported missed in production (biting, grinding,
+// "between my legs" -- see AddUncoveredSexualCandidates' own remarks for the real incident
+// this guards against). The high-recall keyword scan must still surface it as a candidate,
+// Terra must still get a chance to confirm it, and the final result must contain a
+// sexual_complete_scene event Luna alone would never have produced.
+{
+    var safetyNetRoot = Path.Combine(
+        Path.GetTempPath(), $"audiochoice-safety-net-checkpoints-{Guid.NewGuid():N}");
+    try
+    {
+        var safetyNetOptions = new OpenAIProcessingOptions
+        {
+            AnalysisModel = "gpt-5.6-luna",
+            SceneVerificationModel = "gpt-5.6-terra",
+            SceneEscalationModel = "gpt-5.6-sol",
+            ViolenceVerificationModel = "gpt-5.6-terra",
+            SolEscalationConfidenceThreshold = .95,
+            MinimumEventConfidence = .55,
+        };
+
+        // Luna's fixture answer for this exact input is "no events at all" (see
+        // FixtureAnalysisModelClient.RespondToLuna's fallback) -- the same as the real
+        // incident, where Luna's own first pass proposed nothing for this passage.
+        var safetyNetSegments = new[]
+        {
+            new TranscriptSegment(0, 5, "Morning came quietly at first."),
+            new TranscriptSegment(
+                10, 20, "He grabbed her hands again and bit down as she moaned against him.", new[]
+                {
+                    new TranscriptWord("He", 10.0, 10.2),
+                    new TranscriptWord("grabbed", 10.2, 10.6),
+                    new TranscriptWord("her", 10.6, 10.8),
+                    new TranscriptWord("hands", 10.8, 11.1),
+                    new TranscriptWord("again", 11.1, 11.4),
+                    new TranscriptWord("and", 11.4, 11.5),
+                    new TranscriptWord("bit", 11.5, 11.7),
+                    new TranscriptWord("down", 11.7, 11.9),
+                    new TranscriptWord("as", 11.9, 12.0),
+                    new TranscriptWord("she", 12.0, 12.2),
+                    new TranscriptWord("moaned", 12.2, 12.6),
+                    new TranscriptWord("against", 12.6, 12.9),
+                    new TranscriptWord("him.", 12.9, 27.0),
+                }),
+            new TranscriptSegment(30, 40, "Morning came, and with it the ordinary day."),
+        };
+
+        var safetyNetModelClient = new FixtureAnalysisModelClient();
+        var safetyNetDataPaths = new AudioChoiceDataPaths(
+            new FakeWebHostEnvironment(safetyNetRoot),
+            new ConfigurationBuilder().Build());
+        var safetyNetProvider = new OpenAIContentAnalysisProvider(
+            safetyNetModelClient, safetyNetOptions, safetyNetDataPaths,
+            NullLogger<OpenAIContentAnalysisProvider>.Instance);
+
+        var safetyNetResult = await safetyNetProvider.Analyze(
+            safetyNetSegments, null, CancellationToken.None);
+
+        Assert(
+            safetyNetModelClient.LunaSawZeroEventsAtLeastOnce,
+            "This test's own premise -- that Luna proposed nothing for the fixture's " +
+            "missed-scene passage -- was not exercised; the fixture stopped matching " +
+            "FixtureAnalysisModelClient.RespondToLuna's no-events branch.");
+
+        var safetyNetEvent = safetyNetResult.SingleOrDefault(
+            item => item.EventID == ContentTaxonomy.Mappings["sexual_complete_scene"].EventID);
+        Assert(
+            safetyNetEvent is not null,
+            "The keyword safety net did not surface a sexual_complete_scene event for a " +
+            "passage Luna's own first pass reported no events for at all.");
+        Assert(
+            safetyNetModelClient.TerraCallCount >= 1,
+            "The keyword safety net's candidate was never sent to Terra for confirmation.");
+
+        // The event must still have gone through real word-snap confirmation -- this is not
+        // a raw, unconfirmed keyword guess reaching a listener directly.
+        var safetyNetWordTimes = safetyNetSegments
+            .Where(segment => segment.Words is not null)
+            .SelectMany(segment => segment.Words!)
+            .SelectMany(word => new[] { word.StartTime, word.EndTime })
+            .ToHashSet();
+        Assert(
+            safetyNetWordTimes.Contains(safetyNetEvent!.StartTime) &&
+                safetyNetWordTimes.Contains(safetyNetEvent.EndTime),
+            $"The keyword safety net's confirmed event boundary " +
+            $"({safetyNetEvent.StartTime}-{safetyNetEvent.EndTime}) did not land on any of " +
+            "the fixture transcript's own word timings -- it reached the listener as an " +
+            "unconfirmed keyword guess rather than a Terra-confirmed event.");
+    }
+    finally
+    {
+        if (Directory.Exists(safetyNetRoot)) Directory.Delete(safetyNetRoot, true);
+    }
+}
+
+// Keyword safety net, negative case: when Luna already covers a passage with its own
+// sexual-content event, the keyword scan must not add a second, duplicate candidate for the
+// same window -- proving the "already covered" skip in AddUncoveredSexualCandidates actually
+// suppresses overlap rather than only reducing it. Reuses the original scene fixture, whose
+// keyword-cue words ("kissed") sit inside the same passage Luna already proposes an event for.
+{
+    var noDuplicateRoot = Path.Combine(
+        Path.GetTempPath(), $"audiochoice-safety-net-no-duplicate-{Guid.NewGuid():N}");
+    try
+    {
+        var noDuplicateOptions = new OpenAIProcessingOptions
+        {
+            AnalysisModel = "gpt-5.6-luna",
+            SceneVerificationModel = "gpt-5.6-terra",
+            SceneEscalationModel = "gpt-5.6-sol",
+            ViolenceVerificationModel = "gpt-5.6-terra",
+            SolEscalationConfidenceThreshold = .95,
+            MinimumEventConfidence = .55,
+        };
+        var noDuplicateSegments = new[]
+        {
+            new TranscriptSegment(0, 5, "Damn it, he muttered, and slammed the car door.", new[]
+            {
+                new TranscriptWord("Damn", 0.2, 0.6),
+                new TranscriptWord("it,", 0.6, 0.8),
+            }),
+            new TranscriptSegment(5, 10, "They argued for a while about the schedule."),
+            new TranscriptSegment(
+                10, 20, "She crossed the room and kissed him slowly by the fire.", new[]
+                {
+                    new TranscriptWord("She", 10.0, 10.3),
+                    new TranscriptWord("crossed", 10.3, 10.7),
+                    new TranscriptWord("the", 10.7, 10.9),
+                    new TranscriptWord("room", 10.9, 11.3),
+                    new TranscriptWord("and", 11.3, 11.5),
+                    new TranscriptWord("kissed", 11.5, 12.0),
+                    new TranscriptWord("him", 12.0, 12.2),
+                    new TranscriptWord("slowly", 12.2, 12.7),
+                    new TranscriptWord("by", 12.7, 12.9),
+                    new TranscriptWord("the", 12.9, 13.1),
+                    new TranscriptWord("fire.", 13.1, 13.6),
+                }),
+            new TranscriptSegment(
+                20, 30, "Clothes fell away as they moved together on the rug for a while.", new[]
+                {
+                    new TranscriptWord("Clothes", 20.0, 20.5),
+                    new TranscriptWord("fell", 20.5, 20.8),
+                    new TranscriptWord("away", 20.8, 21.2),
+                    new TranscriptWord("as", 21.2, 21.4),
+                    new TranscriptWord("they", 21.4, 21.6),
+                    new TranscriptWord("moved", 21.6, 22.0),
+                    new TranscriptWord("together", 22.0, 22.6),
+                    new TranscriptWord("on", 22.6, 22.8),
+                    new TranscriptWord("the", 22.8, 23.0),
+                    new TranscriptWord("rug", 23.0, 23.5),
+                    new TranscriptWord("for", 23.5, 23.7),
+                    new TranscriptWord("a", 23.7, 23.8),
+                    new TranscriptWord("while.", 25.8, 26.3),
+                }),
+            new TranscriptSegment(30, 40, "Morning came, and with it the ordinary day."),
+        };
+        var noDuplicateModelClient = new FixtureAnalysisModelClient();
+        var noDuplicateDataPaths = new AudioChoiceDataPaths(
+            new FakeWebHostEnvironment(noDuplicateRoot),
+            new ConfigurationBuilder().Build());
+        var noDuplicateProvider = new OpenAIContentAnalysisProvider(
+            noDuplicateModelClient, noDuplicateOptions, noDuplicateDataPaths,
+            NullLogger<OpenAIContentAnalysisProvider>.Instance);
+
+        var noDuplicateResult = await noDuplicateProvider.Analyze(
+            noDuplicateSegments, null, CancellationToken.None);
+
+        Assert(
+            noDuplicateResult.Count(
+                item => item.EventID == ContentTaxonomy.Mappings["sexual_complete_scene"].EventID) == 1,
+            $"A passage Luna already covered with its own sexual_complete_scene event " +
+            $"produced {noDuplicateResult.Count(item => item.EventID == ContentTaxonomy.Mappings["sexual_complete_scene"].EventID)} " +
+            "such events after the keyword safety net ran, rather than the original single " +
+            "event -- the safety net added a duplicate for a window Luna already covered.");
+        Assert(
+            noDuplicateModelClient.TerraCallCount == 1,
+            $"The keyword safety net sent an extra Terra request ({noDuplicateModelClient.TerraCallCount} " +
+            "total) for a passage Luna's own pass already covered -- the already-covered " +
+            "skip did not suppress the overlapping keyword window.");
+    }
+    finally
+    {
+        if (Directory.Exists(noDuplicateRoot)) Directory.Delete(noDuplicateRoot, true);
+    }
+}
+
 // Negative-control regression guard: a book with nothing objectionable in it must produce
 // (near-)zero events after the full pipeline overhaul, so a precision regression (the
 // pipeline over-firing on ordinary prose) is caught here rather than discovered by a
@@ -2859,6 +3045,7 @@ sealed class FixtureAnalysisModelClient : IAnalysisModelClient
     public int LunaCallCount { get; private set; }
     public int TerraCallCount { get; private set; }
     public int SolCallCount { get; private set; }
+    public bool LunaSawZeroEventsAtLeastOnce { get; private set; }
 
     public Task<AnalysisModelResponse> CompleteJson(
         string model,
@@ -2901,6 +3088,11 @@ sealed class FixtureAnalysisModelClient : IAnalysisModelClient
         }
         if (!input.Contains("kissed him slowly", StringComparison.Ordinal))
         {
+            // Exactly what the real incident's Luna batch returned for the passage a
+            // listener reported missed: nothing at all, even though it read the whole
+            // passage intact in one batch. This is the branch the keyword safety net exists
+            // to catch.
+            LunaSawZeroEventsAtLeastOnce = true;
             return """{"events":[]}""";
         }
         return """
@@ -2938,8 +3130,13 @@ sealed class FixtureAnalysisModelClient : IAnalysisModelClient
         }
 
         var isSexualViolenceLane = input.Contains("sexual-violence skip range", StringComparison.Ordinal);
+        var isSafetyNetLane = input.Contains("bit down as she moaned", StringComparison.Ordinal);
         var nonconsensualEvidence = isSexualViolenceLane ? "true" : "false";
-        var quote = isSexualViolenceLane ? "refused to let go" : "crossed the room and kissed";
+        var quote = isSexualViolenceLane
+            ? "refused to let go"
+            : isSafetyNetLane
+                ? "bit down as she moaned"
+                : "crossed the room and kissed";
         var safeDescription = isSexualViolenceLane
             ? "Sexual violence is described"
             : "Sustained consensual sexual activity";

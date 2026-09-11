@@ -176,6 +176,7 @@ public sealed class OpenAIContentAnalysisProvider(
         // torture, violence involving children or animals, and suicide/self-harm.
         uniqueEvents = ApplyNarrowViolencePolicy(uniqueEvents);
         uniqueEvents = await VerifyGraphicViolence(uniqueEvents, segments, cancellationToken);
+        uniqueEvents = AddUncoveredSexualCandidates(uniqueEvents, segments).ToArray();
         var verifiedEvents = await VerifyCompleteSexualScenes(
             uniqueEvents, segments,
             progress => reportProgress?.Invoke(.75 + progress * .25),
@@ -998,6 +999,99 @@ Candidates:
         [property: JsonPropertyName("candidateKey")] string CandidateKey,
         [property: JsonPropertyName("dwellsOnPhysicalDamage")] bool DwellsOnPhysicalDamage,
         [property: JsonPropertyName("confidence")] double Confidence);
+
+    /// <summary>
+    /// A safety net for Luna's own recall on sexual content: runs the same high-recall
+    /// keyword windows the Lambda-first pass already relies on
+    /// (<see cref="DeterministicContentDetector.CandidateWindows"/>) across the whole
+    /// transcript, and seeds an unconfirmed <c>sexual_complete_scene</c> candidate for any
+    /// window Luna did not already cover with a sexual-content event of its own.
+    /// </summary>
+    /// <remarks>
+    /// Luna reads full paragraph-aligned batches and is free to use judgement the keyword
+    /// scan cannot -- that is why its output is trusted as-is everywhere else in this file.
+    /// But a judgement call can miss a passage that builds gradually rather than opening
+    /// with unambiguous vocabulary. The keyword scan is wrong constantly on its own -- that
+    /// is why <see cref="DeterministicContentDetector"/>'s doc comment warns its cues are
+    /// "guesses, not findings" -- so a seed this method adds is deliberately never a final
+    /// event a listener could see on its own. Labeled <c>sexual_complete_scene</c> rather
+    /// than a weaker label specifically so <see cref="VerifyCompleteSexualScenes"/>'s own
+    /// <c>retained</c> filter strips the raw seed unconditionally, the same way it already
+    /// strips every complete-scene claim pending Terra's decision: only a label Terra/Sol
+    /// goes on to confirm at their normal 0.85-confidence bar ever reaches a listener. A
+    /// seed Terra rejects simply disappears, exactly like a real rejected candidate.
+    ///
+    /// Built directly rather than through <see cref="AddEvent"/> because that method's
+    /// confidence floor (<see cref="EffectiveMinimumConfidence"/>, 0.55 outside Lambda-first
+    /// mode) exists to gate what a listener sees, and a seed is not that -- gating it there
+    /// would silently drop every seed this method exists to create, the same as if Luna's
+    /// own first pass had never proposed it at all.
+    ///
+    /// Skips a window Luna already has a nearby sexual-content event for, so a book Luna
+    /// covered thoroughly pays no extra Terra requests for this pass -- only a genuine gap
+    /// in Luna's own coverage produces a new candidate.
+    /// </remarks>
+    private IReadOnlyList<ScanEvent> AddUncoveredSexualCandidates(
+        IReadOnlyList<ScanEvent> events,
+        IReadOnlyList<TranscriptSegment> segments)
+    {
+        var completeSceneMapping = ContentTaxonomy.Mappings["sexual_complete_scene"];
+        var sexualEventIDs = new[]
+        {
+            "sexual_suggestive_dialogue", "sexual_references", "sexual_nudity",
+            "sexual_implied_activity", "sexual_explicit_activity", "sexual_complete_scene",
+            "sexual_violence"
+        }.Select(label => ContentTaxonomy.Mappings[label].EventID).ToHashSet();
+        var lunaSexualRanges = events
+            .Where(item => sexualEventIDs.Contains(item.EventID))
+            .Select(item => (item.StartTime, item.EndTime))
+            .OrderBy(item => item.StartTime)
+            .ToArray();
+
+        var keywordWindows = DeterministicContentDetector.CandidateWindows(segments);
+        if (keywordWindows.Count == 0) return events;
+
+        var supplemented = new List<ScanEvent>(events);
+        var added = 0;
+        for (var index = 0; index < keywordWindows.Count; index += 1)
+        {
+            var range = keywordWindows[index];
+            var window = segments.Skip(range.StartIndex)
+                .Take(range.EndExclusive - range.StartIndex).ToArray();
+            if (window.Length == 0) continue;
+            var windowStart = window[0].StartTime;
+            var windowEnd = window[^1].EndTime;
+
+            // A window Luna already has a sexual-content event anywhere near is coverage,
+            // not a gap -- the same proximity margin AnchorToTranscript already uses for
+            // "this claim and this quote are describing the same moment."
+            var alreadyCovered = lunaSexualRanges.Any(covered =>
+                covered.EndTime >= windowStart - QuoteProximitySeconds &&
+                covered.StartTime <= windowEnd + QuoteProximitySeconds);
+            if (alreadyCovered) continue;
+
+            var description = "Sexual references or suggestive dialogue detected";
+            supplemented.Add(new ScanEvent(
+                Guid.NewGuid(), windowStart, windowEnd,
+                completeSceneMapping.CategoryID, completeSceneMapping.GroupID,
+                completeSceneMapping.EventID, .35,
+                StableEventKey(
+                    completeSceneMapping, windowStart, windowEnd, description,
+                    $"keyword-safety-net-{index}"),
+                description, null, null));
+            added += 1;
+        }
+
+        if (added > 0)
+        {
+            logger.LogInformation(
+                "Keyword safety net seeded {AddedCount} unconfirmed sexual-content " +
+                "candidate(s) for Terra review, out of {WindowCount} high-recall windows " +
+                "Luna's own pass had not already covered.",
+                added, keywordWindows.Count);
+        }
+        return supplemented;
+    }
 
     private async Task<IReadOnlyList<ScanEvent>> VerifyCompleteSexualScenes(
         IReadOnlyList<ScanEvent> events,
