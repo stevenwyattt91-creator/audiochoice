@@ -131,7 +131,13 @@ public sealed class OpenAIProcessingOptions
     // Terra/Sol verification lane with a consent-specific evidence requirement. A scan made
     // under the prior version never had a chance to report sexual_violence at all, so it
     // must not be presented as though it had.
-    public string ScannerVersion { get; init; } = "5.1-sexual-violence";
+    //
+    // Bumped again for the sexual-content keyword safety net (AddUncoveredSexualCandidates):
+    // a scan made under the prior version never ran the high-recall keyword windows against
+    // Luna's own coverage gaps, so it may be missing a scene the safety net would have
+    // caught. A cached scan_result from before this change must not be presented as though
+    // it already had that second chance.
+    public string ScannerVersion { get; init; } = "5.2-sexual-safety-net";
     /// <summary>Only jobs in this lane may be claimed by this worker instance.</summary>
     public string ProcessingLane { get; init; } = ScanProcessingLanes.AzureOpenAI;
     /// <summary>
