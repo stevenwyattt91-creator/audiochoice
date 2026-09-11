@@ -31,8 +31,14 @@ public sealed class OpenAIContentAnalysisProvider(
     // did not exist under the prior version -- a cached answer from before this change never
     // considered whether the passage was non-consensual at all.
     private const string BaseAnalysisPromptVersion = "5.1-sexual-violence";
-    private const string SceneVerificationVersion = "5.1-sexual-violence";
-    private const string SceneEscalationVersion = "5.1-sexual-violence";
+    // Bumped for the keyword safety net's lane isolation fix: a candidate whose window
+    // happens to match a checkpoint cached under the prior version may have been built
+    // before a safety-net seed's own lane existed, when it could still get coalesced into a
+    // real Luna candidate's review window and rejected as a diluted, wider passage. Reusing
+    // that cached rejection here would silently keep serving the exact bug this fix exists
+    // to close, even after the code itself is corrected.
+    private const string SceneVerificationVersion = "5.2-sexual-safety-net-lane-isolation";
+    private const string SceneEscalationVersion = "5.2-sexual-safety-net-lane-isolation";
     private readonly string _checkpointFolder = dataPaths.AnalysisCheckpoints;
     public string ScannerVersion => options.ScannerVersion;
 
