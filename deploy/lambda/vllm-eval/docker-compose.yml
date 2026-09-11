@@ -1,0 +1,63 @@
+# Isolated evaluation sidecar for a self-hosted open-weight model (Qwen3.6-27B), run
+# alongside -- and fully independent of -- the production scanner/whisper stack in
+# ../docker-compose.yml. This exists to answer one question before anything in the real
+# pipeline changes: does a self-hosted model classify this app's sexual-content taxonomy
+# (7-level ladder, consent distinction, scene boundaries) as accurately as OpenAI's
+# gpt-5.6-terra/sol, on the real scenes this session already found and fixed.
+#
+# Not part of the scan pipeline. Nothing here is reachable by IContentAnalysisProvider or
+# any production request path -- this only serves an OpenAI-compatible completions API on
+# a separate port (8002) for manual/scripted evaluation. Not started by the production
+# `docker compose ... up` command, and safe to stop/remove at any time without touching a
+# real scan.
+#
+# Usage (from this directory, on the Lambda host):
+#   docker compose up -d
+#   curl http://127.0.0.1:8002/v1/models
+#   docker compose down          # tear down when not actively evaluating
+#
+# GPU budget: this host's single A100 40GB already runs the production whisper container
+# (idle ~2.5GB, headroom under load). --gpu-memory-utilization 0.70 caps this service at
+# roughly 28GB. Measured directly on this host: AWQ INT4 weight loading alone takes just
+# under 20GB, so anything below ~0.55 leaves no room for a KV cache at all and the engine
+# refuses to start ("No available memory for the cache blocks"). 0.70 leaves ~8GB for KV
+# cache/activations at --max-model-len below, and ~12GB of the card free for whisper and
+# host overhead. Raise or lower only after confirming actual headroom with `nvidia-smi`
+# under concurrent load from both services.
+#
+# --max-num-seqs 32: Qwen3.6 is a hybrid Mamba/attention (GDN) model -- every concurrent
+# decode sequence needs its own Mamba cache block, separate from the regular KV cache.
+# Measured directly on this host at gpu-memory-utilization=0.70: only 94 Mamba cache
+# blocks are available, well under vLLM's default max_num_seqs of 256, which made the
+# engine refuse to start. This is a single-request evaluation sidecar, not a
+# high-concurrency production server, so 32 is far more than the eval scripts need --
+# raise only if a specific eval run needs more parallel requests, and confirm against the
+# real available-block count logged at startup first.
+services:
+  qwen-eval:
+    image: vllm/vllm-openai:v0.29.0-cu129
+    restart: unless-stopped
+    network_mode: host
+    ipc: host
+    volumes:
+      # Reuses the same cache the whisper container already persists to, so the ~15GB
+      # quantized model survives nightly instance replacement instead of re-downloading.
+      - /lambda/nfs/audiochoice-worker-state/huggingface-cache:/root/.cache/huggingface
+    environment:
+      # Only needed if the chosen model repo is gated on Hugging Face; leave unset otherwise.
+      HUGGING_FACE_HUB_TOKEN: ${HUGGING_FACE_HUB_TOKEN:-}
+    command: >
+      --model QuantTrio/Qwen3.6-27B-AWQ
+      --quantization awq
+      --port 8002
+      --max-model-len 32768
+      --gpu-memory-utilization 0.70
+      --max-num-seqs 32
+      --served-model-name qwen3.6-27b-eval
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
