@@ -37,8 +37,14 @@ public sealed class OpenAIContentAnalysisProvider(
     // real Luna candidate's review window and rejected as a diluted, wider passage. Reusing
     // that cached rejection here would silently keep serving the exact bug this fix exists
     // to close, even after the code itself is corrected.
-    private const string SceneVerificationVersion = "5.2-sexual-safety-net-lane-isolation";
-    private const string SceneEscalationVersion = "5.2-sexual-safety-net-lane-isolation";
+    //
+    // Bumped again: a keyword-safety-net candidate's Terra rejection now escalates to Sol
+    // for a second opinion (see NeedsSolReview's remarks), which a cached Terra-only
+    // checkpoint from before this change never had a chance to do.
+    private const string SceneVerificationVersion =
+        "5.2-sexual-safety-net-sol-second-opinion";
+    private const string SceneEscalationVersion =
+        "5.2-sexual-safety-net-sol-second-opinion";
     private readonly string _checkpointFolder = dataPaths.AnalysisCheckpoints;
     public string ScannerVersion => options.ScannerVersion;
 
@@ -1209,11 +1215,16 @@ Candidates:
                 (TerraIndex: result.Index, Decision: decision)))
             .ToArray();
         // Only what is genuinely ambiguous or borderline reaches Sol: Terra's own
-        // needsEscalation flag, or an accepted scene whose confidence fell short of
-        // SolEscalationConfidenceThreshold. A confident accept is not re-paid-for at Sol --
-        // see NeedsSolReview's remarks for why that does not mean it goes unconfirmed.
+        // needsEscalation flag, an accepted scene whose confidence fell short of
+        // SolEscalationConfidenceThreshold, or a rejection of a keyword-safety-net candidate
+        // (see NeedsSolReview's remarks for why that last case gets a second opinion rather
+        // than being final on Terra's single call). A confident accept is not re-paid-for at
+        // Sol -- that does not mean it goes unconfirmed, see NeedsSolReview's remarks.
         var escalationCandidates = terraDecisions
-            .Where(item => NeedsSolReview(item.Decision))
+            .Where(item => sourceCandidates.TryGetValue(
+                item.Decision.CandidateKey, out var candidateSource) &&
+                NeedsSolReview(
+                    item.Decision, candidateSource.FirstPassLane == "sexual_keyword_safety_net"))
             .Select(item => sourceCandidates.TryGetValue(
                     item.Decision.CandidateKey, out var source)
                 ? new SolEscalationCandidate(item.TerraIndex, source)
@@ -1424,19 +1435,36 @@ Candidates:
     /// </summary>
     /// <remarks>
     /// True for Terra's own <c>needsEscalation</c> flag, or for an accepted scene whose
-    /// confidence fell short of <paramref name="confidenceThreshold"/>. A rejected candidate
-    /// (neither accepted nor flagged for escalation) needs nothing further -- it was never
-    /// going to produce a scene event either way. A confident accept that skips Sol is not
-    /// skipping confirmation: the boundary confirmation against the transcript's own words in
-    /// <see cref="TryConfirmSceneBoundary"/> still runs for it, exactly as it does for a
-    /// Sol-reviewed candidate, using Terra's own reported quote.
+    /// confidence fell short of <paramref name="confidenceThreshold"/>. A confident accept
+    /// that skips Sol is not skipping confirmation: the boundary confirmation against the
+    /// transcript's own words in <see cref="TryConfirmSceneBoundary"/> still runs for it,
+    /// exactly as it does for a Sol-reviewed candidate, using Terra's own reported quote.
+    ///
+    /// An ordinary rejected candidate (neither accepted nor flagged for escalation) needs
+    /// nothing further -- it was never going to produce a scene event either way, and
+    /// re-litigating every Terra "no" at Sol would multiply cost without changing an outcome
+    /// Terra was clear about.
+    ///
+    /// <paramref name="isKeywordSafetyNetCandidate"/> is the one exception: a rejection of a
+    /// candidate Luna's own first pass never proposed at all (see
+    /// <see cref="AddUncoveredSexualCandidates"/>) is not "Terra was clear about this" in the
+    /// same sense -- it is the pipeline's only chance to catch something Luna missed
+    /// entirely, decided by a single call with no seed/temperature control over the model's
+    /// own call-to-call variance. A rescan of ACOTAR Part 1 during this fix's own
+    /// verification showed the same passage accepted by Terra on one call and rejected on
+    /// another with nothing else in the pipeline changed. Giving Sol -- the stricter, final
+    /// arbiter tier -- one independent second opinion on a safety-net rejection costs one
+    /// extra call only on the rare passage the keyword scan actually flags as uncovered, not
+    /// on the whole book.
     /// </remarks>
-    internal static bool NeedsSolReview(VerifiedSceneCandidate decision, double confidenceThreshold) =>
+    internal static bool NeedsSolReview(
+        VerifiedSceneCandidate decision, double confidenceThreshold, bool isKeywordSafetyNetCandidate) =>
         decision.NeedsEscalation ||
-        (decision.Accepted && decision.Confidence < confidenceThreshold);
+        (decision.Accepted && decision.Confidence < confidenceThreshold) ||
+        (isKeywordSafetyNetCandidate && !decision.Accepted);
 
-    private bool NeedsSolReview(VerifiedSceneCandidate decision) =>
-        NeedsSolReview(decision, options.SolEscalationConfidenceThreshold);
+    private bool NeedsSolReview(VerifiedSceneCandidate decision, bool isKeywordSafetyNetCandidate) =>
+        NeedsSolReview(decision, options.SolEscalationConfidenceThreshold, isKeywordSafetyNetCandidate);
 
     /// <summary>
     /// The two lanes' finalized confidence floor. Kept at the pre-existing 0.85 rather than

@@ -860,23 +860,46 @@ Assert(abbreviationBetween.Count == 1,
 
     // Terra's own needsEscalation flag always sends it to Sol, regardless of confidence.
     Assert(
-        OpenAIContentAnalysisProvider.NeedsSolReview(Decision(false, true, .99), threshold),
+        OpenAIContentAnalysisProvider.NeedsSolReview(
+            Decision(false, true, .99), threshold, isKeywordSafetyNetCandidate: false),
         "A candidate Terra flagged needsEscalation was not sent to Sol.");
 
     // A confident accept at or above the threshold skips Sol.
     Assert(
-        !OpenAIContentAnalysisProvider.NeedsSolReview(Decision(true, false, .97), threshold),
+        !OpenAIContentAnalysisProvider.NeedsSolReview(
+            Decision(true, false, .97), threshold, isKeywordSafetyNetCandidate: false),
         "A confident Terra accept above the threshold was still sent to Sol.");
 
     // An accept just below the threshold still needs Sol's review.
     Assert(
-        OpenAIContentAnalysisProvider.NeedsSolReview(Decision(true, false, .90), threshold),
+        OpenAIContentAnalysisProvider.NeedsSolReview(
+            Decision(true, false, .90), threshold, isKeywordSafetyNetCandidate: false),
         "A Terra accept below the confidence threshold was not sent to Sol.");
 
-    // A rejected candidate (neither accepted nor flagged) needs nothing further.
+    // An ordinary candidate's rejection (neither accepted nor flagged) needs nothing further.
     Assert(
-        !OpenAIContentAnalysisProvider.NeedsSolReview(Decision(false, false, .99), threshold),
+        !OpenAIContentAnalysisProvider.NeedsSolReview(
+            Decision(false, false, .99), threshold, isKeywordSafetyNetCandidate: false),
         "A candidate Terra rejected outright was sent to Sol anyway.");
+
+    // A keyword-safety-net candidate's rejection DOES need Sol's second opinion -- this is
+    // the one exception, since it is the pipeline's only chance to catch something Luna
+    // missed entirely and a single Terra call has no seed/temperature control over the
+    // model's own call-to-call variance (see NeedsSolReview's remarks for the real incident
+    // that motivated this).
+    Assert(
+        OpenAIContentAnalysisProvider.NeedsSolReview(
+            Decision(false, false, .99), threshold, isKeywordSafetyNetCandidate: true),
+        "A keyword-safety-net candidate's outright Terra rejection was not given a second " +
+        "opinion from Sol.");
+
+    // A keyword-safety-net candidate Terra confidently accepted still skips Sol -- the
+    // safety-net-specific rule only adds a second look at a rejection, not at an accept
+    // that already cleared the ordinary confidence bar.
+    Assert(
+        !OpenAIContentAnalysisProvider.NeedsSolReview(
+            Decision(true, false, .97), threshold, isKeywordSafetyNetCandidate: true),
+        "A keyword-safety-net candidate's confident Terra accept was still sent to Sol.");
 }
 
 // Sexual-violence lane: a separate finalized label from the consensual scene lane, requiring
@@ -1646,6 +1669,154 @@ Assert(retainedSceneEvents.Count == 1,
     finally
     {
         if (Directory.Exists(laneIsolationRoot)) Directory.Delete(laneIsolationRoot, true);
+    }
+}
+
+// Keyword safety net, Sol second opinion: a safety-net candidate Terra rejects outright must
+// still reach Sol for a second, independent look -- and if Sol accepts it, the event must be
+// produced despite Terra's own "no". An ordinary (non-safety-net) Terra rejection must NOT
+// reach Sol at all, so this also proves the second-opinion rule is scoped to the safety net
+// specifically, not a general "always double-check a rejection" change.
+{
+    var solSecondOpinionRoot = Path.Combine(
+        Path.GetTempPath(), $"audiochoice-safety-net-sol-second-opinion-{Guid.NewGuid():N}");
+    try
+    {
+        var solSecondOpinionOptions = new OpenAIProcessingOptions
+        {
+            AnalysisModel = "gpt-5.6-luna",
+            SceneVerificationModel = "gpt-5.6-terra",
+            SceneEscalationModel = "gpt-5.6-sol",
+            ViolenceVerificationModel = "gpt-5.6-terra",
+            SolEscalationConfidenceThreshold = .95,
+            MinimumEventConfidence = .55,
+        };
+
+        // Luna's fixture answer for this exact input is "no events at all" -- the keyword
+        // scan is this passage's only source of a candidate, exactly the safety net's
+        // intended case.
+        var solSecondOpinionSegments = new[]
+        {
+            new TranscriptSegment(0, 5, "Morning came quietly at first."),
+            new TranscriptSegment(
+                10, 20, "He grabbed her hands again and bit down as she moaned against him.", new[]
+                {
+                    new TranscriptWord("He", 10.0, 10.2),
+                    new TranscriptWord("grabbed", 10.2, 10.6),
+                    new TranscriptWord("her", 10.6, 10.8),
+                    new TranscriptWord("hands", 10.8, 11.1),
+                    new TranscriptWord("again", 11.1, 11.4),
+                    new TranscriptWord("and", 11.4, 11.5),
+                    new TranscriptWord("bit", 11.5, 11.7),
+                    new TranscriptWord("down", 11.7, 11.9),
+                    new TranscriptWord("as", 11.9, 12.0),
+                    new TranscriptWord("she", 12.0, 12.2),
+                    new TranscriptWord("moaned", 12.2, 12.6),
+                    new TranscriptWord("against", 12.6, 12.9),
+                    new TranscriptWord("him.", 12.9, 27.0),
+                }),
+            new TranscriptSegment(30, 40, "Morning came, and with it the ordinary day."),
+        };
+
+        var solSecondOpinionModelClient = new SolSecondOpinionFixtureModelClient();
+        var solSecondOpinionDataPaths = new AudioChoiceDataPaths(
+            new FakeWebHostEnvironment(solSecondOpinionRoot),
+            new ConfigurationBuilder().Build());
+        var solSecondOpinionProvider = new OpenAIContentAnalysisProvider(
+            solSecondOpinionModelClient, solSecondOpinionOptions, solSecondOpinionDataPaths,
+            NullLogger<OpenAIContentAnalysisProvider>.Instance);
+
+        var solSecondOpinionResult = await solSecondOpinionProvider.Analyze(
+            solSecondOpinionSegments, null, CancellationToken.None);
+
+        Assert(
+            solSecondOpinionModelClient.TerraCallCount == 1,
+            $"Expected exactly one Terra call for the safety-net candidate but got " +
+            $"{solSecondOpinionModelClient.TerraCallCount}.");
+        Assert(
+            solSecondOpinionModelClient.SolCallCount == 1,
+            $"A safety-net candidate Terra rejected outright was not escalated to Sol for a " +
+            $"second opinion (got {solSecondOpinionModelClient.SolCallCount} Sol call(s), " +
+            "expected 1).");
+
+        var sceneEvent = solSecondOpinionResult.SingleOrDefault(
+            item => item.EventID == ContentTaxonomy.Mappings["sexual_complete_scene"].EventID);
+        Assert(
+            sceneEvent is not null,
+            "Sol accepted the safety-net candidate on its second-opinion review, but no " +
+            "sexual_complete_scene event was produced -- Sol's override of Terra's rejection " +
+            "did not take effect.");
+    }
+    finally
+    {
+        if (Directory.Exists(solSecondOpinionRoot)) Directory.Delete(solSecondOpinionRoot, true);
+    }
+}
+
+// Keyword safety net, Sol second opinion negative case: an ORDINARY (non-safety-net) Terra
+// rejection must not be escalated to Sol at all, proving the second-opinion rule stays scoped
+// to safety-net candidates rather than becoming a general "always double-check a rejection"
+// change that would double Terra/Sol spend on every ordinary rejected candidate in the book.
+{
+    var ordinaryRejectionRoot = Path.Combine(
+        Path.GetTempPath(), $"audiochoice-ordinary-rejection-no-sol-{Guid.NewGuid():N}");
+    try
+    {
+        var ordinaryRejectionOptions = new OpenAIProcessingOptions
+        {
+            AnalysisModel = "gpt-5.6-luna",
+            SceneVerificationModel = "gpt-5.6-terra",
+            SceneEscalationModel = "gpt-5.6-sol",
+            ViolenceVerificationModel = "gpt-5.6-terra",
+            SolEscalationConfidenceThreshold = .95,
+            MinimumEventConfidence = .55,
+        };
+        // "gave a knowing smile" is Luna's real (non-safety-net) proposed candidate in this
+        // fixture client -- Luna itself proposed it, so it is not a keyword-safety-net seed.
+        var ordinaryRejectionSegments = new[]
+        {
+            new TranscriptSegment(0, 5, "Morning came quietly at first."),
+            new TranscriptSegment(
+                10, 20, "She gave a knowing smile and looked away.", new[]
+                {
+                    new TranscriptWord("She", 10.0, 10.2),
+                    new TranscriptWord("gave", 10.2, 10.5),
+                    new TranscriptWord("a", 10.5, 10.6),
+                    new TranscriptWord("knowing", 10.6, 11.0),
+                    new TranscriptWord("smile", 11.0, 11.4),
+                    new TranscriptWord("and", 11.4, 11.6),
+                    new TranscriptWord("looked", 11.6, 12.0),
+                    new TranscriptWord("away.", 12.0, 12.4),
+                }),
+            new TranscriptSegment(30, 40, "Morning came, and with it the ordinary day."),
+        };
+
+        var ordinaryRejectionModelClient = new SolSecondOpinionFixtureModelClient();
+        var ordinaryRejectionDataPaths = new AudioChoiceDataPaths(
+            new FakeWebHostEnvironment(ordinaryRejectionRoot),
+            new ConfigurationBuilder().Build());
+        var ordinaryRejectionProvider = new OpenAIContentAnalysisProvider(
+            ordinaryRejectionModelClient, ordinaryRejectionOptions, ordinaryRejectionDataPaths,
+            NullLogger<OpenAIContentAnalysisProvider>.Instance);
+
+        var ordinaryRejectionResult = await ordinaryRejectionProvider.Analyze(
+            ordinaryRejectionSegments, null, CancellationToken.None);
+
+        Assert(
+            ordinaryRejectionModelClient.SolCallCount == 0,
+            $"An ordinary Luna-proposed candidate's outright Terra rejection was escalated " +
+            $"to Sol anyway (got {ordinaryRejectionModelClient.SolCallCount} Sol call(s), " +
+            "expected 0) -- the second-opinion rule must be scoped to keyword-safety-net " +
+            "candidates only.");
+        Assert(
+            !ordinaryRejectionResult.Any(
+                item => item.EventID == ContentTaxonomy.Mappings["sexual_complete_scene"].EventID),
+            "An ordinary candidate Terra rejected outright still produced a scene event.");
+    }
+    finally
+    {
+        if (Directory.Exists(ordinaryRejectionRoot))
+            Directory.Delete(ordinaryRejectionRoot, true);
     }
 }
 
@@ -3341,6 +3512,106 @@ sealed class FixtureAnalysisModelClient : IAnalysisModelClient
            "quote":"{{quote}}"}
         ]}
         """;
+    }
+}
+
+/// <summary>
+/// A fixture model client dedicated to the Sol-second-opinion tests: Luna always proposes
+/// nothing at all (so any candidate reaching Terra came from the keyword safety net or, for
+/// the negative-case fixture below, is confirmed to be Luna's own real proposal instead),
+/// Terra always rejects outright, and Sol always accepts. This isolates exactly one thing --
+/// whether a rejection reaches Sol at all -- from every other decision the shared
+/// <see cref="FixtureAnalysisModelClient"/> makes for its own, differently-shaped tests.
+/// </summary>
+sealed class SolSecondOpinionFixtureModelClient : IAnalysisModelClient
+{
+    public string ProviderName => "fixture";
+    public int TerraCallCount { get; private set; }
+    public int SolCallCount { get; private set; }
+
+    public Task<AnalysisModelResponse> CompleteJson(
+        string model,
+        string input,
+        string schemaName,
+        System.Text.Json.Nodes.JsonObject schema,
+        CancellationToken cancellationToken)
+    {
+        var json = schemaName switch
+        {
+            "audiochoice_scan_events" => RespondToLuna(input),
+            "audiochoice_violence_verification" => """{"candidates":[]}""",
+            "audiochoice_scene_verification" => RespondToSceneVerification(model, input),
+            _ => throw new InvalidOperationException($"Unexpected schema {schemaName}."),
+        };
+        return Task.FromResult(new AnalysisModelResponse(json));
+    }
+
+    /// <summary>
+    /// Luna proposes the "knowing smile" passage as a real candidate (for the negative-case
+    /// fixture, which needs a genuine, non-safety-net Terra rejection to prove it does NOT
+    /// reach Sol) and nothing at all for the "bit down as she moaned" passage (the positive
+    /// case, where only the keyword safety net produces a candidate).
+    /// </summary>
+    private static string RespondToLuna(string input)
+    {
+        if (input.Contains("knowing smile", StringComparison.Ordinal))
+        {
+            return """
+            {"events":[
+              {"label":"sexual_implied_activity","startTime":10,"endTime":20,"confidence":0.8,
+               "safeDescription":"An intimate encounter is implied","profanityWord":null,
+               "quote":"knowing smile"},
+              {"label":"sexual_complete_scene","startTime":10,"endTime":20,"confidence":0.8,
+               "safeDescription":"A sustained intimate encounter","profanityWord":null,
+               "quote":"knowing smile"}
+            ]}
+            """;
+        }
+        return """{"events":[]}""";
+    }
+
+    /// <summary>
+    /// Terra always rejects outright (accepted=false, needsEscalation=false) regardless of
+    /// which candidate it is reviewing -- the test's whole point is to isolate what happens
+    /// to a Terra "no" depending on whether Sol is later given a second opinion, not to
+    /// exercise Terra's own decision logic.
+    /// </summary>
+    private string RespondToSceneVerification(string model, string input)
+    {
+        if (model == "gpt-5.6-sol")
+        {
+            SolCallCount += 1;
+            var candidateKey = ExtractCandidateKey(input);
+            return $$"""
+            {"candidates":[
+              {"candidateKey":"{{candidateKey}}","accepted":true,"needsEscalation":false,
+               "directSexualActEvidence":true,"sustainedBeyondKissing":true,
+               "nonconsensualEvidence":false,"startTime":10,"endTime":27,"confidence":0.9,
+               "safeDescription":"Sustained consensual sexual activity",
+               "quote":"bit down as she moaned"}
+            ]}
+            """;
+        }
+
+        TerraCallCount += 1;
+        var terraCandidateKey = ExtractCandidateKey(input);
+        return $$"""
+        {"candidates":[
+          {"candidateKey":"{{terraCandidateKey}}","accepted":false,"needsEscalation":false,
+           "directSexualActEvidence":false,"sustainedBeyondKissing":false,
+           "nonconsensualEvidence":false,"startTime":10,"endTime":27,"confidence":0.3,
+           "safeDescription":"Rejected","quote":""}
+        ]}
+        """;
+    }
+
+    private static string ExtractCandidateKey(string input)
+    {
+        var candidateKeyStart = input.IndexOf("\"candidateKey\":\"", StringComparison.Ordinal);
+        if (candidateKeyStart < 0) return "unknown";
+        var valueStart = candidateKeyStart + "\"candidateKey\":\"".Length;
+        var valueEnd = input.IndexOf('"', valueStart);
+        return valueEnd > valueStart ? input[valueStart..valueEnd] : "unknown";
     }
 }
 
