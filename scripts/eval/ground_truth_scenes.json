@@ -8020,6 +8020,1339 @@
           }
         ]
       }
+    },
+    {
+      "id": "misery-explicit-graphic-violence-amputation",
+      "source": "Misery",
+      "fingerprint": {
+        "version": 1,
+        "sha256": "5dda35c38c5d15695a719a1a05da94065c56b005fef0b650af3ce183322e5fea",
+        "fileSize": 697047477
+      },
+      "category": "violence_graphic",
+      "expected": {
+        "accepted": true,
+        "label": "violence_graphic",
+        "notes": "Textbook positive for violence_graphic under the app's own definition ('the narration must dwell on the physical detail of a body being damaged... blood flowing... bones breaking... a wound described closely enough that a listener pictures the injury'). An axe amputation described in extended, dwelt-on physical detail (bone squealing against the blade, the severed foot's toes still spasming, cauterization with a torch, blood pouring, the stump blackening). If a candidate model does not confidently flag this, it is not viable for this category regardless of performance elsewhere -- this is as unambiguous a positive as the taxonomy has."
+      },
+      "transcript_window": {
+        "start_time": 28853.04,
+        "end_time": 29195.57,
+        "segments": [
+          {
+            "startTime": 28853.04,
+            "endTime": 28857.38,
+            "text": "He could see random flowers of rust blooming on this side before the goop covered it."
+          },
+          {
+            "startTime": 28858.96,
+            "endTime": 28862.74,
+            "text": "Annie, Annie, oh, Annie, please, please, no, please, don't, Annie."
+          },
+          {
+            "startTime": 28862.9,
+            "endTime": 28863.96,
+            "text": "I swear to you, I'll be good."
+          },
+          {
+            "startTime": 28864.1,
+            "endTime": 28865.2,
+            "text": "I swear to God, I'll be good."
+          },
+          {
+            "startTime": 28865.36,
+            "endTime": 28866.84,
+            "text": "Please give me a chance to be good."
+          },
+          {
+            "startTime": 28866.98,
+            "endTime": 28868.8,
+            "text": "Oh, Annie, please, let me please be good."
+          },
+          {
+            "startTime": 28869.7,
+            "endTime": 28873.16,
+            "text": "Just a little pain, then this nasty business will be behind us for good, Paul."
+          },
+          {
+            "startTime": 28874.42,
+            "endTime": 28877.16,
+            "text": "She tossed the open bottle of betadine over her shoulder,"
+          },
+          {
+            "startTime": 28877.7,
+            "endTime": 28881.7,
+            "text": "her face blank and empty, and yet so inarguably solid."
+          },
+          {
+            "startTime": 28882.46,
+            "endTime": 28886.22,
+            "text": "She slid her right hand down the handle of the axe almost to the steel head."
+          },
+          {
+            "startTime": 28886.8,
+            "endTime": 28890.76,
+            "text": "She gripped the handle farther up in her left hand and spread her legs like a logger."
+          },
+          {
+            "startTime": 28892.12,
+            "endTime": 28894.04,
+            "text": "Annie, oh, please, please, don't hurt me."
+          },
+          {
+            "startTime": 28894.98,
+            "endTime": 28896.72,
+            "text": "Her eyes were mild and drifting."
+          },
+          {
+            "startTime": 28898.18,
+            "endTime": 28899.96,
+            "text": "Don't worry, she said."
+          },
+          {
+            "startTime": 28900.52,
+            "endTime": 28901.96,
+            "text": "I'm a trained nurse."
+          },
+          {
+            "startTime": 28902.98,
+            "endTime": 28908.06,
+            "text": "The axe came whistling down and buried itself in Paul Sheldon's left leg just above the ankle."
+          },
+          {
+            "startTime": 28908.88,
+            "endTime": 28911.82,
+            "text": "Pain exploded up his body in a gigantic bolt."
+          },
+          {
+            "startTime": 28912.46,
+            "endTime": 28915.92,
+            "text": "Dark red blood splattered across her face like Indian war paint."
+          },
+          {
+            "startTime": 28916.26,
+            "endTime": 28917.5,
+            "text": "It splattered the wall."
+          },
+          {
+            "startTime": 28918.06,
+            "endTime": 28921.28,
+            "text": "He heard the blade squeal against bone as she wrenched it free."
+          },
+          {
+            "startTime": 28921.96,
+            "endTime": 28924.34,
+            "text": "He looked unbelievingly down at himself."
+          },
+          {
+            "startTime": 28924.86,
+            "endTime": 28926.56,
+            "text": "The sheet was turning red."
+          },
+          {
+            "startTime": 28927.12,
+            "endTime": 28928.92,
+            "text": "He saw his toes wriggling."
+          },
+          {
+            "startTime": 28929.7,
+            "endTime": 28932.12,
+            "text": "Then he saw her raising the dripping axe again."
+          },
+          {
+            "startTime": 28932.9,
+            "endTime": 28936.64,
+            "text": "Her hair had fallen free of its pins and hung around her blank face."
+          },
+          {
+            "startTime": 28937.98,
+            "endTime": 28944.6,
+            "text": "He tried to pull back in spite of the pain in his leg and knee and realized that his leg was moving, but his foot wasn't."
+          },
+          {
+            "startTime": 28945.64,
+            "endTime": 28950.14,
+            "text": "All he was doing was widening the axe slash, making it open like a mouth."
+          },
+          {
+            "startTime": 28951.1,
+            "endTime": 28965.14,
+            "text": "He had time enough to realize his foot was now only held on his leg by the meat of his calf before the blade came down again, directly into the gash, shearing through the rest of his leg and burying itself deep in the mattress."
+          },
+          {
+            "startTime": 28966.48,
+            "endTime": 28968.28,
+            "text": "Springs boinked and squinked."
+          },
+          {
+            "startTime": 28969.68,
+            "endTime": 28972.82,
+            "text": "Annie pulled the axe free and tossed it aside."
+          },
+          {
+            "startTime": 28973.8,
+            "endTime": 28979.12,
+            "text": "She looked absently at the jetting stump for a moment and then picked up the box of matches."
+          },
+          {
+            "startTime": 28980.16,
+            "endTime": 28981.2,
+            "text": "She lit one."
+          },
+          {
+            "startTime": 28982.26,
+            "endTime": 28988.54,
+            "text": "Then she picked up the propane torch with the word Burns-O-Matic on the side and twisted the valve on the side."
+          },
+          {
+            "startTime": 28989.22,
+            "endTime": 28990.6,
+            "text": "The torch hissed."
+          },
+          {
+            "startTime": 28991.56,
+            "endTime": 28994.26,
+            "text": "Blood poured from the place where he no longer was."
+          },
+          {
+            "startTime": 28995.82,
+            "endTime": 28999.44,
+            "text": "Annie held the match delicately under the nozzle of the Burns-O-Matic."
+          },
+          {
+            "startTime": 29000.08,
+            "endTime": 29001.78,
+            "text": "There was a floof sound."
+          },
+          {
+            "startTime": 29002.4,
+            "endTime": 29004.42,
+            "text": "A long yellow flame appeared."
+          },
+          {
+            "startTime": 29005.34,
+            "endTime": 29008.14,
+            "text": "Annie adjusted it to a hard blue line of fire."
+          },
+          {
+            "startTime": 29009.14,
+            "endTime": 29010.56,
+            "text": "Can't suture, she said."
+          },
+          {
+            "startTime": 29010.74,
+            "endTime": 29011.28,
+            "text": "No time."
+          },
+          {
+            "startTime": 29011.96,
+            "endTime": 29012.88,
+            "text": "Tourniquet's no good."
+          },
+          {
+            "startTime": 29013.34,
+            "endTime": 29014.54,
+            "text": "No central pressure point."
+          },
+          {
+            "startTime": 29015.42,
+            "endTime": 29016.94,
+            "text": "Got to rinse."
+          },
+          {
+            "startTime": 29018.08,
+            "endTime": 29018.66,
+            "text": "Cauterize."
+          },
+          {
+            "startTime": 29019.94,
+            "endTime": 29020.94,
+            "text": "She bent."
+          },
+          {
+            "startTime": 29022.24,
+            "endTime": 29025.76,
+            "text": "Paul screamed as fire splashed over the raw and bleeding stump."
+          },
+          {
+            "startTime": 29026.34,
+            "endTime": 29027.56,
+            "text": "Smoke drifted up."
+          },
+          {
+            "startTime": 29027.86,
+            "endTime": 29028.98,
+            "text": "It smelled sweet."
+          },
+          {
+            "startTime": 29029.96,
+            "endTime": 29032.6,
+            "text": "He and his first wife had honeymooned on Maui."
+          },
+          {
+            "startTime": 29032.88,
+            "endTime": 29034.14,
+            "text": "There had been a luau."
+          },
+          {
+            "startTime": 29034.84,
+            "endTime": 29039.66,
+            "text": "This smell reminded him of the smell of the pig when they brought it out of the pit where it had cooked all day."
+          },
+          {
+            "startTime": 29040.22,
+            "endTime": 29041.8,
+            "text": "The pig had been on a stick."
+          },
+          {
+            "startTime": 29042.52,
+            "endTime": 29043.08,
+            "text": "Sagging."
+          },
+          {
+            "startTime": 29043.34,
+            "endTime": 29043.72,
+            "text": "Black."
+          },
+          {
+            "startTime": 29044.14,
+            "endTime": 29045,
+            "text": "Falling apart."
+          },
+          {
+            "startTime": 29046.1,
+            "endTime": 29047.58,
+            "text": "The pain was screaming."
+          },
+          {
+            "startTime": 29048.14,
+            "endTime": 29049.36,
+            "text": "He was screaming."
+          },
+          {
+            "startTime": 29050.76,
+            "endTime": 29052.9,
+            "text": "Almost over, she said."
+          },
+          {
+            "startTime": 29053.64,
+            "endTime": 29054.96,
+            "text": "And turned the valve."
+          },
+          {
+            "startTime": 29055.8,
+            "endTime": 29059.6,
+            "text": "And now the ground sheet caught fire around the stump that was no longer bleeding."
+          },
+          {
+            "startTime": 29060.12,
+            "endTime": 29064.58,
+            "text": "The stump that was as black as the pig's hide had been when they brought it out of the luau pit."
+          },
+          {
+            "startTime": 29065.7,
+            "endTime": 29071.66,
+            "text": "Eileen had turned away, but Paul had watched, fascinated, as they pulled off the pig's crackling skin."
+          },
+          {
+            "startTime": 29072.14,
+            "endTime": 29076,
+            "text": "As easily as you might skim off a sweater after a football game."
+          },
+          {
+            "startTime": 29077.02,
+            "endTime": 29078.04,
+            "text": "Almost over."
+          },
+          {
+            "startTime": 29079.4,
+            "endTime": 29081.1,
+            "text": "She turned the torch off."
+          },
+          {
+            "startTime": 29081.84,
+            "endTime": 29086.2,
+            "text": "His leg lay in a line of flames with his severed foot wavering beyond it."
+          },
+          {
+            "startTime": 29086.8,
+            "endTime": 29090.34,
+            "text": "She bent and now came up with his old friend the yellow floor bucket."
+          },
+          {
+            "startTime": 29090.94,
+            "endTime": 29092.66,
+            "text": "She dumped it over the flames."
+          },
+          {
+            "startTime": 29093.42,
+            "endTime": 29094.76,
+            "text": "He was screaming."
+          },
+          {
+            "startTime": 29095.28,
+            "endTime": 29095.88,
+            "text": "Screaming."
+          },
+          {
+            "startTime": 29096.42,
+            "endTime": 29097.36,
+            "text": "The pain."
+          },
+          {
+            "startTime": 29097.62,
+            "endTime": 29098.32,
+            "text": "The goddess."
+          },
+          {
+            "startTime": 29098.66,
+            "endTime": 29099.26,
+            "text": "The pain."
+          },
+          {
+            "startTime": 29099.42,
+            "endTime": 29100.32,
+            "text": "Oh, Africa."
+          },
+          {
+            "startTime": 29101.72,
+            "endTime": 29107.42,
+            "text": "She stood looking at him, at the darkening bloody sheet, with vague consternation."
+          },
+          {
+            "startTime": 29108.04,
+            "endTime": 29115.32,
+            "text": "Her face was the face of a woman who hears on a radio that an earthquake has killed 10,000 people in Pakistan or Turkey."
+          },
+          {
+            "startTime": 29116.42,
+            "endTime": 29117.7,
+            "text": "You'll be all right, Paul."
+          },
+          {
+            "startTime": 29118.64,
+            "endTime": 29119.46,
+            "text": "She said."
+          },
+          {
+            "startTime": 29120.3,
+            "endTime": 29122.06,
+            "text": "But her voice was suddenly frightened."
+          },
+          {
+            "startTime": 29122.96,
+            "endTime": 29129.48,
+            "text": "Her eyes began to dart aimlessly around, as they had when it seemed that the fire of his burning book might get out of control."
+          },
+          {
+            "startTime": 29130.2,
+            "endTime": 29133.3,
+            "text": "They suddenly fixed on something, almost with relief."
+          },
+          {
+            "startTime": 29134.54,
+            "endTime": 29135.98,
+            "text": "I'll just get rid of the trash."
+          },
+          {
+            "startTime": 29137.22,
+            "endTime": 29138.96,
+            "text": "She picked up his foot."
+          },
+          {
+            "startTime": 29140.06,
+            "endTime": 29142.28,
+            "text": "Its toes were still spasming."
+          },
+          {
+            "startTime": 29143.68,
+            "endTime": 29145.3,
+            "text": "She carried it across the room."
+          },
+          {
+            "startTime": 29146.78,
+            "endTime": 29149.26,
+            "text": "By the time she got to the door, they had stopped moving."
+          },
+          {
+            "startTime": 29150.54,
+            "endTime": 29154.66,
+            "text": "He could see a scar on the instep and remembered how he had gotten that."
+          },
+          {
+            "startTime": 29155.38,
+            "endTime": 29158.22,
+            "text": "How he had stepped on a piece of bottle when he was just a kid."
+          },
+          {
+            "startTime": 29159.36,
+            "endTime": 29160.86,
+            "text": "Had that been at Revere Beach?"
+          },
+          {
+            "startTime": 29161.88,
+            "endTime": 29163.16,
+            "text": "Yes, he thought it had been."
+          },
+          {
+            "startTime": 29164.38,
+            "endTime": 29167.86,
+            "text": "He remembered he had cried, and his father had told him it was just a little cut."
+          },
+          {
+            "startTime": 29167.86,
+            "endTime": 29172.48,
+            "text": "His father had told him to stop acting like someone had cut his goddamn foot off."
+          },
+          {
+            "startTime": 29173.22,
+            "endTime": 29182.58,
+            "text": "Annie paused at the door and looked back at Paul, who shrieked and writhed in the charred and blood-soaked bed, his face a deathly fading white."
+          },
+          {
+            "startTime": 29183.86,
+            "endTime": 29186.24,
+            "text": "Now you're hobbled, she said."
+          },
+          {
+            "startTime": 29186.84,
+            "endTime": 29188.34,
+            "text": "And don't you blame me."
+          },
+          {
+            "startTime": 29188.7,
+            "endTime": 29190,
+            "text": "It's your own fault."
+          },
+          {
+            "startTime": 29191.85,
+            "endTime": 29192.99,
+            "text": "She went out."
+          },
+          {
+            "startTime": 29194.49,
+            "endTime": 29195.57,
+            "text": "So did Paul."
+          }
+        ]
+      }
+    },
+    {
+      "id": "frankenstein-negative-torture-word-no-physical-detail",
+      "source": "Frankenstein",
+      "fingerprint": {
+        "version": 1,
+        "sha256": "c5dfe6ffb99f1d8923ef64e27f8d11acd89ed4c8a11b34e02f84c18b21f9d034",
+        "fileSize": 181186103
+      },
+      "category": "violence_torture",
+      "expected": {
+        "accepted": false,
+        "label": null,
+        "notes": "Specificity check for violence_torture: the passage uses the word 'tortured' directly ('or tortured the living animal to animate the lifeless clay') but describes no physical damage, wound, blood, or bodily detail whatsoever -- it's vague, anguished narration about the narrator's own secret scientific labor. Under the app's own definition, violence_torture requires the SAME physical-detail test as violence_graphic ('deliberate, sustained cruelty whose injuries the narration describes closely'), which this passage does not meet. Tests that a candidate model does not accept based on the presence of the word 'torture'/'tortured' alone."
+      },
+      "transcript_window": {
+        "start_time": 5701.91,
+        "end_time": 5763.53,
+        "segments": [
+          {
+            "startTime": 5701.91,
+            "endTime": 5703.27,
+            "text": "might realize."
+          },
+          {
+            "startTime": 5704.15,
+            "endTime": 5706.95,
+            "text": "One secret which I alone possessed"
+          },
+          {
+            "startTime": 5706.95,
+            "endTime": 5710.01,
+            "text": "was the hope to which I had dedicated myself,"
+          },
+          {
+            "startTime": 5710.01,
+            "endTime": 5712.97,
+            "text": "and the moon gazed on my midnight labors"
+          },
+          {
+            "startTime": 5712.97,
+            "endTime": 5716.09,
+            "text": "while with unrelaxed and breathless eagerness"
+          },
+          {
+            "startTime": 5716.09,
+            "endTime": 5719.95,
+            "text": "I pursued nature to her hiding places."
+          },
+          {
+            "startTime": 5721.38,
+            "endTime": 5724.29,
+            "text": "Who shall conceive the horrors"
+          },
+          {
+            "startTime": 5724.29,
+            "endTime": 5726.03,
+            "text": "of my secret toil"
+          },
+          {
+            "startTime": 5726.03,
+            "endTime": 5729.89,
+            "text": "as I dabbled among the unhallowed damps"
+          },
+          {
+            "startTime": 5729.89,
+            "endTime": 5730.71,
+            "text": "of the grave"
+          },
+          {
+            "startTime": 5730.71,
+            "endTime": 5733.15,
+            "text": "or tortured the living animal"
+          },
+          {
+            "startTime": 5733.15,
+            "endTime": 5735.07,
+            "text": "to animate the lifeless clay?"
+          },
+          {
+            "startTime": 5736.28,
+            "endTime": 5738.31,
+            "text": "My limbs now tremble"
+          },
+          {
+            "startTime": 5738.31,
+            "endTime": 5740.79,
+            "text": "and my eyes swim with the remembrance."
+          },
+          {
+            "startTime": 5741.85,
+            "endTime": 5746.85,
+            "text": "But then a resistless and almost frantic impulse"
+          },
+          {
+            "startTime": 5746.85,
+            "endTime": 5748.11,
+            "text": "urged me forward."
+          },
+          {
+            "startTime": 5748.91,
+            "endTime": 5752.49,
+            "text": "I seemed to have lost all soul or sensation"
+          },
+          {
+            "startTime": 5752.49,
+            "endTime": 5753.93,
+            "text": "but for this one pursuit."
+          },
+          {
+            "startTime": 5754.63,
+            "endTime": 5757.41,
+            "text": "It was indeed but a passing trance"
+          },
+          {
+            "startTime": 5757.41,
+            "endTime": 5760.17,
+            "text": "that only made me feel with renewed acuteness"
+          },
+          {
+            "startTime": 5760.17,
+            "endTime": 5763.53,
+            "text": "so soon as the unnatural stimulus ceasing to operate"
+          }
+        ]
+      }
+    },
+    {
+      "id": "reddragon-self-harm-suicide-preparation-interrupted",
+      "source": "Red Dragon",
+      "fingerprint": {
+        "version": 1,
+        "sha256": "89398c8bb15928f5d865a1386bfae83e4d76c18157aa5327607c209f9422d6c2",
+        "fileSize": 346447265
+      },
+      "category": "self_harm_suicide_attempt",
+      "expected": {
+        "accepted": true,
+        "label": "self_harm_suicide_attempt",
+        "notes": "Important case: this taxonomy branch (self_harm_reference/suicidal_thoughts/suicide_attempt/depiction) has NO definition text anywhere in the app's classification prompt -- unlike violence_graphic and the sexual ladder, which both have detailed rubrics, self-harm labels are only listed as allowed strings with no guidance on what distinguishes a passing reference from an active attempt. This passage is a detailed, deliberate suicide preparation (tying a belt into a noose, testing its strength, planning the method) that does not complete on-page -- interrupted by the character's own competing thoughts rather than an external event. Tests whether a candidate model can sensibly apply an undefined label to a genuinely clear real-world case, which is itself informative about whether this category needs a real rubric written for it (recommended as a follow-up regardless of self-host results)."
+      },
+      "transcript_window": {
+        "start_time": 35284.32,
+        "end_time": 35423.74,
+        "segments": [
+          {
+            "startTime": 35284.32,
+            "endTime": 35290.96,
+            "text": "Dollar Hyde looked at the shower curtain rod, a solid piece of one-inch pipe bolted to the bathroom walls."
+          },
+          {
+            "startTime": 35291.46,
+            "endTime": 35294.92,
+            "text": "He took down the shower curtain and hung it over the mirror."
+          },
+          {
+            "startTime": 35295.96,
+            "endTime": 35302.9,
+            "text": "Grasping the pipe, he chinned himself with one arm, his toes dragging up the side of the bathtub."
+          },
+          {
+            "startTime": 35303.54,
+            "endTime": 35304.96,
+            "text": "It was stout enough."
+          },
+          {
+            "startTime": 35305.34,
+            "endTime": 35307.6,
+            "text": "His belt was stout enough, too."
+          },
+          {
+            "startTime": 35307.6,
+            "endTime": 35310.02,
+            "text": "He could make himself do it."
+          },
+          {
+            "startTime": 35310.2,
+            "endTime": 35311.8,
+            "text": "He wasn't afraid of that."
+          },
+          {
+            "startTime": 35312.5,
+            "endTime": 35316.8,
+            "text": "He tied the end of his belt around the pipe in a bowline knot."
+          },
+          {
+            "startTime": 35317.22,
+            "endTime": 35319.54,
+            "text": "The buckle end formed a noose."
+          },
+          {
+            "startTime": 35320.04,
+            "endTime": 35322.1,
+            "text": "The thick belt didn't swing."
+          },
+          {
+            "startTime": 35322.1,
+            "endTime": 35324.72,
+            "text": "It hung down in a stiff noose."
+          },
+          {
+            "startTime": 35325.48,
+            "endTime": 35327.92,
+            "text": "He sat on the toilet lid and looked at it."
+          },
+          {
+            "startTime": 35328.38,
+            "endTime": 35331.64,
+            "text": "He wouldn't get any drop, but he could stand it."
+          },
+          {
+            "startTime": 35331.82,
+            "endTime": 35336.84,
+            "text": "He could keep his hands off the noose until he was too weak to raise his arms."
+          },
+          {
+            "startTime": 35337.6,
+            "endTime": 35345.98,
+            "text": "But how could he be positive that his death would affect the dragon, now that he and the dragon were two?"
+          },
+          {
+            "startTime": 35346.9,
+            "endTime": 35348.22,
+            "text": "Maybe it wouldn't."
+          },
+          {
+            "startTime": 35348.64,
+            "endTime": 35352.72,
+            "text": "How could he be sure the dragon then would leave her alone?"
+          },
+          {
+            "startTime": 35353.86,
+            "endTime": 35356.5,
+            "text": "It might be days before they found his body."
+          },
+          {
+            "startTime": 35356.96,
+            "endTime": 35358.98,
+            "text": "She would wonder where he was."
+          },
+          {
+            "startTime": 35359.5,
+            "endTime": 35364.82,
+            "text": "In that time, would she go to his house and feel around for him?"
+          },
+          {
+            "startTime": 35365.08,
+            "endTime": 35369.84,
+            "text": "Go upstairs and feel around for him and get a surprise?"
+          },
+          {
+            "startTime": 35370.7,
+            "endTime": 35376,
+            "text": "The great red dragon would take an hour spitting her down the stairs."
+          },
+          {
+            "startTime": 35376.56,
+            "endTime": 35379.08,
+            "text": "Should he call her and warn her?"
+          },
+          {
+            "startTime": 35379.42,
+            "endTime": 35382.94,
+            "text": "What could she do against him, even warned?"
+          },
+          {
+            "startTime": 35383.7,
+            "endTime": 35384.42,
+            "text": "Nothing."
+          },
+          {
+            "startTime": 35385,
+            "endTime": 35391.84,
+            "text": "She could hope to die quickly, hope that in his rage he would quickly bite deep enough."
+          },
+          {
+            "startTime": 35393.26,
+            "endTime": 35399.1,
+            "text": "Upstairs in Dollarhyde's house, the dragon waited in pictures he had framed with his own hands."
+          },
+          {
+            "startTime": 35399.1,
+            "endTime": 35399.12,
+            "text": "She could elicit their hands."
+          },
+          {
+            "startTime": 35399.38,
+            "endTime": 35399.52,
+            "text": "LeStrecht\u9a0e is over 2 o'clock in 1946."
+          },
+          {
+            "startTime": 35399.78,
+            "endTime": 35399.98,
+            "text": "The dragon looked again."
+          },
+          {
+            "startTime": 35400,
+            "endTime": 35404.16,
+            "text": "Dragon waited in art books and magazines beyond number,"
+          },
+          {
+            "startTime": 35404.74,
+            "endTime": 35409.04,
+            "text": "reborn every time a photographer did what?"
+          },
+          {
+            "startTime": 35410,
+            "endTime": 35414.92,
+            "text": "Dollar Hyde could hear in his mind the dragon's powerful voice cursing Reba."
+          },
+          {
+            "startTime": 35415.46,
+            "endTime": 35418.62,
+            "text": "He would curse her first before he bit."
+          },
+          {
+            "startTime": 35419.04,
+            "endTime": 35423.74,
+            "text": "He would curse Dollar Hyde too, tell her he was nothing."
+          }
+        ]
+      }
+    },
+    {
+      "id": "powerless-negative-suicide-capsule-trope-false-cue",
+      "source": "PowerlessFull-CastDramatizedAdaptation_ep7",
+      "fingerprint": {
+        "version": 1,
+        "sha256": "fe9032b0c4b9c07f4c2391c6586846fb6692351ea418a6fc05c0922aabed992b",
+        "fileSize": 954773527
+      },
+      "category": "self_harm",
+      "expected": {
+        "accepted": false,
+        "label": null,
+        "notes": "Specificity check: 'suicide capsules' here is a fantasy/spy-thriller genre trope (cyanide pills issued to operatives to avoid capture/interrogation), described entirely in past tense as a plot event that already happened to other characters, not personal suicidal ideation or an active self-harm scene involving the narrator. Tests that a candidate model does not flag this the same way it would a genuine self-harm passage just because the word 'suicide' appears -- the taxonomy's own principle ('no word is sexual content by itself... judge the passage by what is happening in it') should extend the same way to this category even though self-harm has no written rubric of its own."
+      },
+      "transcript_window": {
+        "start_time": 37023.91,
+        "end_time": 37139.42,
+        "segments": [
+          {
+            "startTime": 37023.91,
+            "endTime": 37025.61,
+            "text": "My gaze slides to Finn."
+          },
+          {
+            "startTime": 37026.35,
+            "endTime": 37027.97,
+            "text": "You were there and escaped."
+          },
+          {
+            "startTime": 37028.41,
+            "endTime": 37029.25,
+            "text": "What happened?"
+          },
+          {
+            "startTime": 37031.45,
+            "endTime": 37040.47,
+            "text": "I won't bore you with the details, but a guard found me in a back hallway during my search and thought it was rather suspicious that a serving boy was so far from the festivities."
+          },
+          {
+            "startTime": 37040.85,
+            "endTime": 37044.89,
+            "text": "So when he asked, prying questions, naturally, I lied my ass off."
+          },
+          {
+            "startTime": 37045.29,
+            "endTime": 37051.47,
+            "text": "Only after he dragged me back into the ballroom did I discover he was a bluff who could sense each of my lies."
+          },
+          {
+            "startTime": 37052.31,
+            "endTime": 37054.17,
+            "text": "But Finn wasn't the only one caught."
+          },
+          {
+            "startTime": 37054.53,
+            "endTime": 37058.81,
+            "text": "Turns out there were a lot more Imperials crawling around the castle than anticipated."
+          },
+          {
+            "startTime": 37060.09,
+            "endTime": 37067.83,
+            "text": "We were all equipped with low-damage bombs, knives, and suicide capsules, though we weren't planning on having to use any of it."
+          },
+          {
+            "startTime": 37068.69,
+            "endTime": 37075.75,
+            "text": "But we discreetly wore our leather armor and had our masks as a precaution in case we needed to fight our way out."
+          },
+          {
+            "startTime": 37076.67,
+            "endTime": 37077.97,
+            "text": "And that's exactly what we wanted."
+          },
+          {
+            "startTime": 37077.04,
+            "endTime": 37078.64,
+            "text": "And that's exactly what it came to."
+          },
+          {
+            "startTime": 37079.54,
+            "endTime": 37083.96,
+            "text": "An Imperial was the first to set off one of our bombs, not knowing what it was."
+          },
+          {
+            "startTime": 37084.44,
+            "endTime": 37087.06,
+            "text": "And that's when the ballroom broke out into chaos."
+          },
+          {
+            "startTime": 37088.2,
+            "endTime": 37094.6,
+            "text": "We tried to escape, but Elites started fighting us, and all we could do was try to fight our way out."
+          },
+          {
+            "startTime": 37094.92,
+            "endTime": 37100.43,
+            "text": "In the end, we all used the bombs, while those who were caught used the suicide capsules."
+          },
+          {
+            "startTime": 37101.6,
+            "endTime": 37103.9,
+            "text": "Lena's pretty face is pinched with grief."
+          },
+          {
+            "startTime": 37104.4,
+            "endTime": 37105.84,
+            "text": "Her next words hollow."
+          },
+          {
+            "startTime": 37106.46,
+            "endTime": 37110.7,
+            "text": "Our secrets are too valuable to lose, and they were too loyal to divulge them."
+          },
+          {
+            "startTime": 37111.22,
+            "endTime": 37113,
+            "text": "They knew they would lose their lives anyway."
+          },
+          {
+            "startTime": 37113.9,
+            "endTime": 37118.48,
+            "text": "The room goes silent, as if taking a moment to honor the lives of those they lost."
+          },
+          {
+            "startTime": 37119.3,
+            "endTime": 37123.68,
+            "text": "We weren't intending for the Kingdom to learn of the Resistance that night, or in that way."
+          },
+          {
+            "startTime": 37124.18,
+            "endTime": 37126.18,
+            "text": "But it seems fate had other arrangements."
+          },
+          {
+            "startTime": 37127.12,
+            "endTime": 37131.46,
+            "text": "Sadly, sometimes it takes martyrs to show people that there is something worth fighting for."
+          },
+          {
+            "startTime": 37131.46,
+            "endTime": 37139.42,
+            "text": "I let the information sink in, sitting silently before voicing the question that has slithered its way to the forefront of my mind."
+          }
+        ]
+      }
+    },
+    {
+      "id": "wwz-graphic-violence-mule-carcasses",
+      "source": "World War Z: The Complete Edition",
+      "fingerprint": {
+        "version": 1,
+        "sha256": "330940f6ebaea1a09ac0be0bb8555f6e42f50f198efa61921a51abf2f43eee26",
+        "fileSize": 489624145
+      },
+      "category": "violence_graphic",
+      "expected": {
+        "accepted": true,
+        "label": "violence_graphic",
+        "notes": "Clean positive: pack mule carcasses described with dwelt-on physical damage ('blood and bits of brown rotting flesh', 'bellies were torn out', 'large bite wounds covered their flesh'). Tests the taxonomy against non-human victims -- the app's definition is about the narration's physical detail, not about who/what the injury belongs to."
+      },
+      "transcript_window": {
+        "start_time": 2062.41,
+        "end_time": 2104.49,
+        "segments": [
+          {
+            "startTime": 2062.41,
+            "endTime": 2065.71,
+            "text": "We'd tracked it back from the blood trail leading to the caravan."
+          },
+          {
+            "startTime": 2065.71,
+            "endTime": 2069.33,
+            "text": "Then, right away, we knew something was wrong."
+          },
+          {
+            "startTime": 2069.51,
+            "endTime": 2070.27,
+            "text": "There were no bodies."
+          },
+          {
+            "startTime": 2071.39,
+            "endTime": 2074.35,
+            "text": "Rival tribes always left their victims laid out"
+          },
+          {
+            "startTime": 2074.35,
+            "endTime": 2076.71,
+            "text": "and mutilated as a warning to others."
+          },
+          {
+            "startTime": 2076.91,
+            "endTime": 2078.15,
+            "text": "There was plenty of blood,"
+          },
+          {
+            "startTime": 2078.87,
+            "endTime": 2083.23,
+            "text": "blood and bits of brown rotting flesh,"
+          },
+          {
+            "startTime": 2083.23,
+            "endTime": 2086.41,
+            "text": "but the only corpses we found were the pack mules."
+          },
+          {
+            "startTime": 2087.27,
+            "endTime": 2089.25,
+            "text": "They'd been brought down, not shot,"
+          },
+          {
+            "startTime": 2089.45,
+            "endTime": 2092.37,
+            "text": "by what looked like wild animals."
+          },
+          {
+            "startTime": 2092.91,
+            "endTime": 2094.81,
+            "text": "Their bellies were torn out,"
+          },
+          {
+            "startTime": 2094.81,
+            "endTime": 2097.65,
+            "text": "and large bite wounds covered their flesh."
+          },
+          {
+            "startTime": 2097.93,
+            "endTime": 2100.23,
+            "text": "We guessed it had to be wild dogs."
+          },
+          {
+            "startTime": 2100.39,
+            "endTime": 2102.71,
+            "text": "Packs of those damn things roamed the valleys,"
+          },
+          {
+            "startTime": 2102.71,
+            "endTime": 2104.49,
+            "text": "big and nasty as Arctic wolves."
+          }
+        ]
+      }
+    },
+    {
+      "id": "wwz-graphic-violence-entrails-feeding",
+      "source": "World War Z: The Complete Edition",
+      "fingerprint": {
+        "version": 1,
+        "sha256": "330940f6ebaea1a09ac0be0bb8555f6e42f50f198efa61921a51abf2f43eee26",
+        "fileSize": 489624145
+      },
+      "category": "violence_graphic",
+      "expected": {
+        "accepted": true,
+        "label": "violence_graphic",
+        "notes": "Extremely graphic positive, as unambiguous as the taxonomy has: a dead crew member's entrails hanging out while being fed on, with specific physical detail (intestine wrapped around a neck, the body jerking). If a candidate model does not confidently flag this, it is not viable for violence_graphic regardless of performance elsewhere."
+      },
+      "transcript_window": {
+        "start_time": 22067.46,
+        "end_time": 22098.72,
+        "segments": [
+          {
+            "startTime": 22067.46,
+            "endTime": 22073.52,
+            "text": "harness, dead, twitching. His flight suit had been torn open and his entrails were hanging,"
+          },
+          {
+            "startTime": 22074.28,
+            "endTime": 22080.46,
+            "text": "draped over five of them as they fed in this cloud of red-brown water. One of them had managed to get"
+          },
+          {
+            "startTime": 22080.46,
+            "endTime": 22086.56,
+            "text": "its neck entangled in a section of small intestine. Every time it moved, it would jerk Rollins, ringing him"
+          },
+          {
+            "startTime": 22086.56,
+            "endTime": 22092.66,
+            "text": "like a fucking bell. They didn't notice me at all. Close enough to touch and they didn't even look."
+          },
+          {
+            "startTime": 22093.26,
+            "endTime": 22098.72,
+            "text": "At least I had the brains to snap on my suppressor, thank God. I didn't have to waste a whole clip,"
+          }
+        ]
+      }
+    },
+    {
+      "id": "wwz-negative-self-hate-not-self-harm",
+      "source": "World War Z: The Complete Edition",
+      "fingerprint": {
+        "version": 1,
+        "sha256": "330940f6ebaea1a09ac0be0bb8555f6e42f50f198efa61921a51abf2f43eee26",
+        "fileSize": 489624145
+      },
+      "category": "self_harm",
+      "expected": {
+        "accepted": false,
+        "label": null,
+        "notes": "Specificity check: the character spirals into shame and self-loathing after a combat mistake ('I was so blinded by self-hate... hating myself for hating myself... fucking weakling... fucking loser'), using the literal phrase 'self-hate' repeatedly, but there is no reference to suicide, self-injury, or any self-harm act -- this is psychological shame, not the self-harm category. Tests that a candidate model does not flag this off the word 'self-hate' alone, especially given self-harm has no written rubric in the app's prompt distinguishing this from a real case."
+      },
+      "transcript_window": {
+        "start_time": 22098.82,
+        "end_time": 22139.96,
+        "segments": [
+          {
+            "startTime": 22098.82,
+            "endTime": 22105.86,
+            "text": "another fuck-up. I was so angry. I almost started kicking their corpses. I was so ashamed, so blinded"
+          },
+          {
+            "startTime": 22105.86,
+            "endTime": 22116.02,
+            "text": "by self-hate. Self-hate? I screwed the pooch. My ship, my crew. But it was an accident. It wasn't"
+          },
+          {
+            "startTime": 22116.02,
+            "endTime": 22121.68,
+            "text": "your fault. How do you know that? You weren't there. Shit, I wasn't even there. I don't know"
+          },
+          {
+            "startTime": 22121.68,
+            "endTime": 22127.04,
+            "text": "what happened. I wasn't doing my job. I was squatting over a bucket like a goddamn little girl."
+          },
+          {
+            "startTime": 22126.0,
+            "endTime": 22133.06,
+            "text": "goddamn little girl. I found myself burning up mentally. Fucking weakling, I told myself."
+          },
+          {
+            "startTime": 22133.2,
+            "endTime": 22139.96,
+            "text": "Fucking loser. I started to spiral, not just hating myself, but hating myself for hating myself."
+          }
+        ]
+      }
+    },
+    {
+      "id": "wwz-negative-methodical-violence-no-physical-dwelling",
+      "source": "World War Z: The Complete Edition",
+      "fingerprint": {
+        "version": 1,
+        "sha256": "330940f6ebaea1a09ac0be0bb8555f6e42f50f198efa61921a51abf2f43eee26",
+        "fileSize": 489624145
+      },
+      "category": "violence_torture",
+      "expected": {
+        "accepted": false,
+        "label": null,
+        "notes": "Borderline negative: a character calmly describes his zombie-killing technique in a methodical, almost instructional tone (aiming point, 'split skull or severed neck', decapitation vs. a strike between forehead and nose) -- mentions of skull/decapitation are present, but the narration does not dwell on physical damage the way the taxonomy requires (no blood flowing, no described wound texture, no lingering on the moment of injury). This tests the same bar as the Frankenstein 'tortured' case: presence of violent vocabulary (skull, decapitation, severed) without the narration actually dwelling on physical detail should not qualify for violence_graphic."
+      },
+      "transcript_window": {
+        "start_time": 28395.44,
+        "end_time": 28492.6,
+        "segments": [
+          {
+            "startTime": 28395.44,
+            "endTime": 28398.36,
+            "text": "I almost felt sorry for the poor mindless filth,"
+          },
+          {
+            "startTime": 28398.6,
+            "endTime": 28401.74,
+            "text": "to come all this way slowly and methodically,"
+          },
+          {
+            "startTime": 28402.12,
+            "endTime": 28406.16,
+            "text": "only to end their journey with a split skull or severed neck."
+          },
+          {
+            "startTime": 28406.84,
+            "endTime": 28409.34,
+            "text": "Did you always kill your enemy on the first strike?"
+          },
+          {
+            "startTime": 28410.0,
+            "endTime": 28410.6,
+            "text": "Always."
+          },
+          {
+            "startTime": 28411.2,
+            "endTime": 28413.9,
+            "text": "He gestures with an imaginary coupous\u00e9."
+          },
+          {
+            "startTime": 28414.46,
+            "endTime": 28416.26,
+            "text": "Thrust forward, never swing."
+          },
+          {
+            "startTime": 28416.84,
+            "endTime": 28419.1,
+            "text": "At first I would aim for the base of the neck."
+          },
+          {
+            "startTime": 28419.6,
+            "endTime": 28423.92,
+            "text": "Later, as my skills grew with time and experience, I learned to strike here."
+          },
+          {
+            "startTime": 28424.32,
+            "endTime": 28429.16,
+            "text": "He places his hand horizontally against the indentation between the forehead and the nose."
+          },
+          {
+            "startTime": 28429.16,
+            "endTime": 28434.78,
+            "text": "It was a little harder than simple decapitation, all that thick, tough bone."
+          },
+          {
+            "startTime": 28435.14,
+            "endTime": 28439.2,
+            "text": "But it did serve to destroy the brain, as opposed to decapitation,"
+          },
+          {
+            "startTime": 28439.44,
+            "endTime": 28442.72,
+            "text": "where the living head would always require a secondary blow."
+          },
+          {
+            "startTime": 28443.66,
+            "endTime": 28445.1,
+            "text": "What about multiple attackers?"
+          },
+          {
+            "startTime": 28445.5,
+            "endTime": 28446.92,
+            "text": "Was that more of a problem?"
+          },
+          {
+            "startTime": 28447.62,
+            "endTime": 28449.12,
+            "text": "Yes, in the beginning."
+          },
+          {
+            "startTime": 28449.56,
+            "endTime": 28453.52,
+            "text": "As their numbers swelled, I began to find myself increasingly surrounded."
+          },
+          {
+            "startTime": 28454.06,
+            "endTime": 28457.26,
+            "text": "Those early battles were untidy."
+          },
+          {
+            "startTime": 28457.26,
+            "endTime": 28461.3,
+            "text": "I must admit I allowed my emotions to rule my hand."
+          },
+          {
+            "startTime": 28461.72,
+            "endTime": 28464.24,
+            "text": "I was the typhoon, not the lightning bolt."
+          },
+          {
+            "startTime": 28465.02,
+            "endTime": 28470.5,
+            "text": "During one melee at Tokachidake, I dispatched 41 in as many minutes."
+          },
+          {
+            "startTime": 28471.22,
+            "endTime": 28474.66,
+            "text": "I was washing bodily fluids from my clothes for a fortnight."
+          },
+          {
+            "startTime": 28475.42,
+            "endTime": 28479.42,
+            "text": "Later, as I began to exercise more tactical creativity,"
+          },
+          {
+            "startTime": 28480.14,
+            "endTime": 28482.52,
+            "text": "I allowed the gods to join me on the battlefield."
+          },
+          {
+            "startTime": 28483.1,
+            "endTime": 28486.72,
+            "text": "I would lead groups of beasts to the base of a tall rock,"
+          },
+          {
+            "startTime": 28486.72,
+            "endTime": 28489.0,
+            "text": "where I would crush their skulls from above."
+          },
+          {
+            "startTime": 28489.48,
+            "endTime": 28492.6,
+            "text": "I might even find a rock that allowed them to climb up after me."
+          }
+        ]
+      }
     }
   ]
 }
