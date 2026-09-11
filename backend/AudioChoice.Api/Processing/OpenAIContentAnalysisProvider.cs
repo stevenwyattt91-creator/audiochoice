@@ -49,10 +49,17 @@ public sealed class OpenAIContentAnalysisProvider(
     // listener would also expect skipped had already started playing -- a cached quote from
     // before this change reflects the old, narrower reading and must not be trusted as
     // though it already applied the new one.
+    //
+    // Bumped again: an escalated candidate's outcome is now a genuine three-vote majority
+    // (Terra's own decision plus two independent Sol calls, see RunSolEscalations/
+    // ResolveMajorityVote's remarks) rather than a single Sol call fully overriding Terra's.
+    // A cached checkpoint from before this change holds only one Sol answer per candidate,
+    // which this version bump keeps from being silently read as though it already reflected
+    // a majority of three.
     private const string SceneVerificationVersion =
-        "5.3-scene-boundary-includes-buildup";
+        "5.4-sol-majority-vote";
     private const string SceneEscalationVersion =
-        "5.3-scene-boundary-includes-buildup";
+        "5.4-sol-majority-vote";
     private readonly string _checkpointFolder = dataPaths.AnalysisCheckpoints;
     public string ScannerVersion => options.ScannerVersion;
 
@@ -1268,19 +1275,32 @@ Candidates:
             escalationCandidates.Length, terraDecisions.Length, confidentAcceptsSkippingSol,
             Math.Max(1, options.SceneEscalationConcurrency));
 
+        // Terra's own decision on each escalated candidate is kept as the first of three
+        // votes -- see RunSolEscalations' remarks for why a single Sol call fully overriding
+        // Terra was exactly the failure mode a real rescan exposed this pipeline to. Grouped
+        // rather than keyed directly for the same reason solByCandidate below is: a model
+        // returning two decisions for one key must not throw building this lookup.
+        var terraDecisionsByKey = terraDecisions
+            .GroupBy(item => item.Decision.CandidateKey, StringComparer.Ordinal)
+            .ToDictionary(
+                group => group.Key,
+                group => group.OrderByDescending(item => item.Decision.Confidence).First().Decision,
+                StringComparer.Ordinal);
         var solDecisions = await RunSolEscalations(
             escalationCandidates,
+            terraDecisionsByKey,
             progress => reportProgress?.Invoke(.5 + progress * .5),
             cancellationToken);
         // Grouped rather than keyed directly. Each request carries one candidate, but the
         // schema permits an array, so a model returning two decisions for the same key threw
         // and failed the job at the very last step, after every model call had been paid for.
-        // The most confident decision wins, matching how the first pass deduplicates.
+        // RunSolEscalations already resolved each key's votes into one final decision, so the
+        // most recent one is the majority-resolved answer, not a second competing signal.
         var solByCandidate = solDecisions
             .GroupBy(item => item.CandidateKey, StringComparer.Ordinal)
             .ToDictionary(
                 group => group.Key,
-                group => group.OrderByDescending(item => item.Confidence).First(),
+                group => group.Last(),
                 StringComparer.Ordinal);
 
         var rejectedForUnconfirmedQuote = 0;
@@ -1562,8 +1582,41 @@ Candidates:
         return ResolveConfirmedSceneBoundary(located.StartTime, claimedEndTime, segments);
     }
 
+    /// <summary>
+    /// The second and third votes' checkpoint discriminator. The first Sol call for a
+    /// candidate keeps using the plain candidate-keyed checkpoint path (so a book rescanned
+    /// after this change still reuses that one answer rather than re-paying for it), and this
+    /// distinguishes the extra vote's own cached answer from the first.
+    /// </summary>
+    private const string SecondSolVoteDiscriminator = "sol-vote-2";
+
+    /// <summary>
+    /// Escalates each candidate to Sol and combines the result with Terra's own decision as
+    /// a genuine three-vote majority, rather than letting a single Sol call fully override
+    /// Terra.
+    /// </summary>
+    /// <remarks>
+    /// A real rescan during this fix's own verification found the same passage accepted by
+    /// Terra on one independent call and rejected by Sol on another, with nothing else in the
+    /// pipeline changed -- OpenAI's Responses API is non-deterministic by default and this
+    /// codebase sets no temperature or seed. Letting Sol's single call fully overrule Terra's
+    /// meant that variance had the final word every time a candidate escalated, which is
+    /// exactly backwards for the cases (needsEscalation, a keyword-safety-net rejection) that
+    /// exist specifically because the first opinion was uncertain.
+    ///
+    /// Requests a second, independent Sol call for every escalated candidate and takes the
+    /// majority of Terra's decision plus both Sol calls: accepted only when at least two of
+    /// the three votes accept. A 2-1 split still finalizes -- unanimity is not required, since
+    /// requiring it would make one dissenting vote enough to silently discard a genuine catch
+    /// again, the same failure this exists to fix. The final VerifiedSceneCandidate carries
+    /// the fields (startTime/endTime/quote/confidence) from whichever accepting vote has the
+    /// highest confidence when accepted, or from the plurality-rejecting vote's own fields
+    /// when rejected, so a rejected candidate's own boundary fields are never trusted for
+    /// anything -- ResolveSceneOutcome/TryConfirmSceneBoundary only act on an accepted result.
+    /// </remarks>
     private async Task<IReadOnlyList<VerifiedSceneCandidate>> RunSolEscalations(
         IReadOnlyList<SolEscalationCandidate> candidates,
+        IReadOnlyDictionary<string, VerifiedSceneCandidate> terraDecisionsByKey,
         Action<double>? reportProgress,
         CancellationToken cancellationToken)
     {
@@ -1581,16 +1634,34 @@ Candidates:
             try
             {
                 var batch = new[] { candidate.Source };
-                var checkpointPath = SceneVerificationCheckpointPath(
+
+                var firstVotePath = SceneVerificationCheckpointPath(
                     batch, SceneEscalationVersion, options.SceneEscalationModel);
-                var payload = await LoadSceneVerificationCheckpoint(
-                    checkpointPath, cancellationToken);
-                if (payload is null)
+                var firstVotePayload = await LoadSceneVerificationCheckpoint(
+                    firstVotePath, cancellationToken);
+                if (firstVotePayload is null)
                 {
-                    payload = await VerifySceneBatch(
+                    firstVotePayload = await VerifySceneBatch(
                         batch, options.SceneEscalationModel, cancellationToken);
                     await SaveSceneVerificationCheckpoint(
-                        checkpointPath, payload, cancellationToken);
+                        firstVotePath, firstVotePayload, cancellationToken);
+                }
+
+                // A second, independent Sol call. Checkpointed separately from the first so
+                // the two are never accidentally read as the same cached answer -- that would
+                // silently turn a three-vote majority back into a single opinion counted
+                // twice, defeating the entire point of this method.
+                var secondVotePath = SceneVerificationCheckpointPath(
+                    batch, $"{SceneEscalationVersion}-{SecondSolVoteDiscriminator}",
+                    options.SceneEscalationModel);
+                var secondVotePayload = await LoadSceneVerificationCheckpoint(
+                    secondVotePath, cancellationToken);
+                if (secondVotePayload is null)
+                {
+                    secondVotePayload = await VerifySceneBatch(
+                        batch, options.SceneEscalationModel, cancellationToken);
+                    await SaveSceneVerificationCheckpoint(
+                        secondVotePath, secondVotePayload, cancellationToken);
                 }
 
                 var finished = Interlocked.Increment(ref completed);
@@ -1599,7 +1670,11 @@ Candidates:
                     "Terra candidate {TerraCandidateNumber}.",
                     finished, candidates.Count, candidate.TerraIndex + 1);
                 reportProgress?.Invoke(finished / (double)candidates.Count);
-                return payload.Candidates;
+
+                var terraVote = terraDecisionsByKey.GetValueOrDefault(candidate.Source.CandidateKey);
+                return ResolveMajorityVote(
+                    candidate.Source.CandidateKey, terraVote,
+                    firstVotePayload.Candidates, secondVotePayload.Candidates);
             }
             finally
             {
@@ -1608,7 +1683,59 @@ Candidates:
         });
 
         var results = await Task.WhenAll(tasks);
-        return results.SelectMany(item => item).ToArray();
+        return results.Where(item => item is not null).Select(item => item!).ToArray();
+    }
+
+    /// <summary>
+    /// Combines Terra's own decision with two independent Sol calls into one majority-
+    /// resolved <see cref="VerifiedSceneCandidate"/> for a single escalated candidate.
+    /// </summary>
+    /// <remarks>
+    /// Missing a vote (a model returned no decision for this key at all, rather than a real
+    /// reject) does not count toward either side -- only real returned votes are tallied, so
+    /// a majority among two remaining votes still resolves normally rather than defaulting to
+    /// reject by starvation.
+    /// </remarks>
+    internal static VerifiedSceneCandidate? ResolveMajorityVote(
+        string candidateKey,
+        VerifiedSceneCandidate? terraVote,
+        IReadOnlyList<VerifiedSceneCandidate> firstSolVoteCandidates,
+        IReadOnlyList<VerifiedSceneCandidate> secondSolVoteCandidates)
+    {
+        VerifiedSceneCandidate? FindVote(IReadOnlyList<VerifiedSceneCandidate> candidates) =>
+            candidates.FirstOrDefault(item =>
+                string.Equals(item.CandidateKey, candidateKey, StringComparison.Ordinal));
+
+        var votes = new[] { terraVote, FindVote(firstSolVoteCandidates), FindVote(secondSolVoteCandidates) }
+            .Where(item => item is not null)
+            .Select(item => item!)
+            .ToArray();
+        if (votes.Length == 0) return null;
+
+        var acceptingVotes = votes.Where(item => item.Accepted).ToArray();
+        var rejectingVotes = votes.Where(item => !item.Accepted).ToArray();
+        // A tie between two real votes (Terra missing, only both Sol calls returned) keeps
+        // whichever side is more confident rather than defaulting either way, since two votes
+        // give no true majority to fall back on.
+        var accepted = acceptingVotes.Length > rejectingVotes.Length ||
+            (acceptingVotes.Length == rejectingVotes.Length && acceptingVotes.Length > 0 &&
+                acceptingVotes.Max(item => item.Confidence) >=
+                    rejectingVotes.Max(item => item.Confidence));
+
+        // The fields a listener's finalized boundary is built from come from the most
+        // confident vote on the winning side only -- never averaged or taken from a
+        // dissenting vote, since a boundary this pipeline cannot attribute to one clear
+        // supporting call must not reach a listener presented as confirmed.
+        var winningSide = accepted ? acceptingVotes : rejectingVotes;
+        var chosen = winningSide.Length > 0
+            ? winningSide.OrderByDescending(item => item.Confidence).First()
+            : votes[0];
+
+        return chosen with
+        {
+            Accepted = accepted,
+            NeedsEscalation = false,
+        };
     }
 
     internal static IReadOnlyList<SceneVerificationCandidate> CoalesceSceneCandidates(
@@ -1798,6 +1925,25 @@ the buildup that makes the scene recognizable as one, not to have the skip begin
 through it once the act itself is unambiguous. Only start later, at the act itself, when the
 scene truly opens there with no preceding kissing or touching that belongs to the same
 continuous moment. Set endTime where that activity clearly finishes.
+
+Example of a correct startTime -- a real passage from a production book, reported by a
+listener because the skip began too late and audible content still played:
+"He leaned forward and kissed me lightly. Not forever. And though I knew it was a lie, I put my
+arms around his neck and kissed him. He pulled me onto his lap, holding me tightly against him
+as his lips parted mine. I became aware of every pore in my body when his tongue entered my
+mouth. [...] I pushed Tamlin onto the bed, straddling him."
+The correct startTime is at "He leaned forward and kissed me lightly" -- the kissing is the
+scene's own beginning, part of the same unbroken escalation, not separate lead-in to be left
+playing. A startTime placed instead at "I pushed Tamlin onto the bed" (the act's own most
+unambiguous sentence) is wrong: it skips too little, and is exactly the mistake this
+instruction exists to prevent.
+
+Example of a correct rejection -- ordinary romantic tension with no escalation to skip:
+"He caught her eye across the room and she felt her pulse quicken. There was something about
+the way he looked at her." This is attraction and narration, not activity; accepted must be
+false here regardless of how romantically charged the prose is, because there is no kissing,
+touching, or undressing to mark where a scene even begins.
+
 Keep timestamps within the supplied excerpt. Use a neutral, non-graphic but useful description.
 Do not include graphic details or quotations in safeDescription. Never name intimate
 anatomy or describe touching mechanics, positions, squeezing, or similar physical details.
