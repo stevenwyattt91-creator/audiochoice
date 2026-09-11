@@ -196,6 +196,23 @@ def score_case(case: dict, parsed: dict | None) -> dict:
     expected = case["expected"]
     outcome = {"id": case["id"], "raw_parsed": parsed}
 
+    # A case whose expected["accepted"] is explicitly None is a genuinely ambiguous
+    # taxonomy-boundary case with no single settled correct answer (see its "notes" field
+    # for why). Report the model's answer for a human to judge, but do not score it
+    # pass/fail -- doing so would fabricate a false signal about model accuracy on a
+    # question this eval set itself does not claim to have a ground truth for.
+    if expected.get("accepted") is None:
+        if parsed is None:
+            outcome["verdict"] = "AMBIGUOUS (not scored -- no parseable JSON response)"
+            return outcome
+        candidates = parsed.get("candidates") or []
+        result = candidates[0] if candidates else {}
+        outcome["verdict"] = (
+            f"AMBIGUOUS (not scored -- model answered accepted={result.get('accepted')}, "
+            f"see case notes for why this has no single correct answer)"
+        )
+        return outcome
+
     if parsed is None:
         outcome["verdict"] = "FAIL (no parseable JSON response)"
         return outcome
@@ -281,10 +298,16 @@ def main() -> int:
             print(f"    raw response (truncated): {raw_response[:300]!r}")
         print()
 
-    passed = sum(1 for r in results if r["verdict"].startswith("PASS"))
+    scored = [r for r in results if not r["verdict"].startswith("AMBIGUOUS")]
+    ambiguous_count = len(results) - len(scored)
+    passed = sum(1 for r in scored if r["verdict"].startswith("PASS"))
     print("=" * 72)
-    print(f"TOTAL: {passed}/{len(results)} passed")
-    return 0 if passed == len(results) else 1
+    if ambiguous_count:
+        print(f"TOTAL: {passed}/{len(scored)} passed ({ambiguous_count} case(s) excluded as "
+              f"genuinely ambiguous, not scored)")
+    else:
+        print(f"TOTAL: {passed}/{len(scored)} passed")
+    return 0 if passed == len(scored) else 1
 
 
 if __name__ == "__main__":
