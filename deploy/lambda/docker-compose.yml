@@ -24,13 +24,27 @@ services:
     # alone takes just under 20GB, so anything below ~0.55 leaves no room for a KV cache at
     # all and the engine refuses to start ("No available memory for the cache blocks").
     #
-    # --max-num-seqs 32: Qwen3.6 is a hybrid Mamba/attention (GDN) model -- every concurrent
+    # --max-model-len 65536, not 32768: a real production Luna first-pass batch (Content
+    # AnalysisModel, up to MaximumSegmentsPerAnalysisRequest=100 transcript segments) hit
+    # 24,769 input tokens on the very first live scan through this pipeline, and combined
+    # with VllmMaxTokens' output budget (8000) exceeded 32768 outright -- the job failed
+    # loudly with "This model's maximum context length is 32768 tokens... your prompt
+    # contains at least 24769 input tokens". 32768 was sized against this session's own
+    # eval excerpts (a few dozen transcript segments each), never against a real full-size
+    # production batch. Doubled here with real margin instead of tuned to the exact
+    # observed failure, since a longer chapter or a denser batch could need more still.
+    #
+    # --max-num-seqs 8: Qwen3.6 is a hybrid Mamba/attention (GDN) model -- every concurrent
     # decode sequence needs its own Mamba cache block, separate from the regular KV cache.
-    # Measured directly on this host at gpu-memory-utilization=0.70: only 94 Mamba cache
-    # blocks are available, well under vLLM's default max_num_seqs of 256, which made the
-    # engine refuse to start outright. 32 matches AudioChoice__OpenAI__ContentAnalysisConcurrency
-    # / SceneVerificationConcurrency / SceneEscalationConcurrency below with real headroom;
-    # raise only after confirming the real available-block count logged at startup.
+    # Measured directly on this host at gpu-memory-utilization=0.70 and --max-model-len 32768:
+    # only 94 Mamba cache blocks were available, well under vLLM's default max_num_seqs of
+    # 256, which made the engine refuse to start outright ("No available memory for the
+    # cache blocks"). Lowered further from this session's own eval sidecar value (32) to make
+    # room for the doubled --max-model-len below: production's real concurrency ceiling is
+    # ContentAnalysisConcurrency (2) + SceneVerificationConcurrency (2) +
+    # SceneEscalationConcurrency (2) = 6 at most, so 8 has real margin without over-claiming
+    # KV cache the longer context needs. Raise only after confirming the real available-block
+    # count logged at startup, and only if actual concurrent load approaches this ceiling.
     #
     # Served model name matches RoutingAnalysisModelClient.IsVllmModel's check (contains
     # "qwen") and the three AudioChoice__OpenAI__*Model values below -- all three must agree
@@ -39,9 +53,9 @@ services:
       --model QuantTrio/Qwen3.6-27B-AWQ
       --quantization awq
       --port 8002
-      --max-model-len 32768
+      --max-model-len 65536
       --gpu-memory-utilization 0.70
-      --max-num-seqs 32
+      --max-num-seqs 8
       --served-model-name qwen3.6-27b
     deploy:
       resources:
