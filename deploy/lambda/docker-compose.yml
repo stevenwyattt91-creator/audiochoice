@@ -1,4 +1,56 @@
 services:
+  qwen:
+    image: vllm/vllm-openai:v0.29.0-cu129
+    restart: unless-stopped
+    network_mode: host
+    ipc: host
+    volumes:
+      # Reuses the same cache whisper already persists to, so the ~15GB quantized model
+      # survives nightly instance replacement instead of re-downloading.
+      - /lambda/nfs/audiochoice-worker-state/huggingface-cache:/root/.cache/huggingface
+    environment:
+      # Only needed if the chosen model repo is gated on Hugging Face; leave unset otherwise.
+      HUGGING_FACE_HUB_TOKEN: ${HUGGING_FACE_HUB_TOKEN:-}
+    # Same model, same settings this session's eval sidecar (deploy/lambda/vllm-eval)
+    # validated against a 35-case ground-truth set (scripts/eval/ground_truth_scenes.json)
+    # spanning sexual content, graphic violence, and self-harm across 12+ real books --
+    # 31/33 scored cases passed, the only 2 misses being the two hardest, most
+    # consent-ambiguous passages this session ever found, which OpenAI's own production
+    # pipeline also could not reliably agree with itself on across 29+ independent calls.
+    #
+    # GPU budget: this host's single A100 40GB also runs the whisper transcription
+    # container (idle ~2.5GB, headroom under load). --gpu-memory-utilization 0.70 caps this
+    # service at roughly 28GB. Measured directly on this host: AWQ INT4 weight loading
+    # alone takes just under 20GB, so anything below ~0.55 leaves no room for a KV cache at
+    # all and the engine refuses to start ("No available memory for the cache blocks").
+    #
+    # --max-num-seqs 32: Qwen3.6 is a hybrid Mamba/attention (GDN) model -- every concurrent
+    # decode sequence needs its own Mamba cache block, separate from the regular KV cache.
+    # Measured directly on this host at gpu-memory-utilization=0.70: only 94 Mamba cache
+    # blocks are available, well under vLLM's default max_num_seqs of 256, which made the
+    # engine refuse to start outright. 32 matches AudioChoice__OpenAI__ContentAnalysisConcurrency
+    # / SceneVerificationConcurrency / SceneEscalationConcurrency below with real headroom;
+    # raise only after confirming the real available-block count logged at startup.
+    #
+    # Served model name matches RoutingAnalysisModelClient.IsVllmModel's check (contains
+    # "qwen") and the three AudioChoice__OpenAI__*Model values below -- all three must agree
+    # for a tier's model name to resolve to this service rather than failing loudly.
+    command: >
+      --model QuantTrio/Qwen3.6-27B-AWQ
+      --quantization awq
+      --port 8002
+      --max-model-len 32768
+      --gpu-memory-utilization 0.70
+      --max-num-seqs 32
+      --served-model-name qwen3.6-27b
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+
   whisper:
     image: audiochoice-whisper:local
     build:
@@ -63,15 +115,28 @@ services:
       # scanner refuses to start otherwise rather than writing somewhere temporary.
       AudioChoice__TemporaryAudioStorage__BlobTranscriptEnabled: "true"
       AudioChoice__OpenAI__TranscriptionProvider: faster-whisper
-      # Classification transport. Left on OpenAI until Nova has been compared against saved
-      # results on books whose correct answer is already known. Switching is these four lines
-      # plus AWS credentials in lambda-worker.env; nothing else changes, because the scanner's
-      # judgement does not live in the transport.
+      # Classification transport. Switched to a fully self-hosted vLLM model (Qwen3.6-27B,
+      # served by the qwen service above) for every tier -- no OpenAI credits required for
+      # analysis at all. Validated first against a 35-case ground-truth eval set spanning
+      # sexual content, graphic violence, and self-harm (scripts/eval/ground_truth_scenes.json,
+      # 31/33 scored cases passed) before being switched on here.
       #
-      # Bump ScannerVersion at the same time. Results are stored per edition and scanner
-      # version, so a new version writes new rows instead of overwriting the OpenAI ones,
-      # which is what makes the two comparable rather than one destroying the other.
+      # Rollback path, if this does not hold up in production: change AnalysisProvider back
+      # to the OpenAI default (delete or comment this whole block) and bump ScannerVersion
+      # again. Nothing else needs to change -- OpenAIResponsesModelClient and every OpenAI
+      # config value are untouched, not removed, specifically so this is a config edit and a
+      # redeploy, never a code change or a rebuild of removed functionality.
       #
+      # ScannerVersion is bumped in OpenAIProcessingOptions.cs's own default (6.0-vllm-qwen)
+      # rather than repeated here, so a result written under the prior OpenAI-backed version
+      # is never presented as though this different model had produced it.
+      AudioChoice__OpenAI__AnalysisProvider: vllm
+      AudioChoice__OpenAI__VllmEndpoint: http://127.0.0.1:8002/v1/
+      AudioChoice__OpenAI__AnalysisModel: qwen3.6-27b
+      AudioChoice__OpenAI__SceneVerificationModel: qwen3.6-27b
+      AudioChoice__OpenAI__SceneEscalationModel: qwen3.6-27b
+      #
+      # Bedrock/Nova path, kept for reference, not in use:
       # AudioChoice__OpenAI__AnalysisProvider: bedrock
       # AudioChoice__OpenAI__BedrockRegion: us-east-1
       # AudioChoice__OpenAI__AnalysisModel: amazon.nova-lite-v1:0

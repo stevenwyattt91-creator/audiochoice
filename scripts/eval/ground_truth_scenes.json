@@ -9353,6 +9353,1582 @@
           }
         ]
       }
+    },
+    {
+      "id": "got-graphic-violence-catspaw-attack",
+      "source": "A Game of Thrones",
+      "fingerprint": {
+        "version": 1,
+        "sha256": "1d7d5e1829d0bc813a4537d13d00d271c85734b1407346d1d5a170cb39d2f787",
+        "fileSize": 966322917
+      },
+      "category": "violence_graphic",
+      "expected": {
+        "accepted": true,
+        "label": "violence_graphic",
+        "notes": "Clean positive: an assassination attempt where the victim bites through the attacker's flesh, and a direwolf then tears out the attacker's throat with dwelt-on physical detail ('the beast wrenched back its head, taking out half his throat', 'his blood felt like warm rain as it sprayed across her face', wounds described afterward: 'cuts in her fingers were deep, almost to the bone'). Also involves violence directed at protecting a sleeping child (Bran) -- worth noting as thematically sensitive but not disqualifying; the taxonomy judges physical detail, not victim age here since the child is not the one injured."
+      },
+      "transcript_window": {
+        "start_time": 18406.6,
+        "end_time": 18663.3,
+        "segments": [
+          {
+            "startTime": 18406.6,
+            "endTime": 18408.8,
+            "text": "Catelyn looked at the knife, then at Bran."
+          },
+          {
+            "startTime": 18409.58,
+            "endTime": 18414.08,
+            "text": "No, she said, the word stuck in her throat, the merest whisper."
+          },
+          {
+            "startTime": 18414.74,
+            "endTime": 18416.06,
+            "text": "He must have heard her."
+          },
+          {
+            "startTime": 18416.38,
+            "endTime": 18418.66,
+            "text": "It's a mercy, he said."
+          },
+          {
+            "startTime": 18419.06,
+            "endTime": 18420.7,
+            "text": "He's dead already."
+          },
+          {
+            "startTime": 18421.62,
+            "endTime": 18426.52,
+            "text": "No, Catelyn said, louder now she had found the voice again."
+          },
+          {
+            "startTime": 18427.26,
+            "endTime": 18428.84,
+            "text": "No, you can't."
+          },
+          {
+            "startTime": 18429.36,
+            "endTime": 18434.72,
+            "text": "She spun back toward the window to scream for help, but the man moved faster than she would"
+          },
+          {
+            "startTime": 18434.72,
+            "endTime": 18435.28,
+            "text": "have believed."
+          },
+          {
+            "startTime": 18435.68,
+            "endTime": 18439.54,
+            "text": "One hand clamped down over her mouth and yanked back her head."
+          },
+          {
+            "startTime": 18439.78,
+            "endTime": 18442.08,
+            "text": "The other brought the dagger up to a windpipe."
+          },
+          {
+            "startTime": 18442.52,
+            "endTime": 18444.52,
+            "text": "The stench of him was overwhelming."
+          },
+          {
+            "startTime": 18445.46,
+            "endTime": 18451.34,
+            "text": "She reached up with both hands and grabbed the blade with all her strength, pulling it"
+          },
+          {
+            "startTime": 18451.34,
+            "endTime": 18452.28,
+            "text": "away from her throat."
+          },
+          {
+            "startTime": 18453.0,
+            "endTime": 18455.2,
+            "text": "She heard him cursing into her ear."
+          },
+          {
+            "startTime": 18455.66,
+            "endTime": 18460.56,
+            "text": "Her fingers were slippery with blood, but she would not let go of the dagger."
+          },
+          {
+            "startTime": 18461.08,
+            "endTime": 18465.4,
+            "text": "The hand over her mouth clenched more tightly, shutting off her ear."
+          },
+          {
+            "startTime": 18466.44,
+            "endTime": 18471.12,
+            "text": "Catelyn twisted her head to the side and managed to get a piece of his flesh between her teeth."
+          },
+          {
+            "startTime": 18471.4,
+            "endTime": 18473.58,
+            "text": "She bit down hard into his palm."
+          },
+          {
+            "startTime": 18473.88,
+            "endTime": 18475.74,
+            "text": "The man grunted in pain."
+          },
+          {
+            "startTime": 18476.42,
+            "endTime": 18481.66,
+            "text": "She ground her teeth together and tore at him, and all of a sudden he let go."
+          },
+          {
+            "startTime": 18482.24,
+            "endTime": 18484.56,
+            "text": "The taste of his blood filled her mouth."
+          },
+          {
+            "startTime": 18484.88,
+            "endTime": 18490.08,
+            "text": "She sucked in air and screamed, and he grabbed her hair and pulled her away from him,"
+          },
+          {
+            "startTime": 18490.08,
+            "endTime": 18491.92,
+            "text": "and she stumbled and went down."
+          },
+          {
+            "startTime": 18492.16,
+            "endTime": 18495.44,
+            "text": "And then he was standing over her, breathing hard, shaking."
+          },
+          {
+            "startTime": 18495.74,
+            "endTime": 18500.36,
+            "text": "The dagger was still clutched tightly in his right hand, slick with blood."
+          },
+          {
+            "startTime": 18500.66,
+            "endTime": 18505.78,
+            "text": "You weren't supposed to be here, he repeated stupidly."
+          },
+          {
+            "startTime": 18507.0,
+            "endTime": 18510.24,
+            "text": "Catelyn saw the shadow slip through the open door behind him."
+          },
+          {
+            "startTime": 18510.42,
+            "endTime": 18515.38,
+            "text": "There was a low rumble, less than a snarl, the merest whisper of a threat."
+          },
+          {
+            "startTime": 18515.38,
+            "endTime": 18521.16,
+            "text": "But he must have heard something, because he started to turn, just as the wolf made it sleep."
+          },
+          {
+            "startTime": 18521.76,
+            "endTime": 18525.7,
+            "text": "They went down together, half sprawled over Catelyn where she'd fallen."
+          },
+          {
+            "startTime": 18526.3,
+            "endTime": 18528.32,
+            "text": "The wolf had him under the jaw."
+          },
+          {
+            "startTime": 18528.6,
+            "endTime": 18534.16,
+            "text": "The man, shriek, lasted less than a second, before the beast wrenched back its head,"
+          },
+          {
+            "startTime": 18534.64,
+            "endTime": 18536.24,
+            "text": "taking out half his throat."
+          },
+          {
+            "startTime": 18536.24,
+            "endTime": 18539.62,
+            "text": "His blood felt like warm rain."
+          },
+          {
+            "startTime": 18538.05,
+            "endTime": 18541.69,
+            "text": "\"'felt like warm rain as it sprayed across her face."
+          },
+          {
+            "startTime": 18542.59,
+            "endTime": 18544.57,
+            "text": "\"'The wolf was looking at her."
+          },
+          {
+            "startTime": 18544.87,
+            "endTime": 18547.81,
+            "text": "\"'Its jaws were red and wet,"
+          },
+          {
+            "startTime": 18548.01,
+            "endTime": 18551.83,
+            "text": "\"'and its eyes glowed golden in the dark room."
+          },
+          {
+            "startTime": 18552.17,
+            "endTime": 18554.37,
+            "text": "\"'It was Bran's wolf, she realized."
+          },
+          {
+            "startTime": 18554.69,
+            "endTime": 18555.71,
+            "text": "\"'Of course it was."
+          },
+          {
+            "startTime": 18556.65,
+            "endTime": 18561.15,
+            "text": "\"'Thank you,' Catelyn whispered, her voice faint and tiny."
+          },
+          {
+            "startTime": 18561.85,
+            "endTime": 18564.11,
+            "text": "\"'She lifted her hand, trembling."
+          },
+          {
+            "startTime": 18564.45,
+            "endTime": 18567.53,
+            "text": "\"'The wolf padded closer, sniffed at her fingers,"
+          },
+          {
+            "startTime": 18567.89,
+            "endTime": 18570.33,
+            "text": "\"'then licked at the blood with a wet, rough tongue."
+          },
+          {
+            "startTime": 18570.95,
+            "endTime": 18573.77,
+            "text": "\"'When it had cleaned all the blood off her hand,"
+          },
+          {
+            "startTime": 18573.93,
+            "endTime": 18578.23,
+            "text": "\"'it turned away silently and jumped up on Bran's bed"
+          },
+          {
+            "startTime": 18578.23,
+            "endTime": 18579.91,
+            "text": "\"'and lay down beside him."
+          },
+          {
+            "startTime": 18581.09,
+            "endTime": 18583.87,
+            "text": "\"'Catelyn began to laugh hysterically."
+          },
+          {
+            "startTime": 18585.76,
+            "endTime": 18587.56,
+            "text": "\"'That was the way they found them."
+          },
+          {
+            "startTime": 18587.98,
+            "endTime": 18592.02,
+            "text": "\"'When Robb and Maester Luan and Sir Roderick burst in"
+          },
+          {
+            "startTime": 18592.02,
+            "endTime": 18593.98,
+            "text": "\"'with half the guards in Winterfell,"
+          },
+          {
+            "startTime": 18594.62,
+            "endTime": 18597.44,
+            "text": "\"'when the laughter finally died in her throat,"
+          },
+          {
+            "startTime": 18597.44,
+            "endTime": 18599.74,
+            "text": "\"'they wrapped her in warm blankets"
+          },
+          {
+            "startTime": 18599.74,
+            "endTime": 18601.9,
+            "text": "\"'and led her back to the Great Keep,"
+          },
+          {
+            "startTime": 18602.38,
+            "endTime": 18603.58,
+            "text": "\"'to her own chambers."
+          },
+          {
+            "startTime": 18604.32,
+            "endTime": 18606.28,
+            "text": "\"'Old Nan undressed her"
+          },
+          {
+            "startTime": 18606.28,
+            "endTime": 18609.52,
+            "text": "\"'and helped her into a scalding hot bath"
+          },
+          {
+            "startTime": 18609.52,
+            "endTime": 18613.26,
+            "text": "\"'and washed the blood off her with a soft cloth."
+          },
+          {
+            "startTime": 18614.7,
+            "endTime": 18617.7,
+            "text": "\"'Afterwards Maester Luan arrived to dress her wounds."
+          },
+          {
+            "startTime": 18618.18,
+            "endTime": 18620.28,
+            "text": "\"'The cuts in her fingers were deep,"
+          },
+          {
+            "startTime": 18620.76,
+            "endTime": 18621.96,
+            "text": "\"'almost to the bone,"
+          },
+          {
+            "startTime": 18621.96,
+            "endTime": 18624.76,
+            "text": "\"'and her scalp was raw and bleeding"
+          },
+          {
+            "startTime": 18624.76,
+            "endTime": 18627.02,
+            "text": "\"'where he'd pulled out a handful of hair."
+          },
+          {
+            "startTime": 18627.38,
+            "endTime": 18630.96,
+            "text": "\"'The Maester told her the pain was just starting now"
+          },
+          {
+            "startTime": 18630.96,
+            "endTime": 18634.74,
+            "text": "\"'and gave her milk of the puppy to help her sleep."
+          },
+          {
+            "startTime": 18636.22,
+            "endTime": 18638.3,
+            "text": "\"'Finally, she closed her eyes."
+          },
+          {
+            "startTime": 18639.74,
+            "endTime": 18641.38,
+            "text": "\"'When she opened them again,"
+          },
+          {
+            "startTime": 18642.14,
+            "endTime": 18645.22,
+            "text": "\"'they told her she had slept four days."
+          },
+          {
+            "startTime": 18646.22,
+            "endTime": 18648.72,
+            "text": "\"'Catelyn nodded and sat up in bed."
+          },
+          {
+            "startTime": 18648.72,
+            "endTime": 18651.78,
+            "text": "\"'It all seemed like a nightmare to her now,"
+          },
+          {
+            "startTime": 18652.48,
+            "endTime": 18654.22,
+            "text": "\"'everything since Bran's fall,"
+          },
+          {
+            "startTime": 18654.6,
+            "endTime": 18657.8,
+            "text": "\"'a terrible dream of blood and grief."
+          },
+          {
+            "startTime": 18658.26,
+            "endTime": 18660.3,
+            "text": "\"'But she had the pain in her hands"
+          },
+          {
+            "startTime": 18660.3,
+            "endTime": 18663.3,
+            "text": "\"'to remind her that it was real."
+          }
+        ]
+      }
+    },
+    {
+      "id": "got-borderline-corpse-investigation-clinical-tone",
+      "source": "A Game of Thrones",
+      "fingerprint": {
+        "version": 1,
+        "sha256": "1d7d5e1829d0bc813a4537d13d00d271c85734b1407346d1d5a170cb39d2f787",
+        "fileSize": 966322917
+      },
+      "category": "violence_graphic",
+      "expected": {
+        "accepted": true,
+        "label": "violence_graphic",
+        "notes": "Genuinely borderline case, included as a hard test rather than a clean example: characters examine dead bodies in a mystery/investigation dialogue (missing decomposition, dry crusted blood, a torn-off hand with no bleeding, described wounds), with real anatomical/wound detail present but delivered in a clinical, dialogue-driven tone rather than visceral action narration. Under the app's definition ('a wound described closely enough that a listener pictures the injury itself'), the specific physical descriptions here (torn veins, black dust blood, the stump that hasn't bled) likely still qualify despite the calmer delivery -- but this is close enough to the line that a candidate model's answer here should be checked by a human rather than treated as a clear pass/fail signal on its own."
+      },
+      "transcript_window": {
+        "start_time": 81808.42,
+        "end_time": 82081.25,
+        "segments": [
+          {
+            "startTime": 81808.42,
+            "endTime": 81810.4,
+            "text": "The corpses are still fresh."
+          },
+          {
+            "startTime": 81810.72,
+            "endTime": 81813.58,
+            "text": "These men cannot be dead more than a day."
+          },
+          {
+            "startTime": 81814.36,
+            "endTime": 81814.96,
+            "text": "No!"
+          },
+          {
+            "startTime": 81815.98,
+            "endTime": 81817.46,
+            "text": "Samuel Tarly squeaked."
+          },
+          {
+            "startTime": 81818.26,
+            "endTime": 81818.98,
+            "text": "Jon was startled."
+          },
+          {
+            "startTime": 81819.94,
+            "endTime": 81821.82,
+            "text": "Sam's nervous, high-pitched voice"
+          },
+          {
+            "startTime": 81821.82,
+            "endTime": 81823.94,
+            "text": "was the last he would have expected to hear."
+          },
+          {
+            "startTime": 81824.48,
+            "endTime": 81826.9,
+            "text": "The fat boy was frightened of the officers,"
+          },
+          {
+            "startTime": 81827.16,
+            "endTime": 81830.02,
+            "text": "and Sir Jeremy was not known for his patience."
+          },
+          {
+            "startTime": 81830.9,
+            "endTime": 81833.16,
+            "text": "I did not ask for your views, boy,"
+          },
+          {
+            "startTime": 81833.76,
+            "endTime": 81835.02,
+            "text": "Riker said coldly."
+          },
+          {
+            "startTime": 81835.72,
+            "endTime": 81838.06,
+            "text": "Let him speak, sir, Jon blurted."
+          },
+          {
+            "startTime": 81839.1,
+            "endTime": 81842.28,
+            "text": "Mormont's eyes flicked from Sam to Jon and back again."
+          },
+          {
+            "startTime": 81842.28,
+            "endTime": 81844.62,
+            "text": "If the lad has something to say,"
+          },
+          {
+            "startTime": 81845.1,
+            "endTime": 81846.1,
+            "text": "I'll hear him."
+          },
+          {
+            "startTime": 81846.46,
+            "endTime": 81847.52,
+            "text": "Come closer, boy."
+          },
+          {
+            "startTime": 81847.9,
+            "endTime": 81849.88,
+            "text": "We can't see you behind those horses."
+          },
+          {
+            "startTime": 81850.72,
+            "endTime": 81853.32,
+            "text": "Sam edge past Jon and the Garrens,"
+          },
+          {
+            "startTime": 81853.48,
+            "endTime": 81854.7,
+            "text": "sweating profusely."
+          },
+          {
+            "startTime": 81855.2,
+            "endTime": 81859.86,
+            "text": "My lord, it can't be a day, or..."
+          },
+          {
+            "startTime": 81859.86,
+            "endTime": 81861.88,
+            "text": "Look, the blood!"
+          },
+          {
+            "startTime": 81862.72,
+            "endTime": 81865.0,
+            "text": "Yes, Mormont growled impatiently."
+          },
+          {
+            "startTime": 81865.24,
+            "endTime": 81865.9,
+            "text": "Blood?"
+          },
+          {
+            "startTime": 81866.18,
+            "endTime": 81866.92,
+            "text": "What of it?"
+          },
+          {
+            "startTime": 81867.48,
+            "endTime": 81870.26,
+            "text": "He soils his small clothes at the sight of it,"
+          },
+          {
+            "startTime": 81870.26,
+            "endTime": 81872.66,
+            "text": "Chet shouted out, and the rangers laughed."
+          },
+          {
+            "startTime": 81873.46,
+            "endTime": 81875.82,
+            "text": "Sam mopped at the sweat on his bra."
+          },
+          {
+            "startTime": 81876.66,
+            "endTime": 81877.34,
+            "text": "You..."
+          },
+          {
+            "startTime": 81877.34,
+            "endTime": 81879.78,
+            "text": "You can see where Ghost,"
+          },
+          {
+            "startTime": 81880.16,
+            "endTime": 81881.54,
+            "text": "Jon's dire wolf,"
+          },
+          {
+            "startTime": 81881.84,
+            "endTime": 81885.06,
+            "text": "you can see where he tore off the man's hand,"
+          },
+          {
+            "startTime": 81885.28,
+            "endTime": 81887.88,
+            "text": "and yet the stump hasn't bled."
+          },
+          {
+            "startTime": 81888.22,
+            "endTime": 81888.74,
+            "text": "Look!"
+          },
+          {
+            "startTime": 81889.06,
+            "endTime": 81890.22,
+            "text": "He waved a hand."
+          },
+          {
+            "startTime": 81890.64,
+            "endTime": 81893.86,
+            "text": "My father, Lord Randall,"
+          },
+          {
+            "startTime": 81893.86,
+            "endTime": 81897.06,
+            "text": "He made me watch him dress animals sometimes,"
+          },
+          {
+            "startTime": 81897.06,
+            "endTime": 81898.1,
+            "text": "when..."
+          },
+          {
+            "startTime": 81898.78,
+            "endTime": 81899.34,
+            "text": "After..."
+          },
+          {
+            "startTime": 81899.34,
+            "endTime": 81901.82,
+            "text": "Sam shook his head from side to side,"
+          },
+          {
+            "startTime": 81901.94,
+            "endTime": 81902.8,
+            "text": "his chins quivering."
+          },
+          {
+            "startTime": 81903.34,
+            "endTime": 81904.96,
+            "text": "Now that he had looked at the bodies,"
+          },
+          {
+            "startTime": 81905.18,
+            "endTime": 81906.74,
+            "text": "he could not seem to look away."
+          },
+          {
+            "startTime": 81907.22,
+            "endTime": 81908.54,
+            "text": "A fresh kill,"
+          },
+          {
+            "startTime": 81908.74,
+            "endTime": 81910.26,
+            "text": "the blood would still flow,"
+          },
+          {
+            "startTime": 81910.78,
+            "endTime": 81911.26,
+            "text": "my lords."
+          },
+          {
+            "startTime": 81912.02,
+            "endTime": 81912.58,
+            "text": "Later,"
+          },
+          {
+            "startTime": 81914.0,
+            "endTime": 81914.42,
+            "text": "later,"
+          },
+          {
+            "startTime": 81914.42,
+            "endTime": 81915.96,
+            "text": "it would be"
+          },
+          {
+            "startTime": 81917.2,
+            "endTime": 81917.88,
+            "text": "cluttered"
+          },
+          {
+            "startTime": 81917.88,
+            "endTime": 81918.92,
+            "text": "like a..."
+          },
+          {
+            "startTime": 81918.92,
+            "endTime": 81919.92,
+            "text": "a jelly,"
+          },
+          {
+            "startTime": 81920.6,
+            "endTime": 81922.22,
+            "text": "thick and..."
+          },
+          {
+            "startTime": 81922.22,
+            "endTime": 81922.98,
+            "text": "and..."
+          },
+          {
+            "startTime": 81922.98,
+            "endTime": 81925.02,
+            "text": "He looked as if he was going to be sick."
+          },
+          {
+            "startTime": 81926.18,
+            "endTime": 81927.22,
+            "text": "This man,"
+          },
+          {
+            "startTime": 81926.27,
+            "endTime": 81928.21,
+            "text": "\"'This man, look at the wrist."
+          },
+          {
+            "startTime": 81927.38,
+            "endTime": 81927.98,
+            "text": "look at the..."
+          },
+          {
+            "startTime": 81928.27,
+            "endTime": 81932.51,
+            "text": "\"'It's all crusty, dry, like\u2014'"
+          },
+          {
+            "startTime": 81933.29,
+            "endTime": 81935.45,
+            "text": "\"'John saw at once what Sam meant."
+          },
+          {
+            "startTime": 81935.83,
+            "endTime": 81939.35,
+            "text": "\"'He could see the torn veins in the dead man's wrist,"
+          },
+          {
+            "startTime": 81939.61,
+            "endTime": 81942.39,
+            "text": "\"'iron worms in the pale flesh."
+          },
+          {
+            "startTime": 81943.05,
+            "endTime": 81945.27,
+            "text": "\"'His blood was a black dust,"
+          },
+          {
+            "startTime": 81945.87,
+            "endTime": 81948.13,
+            "text": "\"'yet Jeremy Riker was unconvinced."
+          },
+          {
+            "startTime": 81948.81,
+            "endTime": 81952.07,
+            "text": "\"'If they'd been dead much longer than a day,"
+          },
+          {
+            "startTime": 81952.39,
+            "endTime": 81954.45,
+            "text": "\"'they'd be wiped by now, boy."
+          },
+          {
+            "startTime": 81954.65,
+            "endTime": 81955.87,
+            "text": "\"'They don't even smell."
+          },
+          {
+            "startTime": 81956.79,
+            "endTime": 81958.63,
+            "text": "\"'Diwin, the gnarled old forester,"
+          },
+          {
+            "startTime": 81958.87,
+            "endTime": 81961.95,
+            "text": "\"'who'd like to boast that he could smell snow coming on,"
+          },
+          {
+            "startTime": 81962.17,
+            "endTime": 81965.21,
+            "text": "\"'sidled closer to the corpses and took a whiff."
+          },
+          {
+            "startTime": 81966.81,
+            "endTime": 81969.07,
+            "text": "\"'Well, there are no pansy flowers,"
+          },
+          {
+            "startTime": 81969.21,
+            "endTime": 81971.79,
+            "text": "\"'but my lord has the truth of it."
+          },
+          {
+            "startTime": 81972.19,
+            "endTime": 81973.87,
+            "text": "\"'There's no corpse stink."
+          },
+          {
+            "startTime": 81975.67,
+            "endTime": 81978.61,
+            "text": "\"'They\u2014they aren't rotten,' Sam pointed,"
+          },
+          {
+            "startTime": 81978.89,
+            "endTime": 81980.99,
+            "text": "\"'his fat finger shaking only a little."
+          },
+          {
+            "startTime": 81980.99,
+            "endTime": 81986.87,
+            "text": "\"'Look, there's\u2014there's no maggots or\u2014or worms or anything."
+          },
+          {
+            "startTime": 81987.37,
+            "endTime": 81989.47,
+            "text": "\"'They've been lying here in the woods,"
+          },
+          {
+            "startTime": 81989.73,
+            "endTime": 81994.57,
+            "text": "\"'but they\u2014they haven't been chewed or eaten by animals."
+          },
+          {
+            "startTime": 81994.57,
+            "endTime": 81996.21,
+            "text": "\"'Only ghosts?"
+          },
+          {
+            "startTime": 81996.69,
+            "endTime": 81999.69,
+            "text": "\"'Otherwise, they're\u2014they're\u2014'"
+          },
+          {
+            "startTime": 81999.73,
+            "endTime": 82001.69,
+            "text": "\"'Untouched,' John said softly."
+          },
+          {
+            "startTime": 82002.11,
+            "endTime": 82003.61,
+            "text": "\"'And ghost is different."
+          },
+          {
+            "startTime": 82004.15,
+            "endTime": 82007.09,
+            "text": "\"'The dogs and the horses won't go near them.'"
+          },
+          {
+            "startTime": 82007.09,
+            "endTime": 82009.43,
+            "text": "\"'The rangers exchanged glances."
+          },
+          {
+            "startTime": 82009.83,
+            "endTime": 82011.21,
+            "text": "\"'They could see it was true."
+          },
+          {
+            "startTime": 82011.59,
+            "endTime": 82012.69,
+            "text": "\"'Every man of them."
+          },
+          {
+            "startTime": 82013.49,
+            "endTime": 82017.41,
+            "text": "\"'Mormont Frond, glancing from the corpses to the dogs."
+          },
+          {
+            "startTime": 82017.73,
+            "endTime": 82020.27,
+            "text": "\"'Chet, bring the hounds closer."
+          },
+          {
+            "startTime": 82021.09,
+            "endTime": 82023.95,
+            "text": "\"'Chet tried, cursing, yanking on the leashes,"
+          },
+          {
+            "startTime": 82024.25,
+            "endTime": 82026.13,
+            "text": "\"'giving one animal a lick of his boot."
+          },
+          {
+            "startTime": 82026.81,
+            "endTime": 82029.87,
+            "text": "\"'Most of the dogs just whimpered and planted their feet."
+          },
+          {
+            "startTime": 82030.51,
+            "endTime": 82031.85,
+            "text": "\"'He tried dragging one."
+          },
+          {
+            "startTime": 82031.85,
+            "endTime": 82035.03,
+            "text": "\"'The bitch resisted, growling and squirming,"
+          },
+          {
+            "startTime": 82035.15,
+            "endTime": 82036.69,
+            "text": "\"'as if to escape her collar."
+          },
+          {
+            "startTime": 82037.23,
+            "endTime": 82038.95,
+            "text": "\"'Finally, she lunged at him."
+          },
+          {
+            "startTime": 82039.29,
+            "endTime": 82041.85,
+            "text": "\"'Chet dropped the leash and stumbled backwards."
+          },
+          {
+            "startTime": 82042.19,
+            "endTime": 82046.33,
+            "text": "\"'The dog leapt over him and bound it off into the trees."
+          },
+          {
+            "startTime": 82048.09,
+            "endTime": 82052.01,
+            "text": "\"'This\u2014this is all wrong,' Sam Tarly said earnestly."
+          },
+          {
+            "startTime": 82052.29,
+            "endTime": 82056.13,
+            "text": "\"'The blood\u2014there's bloodstains on the clothes,"
+          },
+          {
+            "startTime": 82056.25,
+            "endTime": 82060.47,
+            "text": "\"'and\u2014and their flesh, dry and hard,"
+          },
+          {
+            "startTime": 82060.47,
+            "endTime": 82064.81,
+            "text": "\"'but there's none on the ground, or anywhere."
+          },
+          {
+            "startTime": 82065.35,
+            "endTime": 82070.03,
+            "text": "\"'With those\u2014those\u2014those\u2014'"
+          },
+          {
+            "startTime": 82071.15,
+            "endTime": 82074.05,
+            "text": "\"'Sam made himself swallow, took a deep breath."
+          },
+          {
+            "startTime": 82074.43,
+            "endTime": 82077.17,
+            "text": "\"'With those wounds, terrible wounds,"
+          },
+          {
+            "startTime": 82077.41,
+            "endTime": 82081.25,
+            "text": "\"'there should be blood all over, shouldn't there?'"
+          }
+        ]
+      }
+    },
+    {
+      "id": "got-graphic-violence-wight-attack",
+      "source": "A Game of Thrones",
+      "fingerprint": {
+        "version": 1,
+        "sha256": "1d7d5e1829d0bc813a4537d13d00d271c85734b1407346d1d5a170cb39d2f787",
+        "fileSize": 966322917
+      },
+      "category": "violence_graphic",
+      "expected": {
+        "accepted": true,
+        "label": "violence_graphic",
+        "notes": "Extremely graphic positive: dwelt-on combat violence against a reanimated corpse ('steel sheared through sleeve and skin and bone', a severed arm still crawling and clawing, 'finger bones crunched', the dire wolf tearing at the corpse's gut). Tests whether a supernatural/undead victim (rather than a living human) changes classification -- the taxonomy's definition is about the narration's physical detail, not the victim's nature, so this should still qualify."
+      },
+      "transcript_window": {
+        "start_time": 83522.72,
+        "end_time": 83733.1,
+        "segments": [
+          {
+            "startTime": 83522.72,
+            "endTime": 83528.8,
+            "text": "black hands buried in white fur, swollen dark fingers tightening around his direwolf's throat."
+          },
+          {
+            "startTime": 83529.68,
+            "endTime": 83534.96,
+            "text": "Ghost was twisting and snapping, legs flailing in the air, but he could not break free."
+          },
+          {
+            "startTime": 83536.28,
+            "endTime": 83542.56,
+            "text": "John had no time to be afraid. He threw himself forward, shouting, bringing down the longsword with"
+          },
+          {
+            "startTime": 83542.56,
+            "endTime": 83551.64,
+            "text": "all his weight behind it. Steel sheared through sleeve and skin and bone. Yet the sound was wrong"
+          },
+          {
+            "startTime": 83551.64,
+            "endTime": 83560.08,
+            "text": "somehow. The smell that engulfed him was so queer and cold he almost gagged. He saw arm and hand on the"
+          },
+          {
+            "startTime": 83560.08,
+            "endTime": 83567.08,
+            "text": "floor, black fingers wriggling in a pool of moonlight. Ghost wrenched free from the other hand and crept"
+          },
+          {
+            "startTime": 83567.08,
+            "endTime": 83576.84,
+            "text": "away, red tongue lolling from his mouth. The hooded man lifted his pale moon face, and John slashed at it"
+          },
+          {
+            "startTime": 83576.84,
+            "endTime": 83584.06,
+            "text": "without hesitation. The sword laid the intruder open to the bone, taking off half his nose and opening a"
+          },
+          {
+            "startTime": 83584.06,
+            "endTime": 83591.08,
+            "text": "gash, gash cheek to cheek under those eyes. Eyes, eyes, eyes, like blue stars burning."
+          },
+          {
+            "startTime": 83591.98,
+            "endTime": 83600.62,
+            "text": "John knew that face. Arthur, he thought, reeling back. Cards, he's dead, he's dead. I saw him dead."
+          },
+          {
+            "startTime": 83601.58,
+            "endTime": 83609.88,
+            "text": "He felt something scrabble at his ankle. Black fingers clawed at his calf. The arm was crawling up his leg,"
+          },
+          {
+            "startTime": 83609.88,
+            "endTime": 83617.24,
+            "text": "ripping at wool and flesh. Shouting with revulsion, John pried the fingers off his leg with a point of"
+          },
+          {
+            "startTime": 83617.24,
+            "endTime": 83622.9,
+            "text": "his sword and flipped the thing away. It lay writhing, fingers opening and closing."
+          },
+          {
+            "startTime": 83623.78,
+            "endTime": 83632.74,
+            "text": "The corpse lurched forward. There was no blood. One armed, face cut near in half. It seemed to feel"
+          },
+          {
+            "startTime": 83632.74,
+            "endTime": 83640.12,
+            "text": "nothing. John held the longsword before him. Stay away, he commanded, his voice gone shrill."
+          },
+          {
+            "startTime": 83640.68,
+            "endTime": 83649.28,
+            "text": "Orn, screamed the raven. Orn, orn. The severed arm was wriggling out of his torn sleeve, a pale snake"
+          },
+          {
+            "startTime": 83649.28,
+            "endTime": 83657.96,
+            "text": "with black five-fingered head. Ghost pounced and got it between his teeth. Finger bones crunched."
+          },
+          {
+            "startTime": 83658.9,
+            "endTime": 83667.78,
+            "text": "John hacked at the corpse's neck, felt the steel bite deep and hard. Dead Arthur slammed into him,"
+          },
+          {
+            "startTime": 83668.2,
+            "endTime": 83674.4,
+            "text": "knocking him off his feet. John's breath went out of him as the fallen table caught him between his"
+          },
+          {
+            "startTime": 83674.4,
+            "endTime": 83681.72,
+            "text": "shoulder blades. The sword! Where was the sword? It lost the damn sword! When he opened his mouth to"
+          },
+          {
+            "startTime": 83681.72,
+            "endTime": 83688.28,
+            "text": "scream, the white jammed its black corpse fingers into John's mouth. Gagging, he tried to shove it"
+          },
+          {
+            "startTime": 83688.28,
+            "endTime": 83695.76,
+            "text": "off. But the dead man was too heavy, its hand forcing itself farther down his throat. I see cold"
+          },
+          {
+            "startTime": 83695.76,
+            "endTime": 83704.14,
+            "text": "choking him. Its face was against his own, filling the world. Frost covered its eyes, sparkling blue."
+          },
+          {
+            "startTime": 83704.74,
+            "endTime": 83711.0,
+            "text": "John raked cold flesh with his nails and kicked at the thing's legs. He tried to bite,"
+          },
+          {
+            "startTime": 83711.0,
+            "endTime": 83718.72,
+            "text": "tried to punch, tried to breathe. And suddenly, the corpse's weight was gone. Its fingers ripped from"
+          },
+          {
+            "startTime": 83718.72,
+            "endTime": 83721.96,
+            "text": "his throat. It was all John could do to run."
+          },
+          {
+            "startTime": 83720.0,
+            "endTime": 83724.66,
+            "text": "It was all John could do to roll over, retching and shaking."
+          },
+          {
+            "startTime": 83725.64,
+            "endTime": 83726.92,
+            "text": "Ghost had it again."
+          },
+          {
+            "startTime": 83727.42,
+            "endTime": 83733.1,
+            "text": "He watched as the dire wolf buried his teeth in the wight's gut and began to rip and tear."
+          }
+        ]
+      }
+    },
+    {
+      "id": "alife-self-harm-active-cutting-depiction",
+      "source": "A Little Life",
+      "fingerprint": {
+        "version": 1,
+        "sha256": "fda633730e5d94ca3e5b7f9ab3dbdbfc88f080f7980fb5d295644c593ee16fe3",
+        "fileSize": 938763832
+      },
+      "category": "self_harm_depiction",
+      "expected": {
+        "accepted": true,
+        "label": "self_harm_depiction",
+        "notes": "The clearest, most direct self-harm positive in this entire eval set, from the book specifically known for sustained, explicit self-harm content throughout. An active cutting scene depicted in real physical detail (razor, counting seconds between cuts, scarred forearms from years of cutting, a prior suicide attempt referenced), escalating into a second character (Willem) cutting himself in a moment of desperate emotional response. This is exactly the kind of case that most needs a written rubric for self_harm_depiction vs. self_harm_suicide_attempt vs. self_harm_reference -- this passage arguably touches all three (past suicide attempt referenced, active depiction happening now, and it is itself a reference for the reader going forward) and the app's prompt gives a model no guidance on how to pick just one."
+      },
+      "transcript_window": {
+        "start_time": 78722.22,
+        "end_time": 78971.24,
+        "segments": [
+          {
+            "startTime": 78722.22,
+            "endTime": 78730.76,
+            "text": "had not veins, but circuitry, fizzing and blipping with electricity. Willem? He whispered. And when Willem"
+          },
+          {
+            "startTime": 78730.76,
+            "endTime": 78737.08,
+            "text": "didn't answer, he placed his hand on Willem's neck, and when Willem didn't move, he finally got out of"
+          },
+          {
+            "startTime": 78737.08,
+            "endTime": 78743.04,
+            "text": "bed and walked as softly as he could into their closet, where he retrieved his bag, which he had"
+          },
+          {
+            "startTime": 78743.04,
+            "endTime": 78748.36,
+            "text": "learned to store in the interior pocket of one of his winter coats, and then out of the room and across"
+          },
+          {
+            "startTime": 78748.36,
+            "endTime": 78754.68,
+            "text": "the apartment to the bathroom at the opposite end, where he closed the door. Here, too, there was a"
+          },
+          {
+            "startTime": 78754.68,
+            "endTime": 78760.32,
+            "text": "large shower, and he sat down inside of it, and took off his shirt, and leaned his back against"
+          },
+          {
+            "startTime": 78760.32,
+            "endTime": 78767.72,
+            "text": "the cool stone. His forearms were now so thickened from scar tissue that from a distance, they appeared"
+          },
+          {
+            "startTime": 78767.72,
+            "endTime": 78773.14,
+            "text": "to have been dipped in plaster, and you could barely distinguish where he had made the cuts in his"
+          },
+          {
+            "startTime": 78773.14,
+            "endTime": 78781.14,
+            "text": "suicide attempt. He had cut between and around each stripe, layering the cuts, camouflaging the scars."
+          },
+          {
+            "startTime": 78782.12,
+            "endTime": 78788.4,
+            "text": "Lately, he had begun concentrating more on his upper arms, not the biceps, which were also scarred,"
+          },
+          {
+            "startTime": 78788.62,
+            "endTime": 78794.8,
+            "text": "but the triceps, which were somehow less satisfying. He liked to see the cuts as he made them without"
+          },
+          {
+            "startTime": 78794.8,
+            "endTime": 78802.26,
+            "text": "twisting his neck. But now he made long, careful cuts down his left tricep, counting the seconds it"
+          },
+          {
+            "startTime": 78802.26,
+            "endTime": 78811.12,
+            "text": "took to make each one, one, two, three, against his breaths. Down he cut, four times,"
+          },
+          {
+            "startTime": 78811.14,
+            "endTime": 78817.72,
+            "text": "times on his left, and three times on his right. And as he was making the fourth, his hands fluttery"
+          },
+          {
+            "startTime": 78817.72,
+            "endTime": 78823.76,
+            "text": "from that delicious weakness, he had looked up and had seen Willem in the doorway, watching him."
+          },
+          {
+            "startTime": 78824.44,
+            "endTime": 78829.54,
+            "text": "In all his decades of cutting himself, he had never been witnessed in the act itself,"
+          },
+          {
+            "startTime": 78830.0,
+            "endTime": 78834.98,
+            "text": "and he stopped abruptly, the violation as shocking as if he had been slugged."
+          },
+          {
+            "startTime": 78835.72,
+            "endTime": 78841.88,
+            "text": "Willem didn't say anything, but as he walked toward him, he cowered, pressing himself against"
+          },
+          {
+            "startTime": 78841.88,
+            "endTime": 78850.4,
+            "text": "the shower wall, mortified and terrified, waiting for what might happen. He watched Willem crouch and"
+          },
+          {
+            "startTime": 78850.4,
+            "endTime": 78855.4,
+            "text": "gently remove the razor from his hand, and for a moment they remained in those positions,"
+          },
+          {
+            "startTime": 78855.84,
+            "endTime": 78862.52,
+            "text": "both of them staring at the razor. And then Willem stood and, without preamble or warning,"
+          },
+          {
+            "startTime": 78862.52,
+            "endTime": 78868.42,
+            "text": "sliced the razor across his own chest. He snapped alive then."
+          },
+          {
+            "startTime": 78868.84,
+            "endTime": 78869.36,
+            "text": "No!"
+          },
+          {
+            "startTime": 78869.7,
+            "endTime": 78875.32,
+            "text": "He shouted, and tried to get up, but he didn't have the strength, and he fell back."
+          },
+          {
+            "startTime": 78876.12,
+            "endTime": 78877.04,
+            "text": "Willem, no!"
+          },
+          {
+            "startTime": 78877.72,
+            "endTime": 78878.52,
+            "text": "Fuck!"
+          },
+          {
+            "startTime": 78878.8,
+            "endTime": 78879.84,
+            "text": "Willem yelled."
+          },
+          {
+            "startTime": 78880.32,
+            "endTime": 78881.04,
+            "text": "Fuck!"
+          },
+          {
+            "startTime": 78881.04,
+            "endTime": 78885.08,
+            "text": "But he made a second cut anyway, right under the first."
+          },
+          {
+            "startTime": 78886.1,
+            "endTime": 78887.18,
+            "text": "Stop it, Willem!"
+          },
+          {
+            "startTime": 78887.4,
+            "endTime": 78889.96,
+            "text": "He shouted, almost in tears."
+          },
+          {
+            "startTime": 78890.6,
+            "endTime": 78893.14,
+            "text": "Willem, stop it! You're hurting yourself!"
+          },
+          {
+            "startTime": 78893.66,
+            "endTime": 78894.44,
+            "text": "Oh yeah?"
+          },
+          {
+            "startTime": 78895.04,
+            "endTime": 78900.82,
+            "text": "Asked Willem, and he could tell by how bright Willem's eyes were that he was almost crying himself."
+          },
+          {
+            "startTime": 78901.36,
+            "endTime": 78903.18,
+            "text": "You see what it feels like, Jude?"
+          },
+          {
+            "startTime": 78903.18,
+            "endTime": 78906.8,
+            "text": "And he made a third cut, cursing again."
+          },
+          {
+            "startTime": 78907.9,
+            "endTime": 78913.48,
+            "text": "Willem, he moaned and lunged for his feet, but Willem stepped out of his way."
+          },
+          {
+            "startTime": 78914.18,
+            "endTime": 78916.72,
+            "text": "Please stop. Please, Willem."
+          },
+          {
+            "startTime": 78917.22,
+            "endTime": 78922.54,
+            "text": "He had begged and begged, but it was only after the sixth cut that Willem stopped,"
+          },
+          {
+            "startTime": 78922.84,
+            "endTime": 78925.0,
+            "text": "slumping down against the opposite wall."
+          },
+          {
+            "startTime": 78926.93,
+            "endTime": 78932.43,
+            "text": "He said quietly, bending over at the waist and wrapping his arms around himself."
+          },
+          {
+            "startTime": 78933.21,
+            "endTime": 78934.59,
+            "text": "Fuck, that hurts!"
+          },
+          {
+            "startTime": 78935.47,
+            "endTime": 78937.95,
+            "text": "He scooted over to Willem with his bag to help him."
+          },
+          {
+            "startTime": 78936.0,
+            "endTime": 78940.92,
+            "text": "scooted over to Willem with his bag to help him clean up, but Willem moved away from him."
+          },
+          {
+            "startTime": 78941.44,
+            "endTime": 78947.0,
+            "text": "Leave me alone, Jude, he said. But you need to bandage them, he said."
+          },
+          {
+            "startTime": 78947.76,
+            "endTime": 78952.14,
+            "text": "Bandage your own goddamn arms, Willem said, still not looking at him."
+          },
+          {
+            "startTime": 78952.5,
+            "endTime": 78955.48,
+            "text": "This isn't some fucked up ritual we're gonna share, you know,"
+          },
+          {
+            "startTime": 78956.02,
+            "endTime": 78960.16,
+            "text": "bandaging each other's self-inflicted cuts. He shrank back."
+          },
+          {
+            "startTime": 78960.82,
+            "endTime": 78965.86,
+            "text": "I wasn't trying to suggest that, he said, but Willem didn't answer him."
+          },
+          {
+            "startTime": 78966.0,
+            "endTime": 78971.24,
+            "text": "And finally, he did clean off his cuts, and then slid the bag over toward Willem,"
+          }
+        ]
+      }
+    },
+    {
+      "id": "alife-self-harm-taught-as-coping-mechanism",
+      "source": "A Little Life",
+      "fingerprint": {
+        "version": 1,
+        "sha256": "fda633730e5d94ca3e5b7f9ab3dbdbfc88f080f7980fb5d295644c593ee16fe3",
+        "fileSize": 938763832
+      },
+      "category": "self_harm_depiction",
+      "expected": {
+        "accepted": true,
+        "label": "self_harm_depiction",
+        "notes": "A flashback in which a child is taught to cut himself as a coping mechanism by an adult abuser, described with real detail about the method (razors, alcohol wipes, bandaging) and its psychological function ('draining away the poison'). Embedded implied child-abuse context (the passage references 'clients' and Brother Luke's body/hands in a way that implies ongoing sexual abuse) -- handled with narrative restraint in the source text, not graphically depicted, but present as context. Included because self-harm associated with grooming/abuse is a real pattern this taxonomy needs to handle, but flagging for extra care in review given the embedded sensitive context; if this case is uncomfortable to use for eval purposes, it should be removed rather than forced."
+      },
+      "transcript_window": {
+        "start_time": 67075.62,
+        "end_time": 67203.36,
+        "segments": [
+          {
+            "startTime": 67075.62,
+            "endTime": 67080.64,
+            "text": "But then the brother said that he would teach him a secret, something that would help him relieve his"
+          },
+          {
+            "startTime": 67080.64,
+            "endTime": 67087.14,
+            "text": "frustrations. And the next day, he had taught him to cut himself, and had given him a bag already"
+          },
+          {
+            "startTime": 67087.14,
+            "endTime": 67094.16,
+            "text": "packed with razors and alcohol wipes and cotton and bandages. You'll have to experiment to see what"
+          },
+          {
+            "startTime": 67094.16,
+            "endTime": 67099.74,
+            "text": "feels best, the brother had said, and had shown him how to clean and bandage the cut once he had"
+          },
+          {
+            "startTime": 67099.74,
+            "endTime": 67107.3,
+            "text": "finished. So this is yours, he said, giving him the bag. You let me know when you need more supplies,"
+          },
+          {
+            "startTime": 67107.3,
+            "endTime": 67114.46,
+            "text": "and I'll get them for you. He had at first missed the theatrics, the force and weight of his falls and"
+          },
+          {
+            "startTime": 67114.46,
+            "endTime": 67121.78,
+            "text": "his slams. But he soon grew to appreciate the secrecy, the control of the cuts. Brother Luke was"
+          },
+          {
+            "startTime": 67121.78,
+            "endTime": 67129.72,
+            "text": "right. The cutting was better. When he did it, it was as if he was draining away the poison, the filth,"
+          },
+          {
+            "startTime": 67129.72,
+            "endTime": 67137.04,
+            "text": "the rage inside him. It was as if his old dream of leeches had come to life, and had the same effect,"
+          },
+          {
+            "startTime": 67137.32,
+            "endTime": 67143.08,
+            "text": "the effect he had always hoped it would. He wished he was made of metal, of plastic,"
+          },
+          {
+            "startTime": 67143.88,
+            "endTime": 67150.16,
+            "text": "something that could be hosed down and scrubbed clean. He had a vision of himself being pumped full"
+          },
+          {
+            "startTime": 67150.16,
+            "endTime": 67156.8,
+            "text": "of water and detergent and bleach, and then blasted dry, everything inside him made hygienic again."
+          },
+          {
+            "startTime": 67157.64,
+            "endTime": 67163.76,
+            "text": "Now, after the final client of the night had left, he took Brother Luke's place in the bathroom,"
+          },
+          {
+            "startTime": 67164.58,
+            "endTime": 67170.76,
+            "text": "and until he heard the brother telling him it was time to come to bed, his body was his to do with"
+          },
+          {
+            "startTime": 67170.76,
+            "endTime": 67178.54,
+            "text": "what he chose. He was so dependent on Luke, for his food, for his protection, and now for his razors."
+          },
+          {
+            "startTime": 67179.14,
+            "endTime": 67184.68,
+            "text": "When he needed to be taken to the doctor because he was sick, he got infections from the clients,"
+          },
+          {
+            "startTime": 67184.68,
+            "endTime": 67190.36,
+            "text": "no matter how hard Brother Luke tried, and sometimes he didn't properly clean his cuts,"
+          },
+          {
+            "startTime": 67190.62,
+            "endTime": 67196.36,
+            "text": "and they became infected as well. Brother Luke took him and got him the antibiotics he needed."
+          },
+          {
+            "startTime": 67197.14,
+            "endTime": 67203.36,
+            "text": "He grew accustomed to Brother Luke's body, his mouth, his hands. He didn't like them,"
+          }
+        ]
+      }
+    },
+    {
+      "id": "alife-self-harm-reference-clinical-discussion",
+      "source": "A Little Life",
+      "fingerprint": {
+        "version": 1,
+        "sha256": "fda633730e5d94ca3e5b7f9ab3dbdbfc88f080f7980fb5d295644c593ee16fe3",
+        "fileSize": 938763832
+      },
+      "category": "self_harm_reference",
+      "expected": {
+        "accepted": true,
+        "label": "self_harm_reference",
+        "notes": "A doctor discusses a patient's chronic self-harm and a recent 'botched suicide attempt' in clinical, statistical terms ('anyone who cuts themselves as much as you do... is in less immediate danger of suicide than someone less consistently self-injurious') -- no active self-harm is depicted in this passage, only referenced and discussed after the fact. Good contrast against alife-self-harm-active-cutting-depiction: tests whether a candidate model correctly distinguishes reference/discussion from active depiction, which is exactly the distinction the app's self-harm labels are supposed to capture but have no written rubric for."
+      },
+      "transcript_window": {
+        "start_time": 21389.6,
+        "end_time": 21477.6,
+        "segments": [
+          {
+            "startTime": 21389.6,
+            "endTime": 21396.72,
+            "text": "cutting himself, and he had cut too close to a vein, and it had resulted in a great, sloppy, bloody mess"
+          },
+          {
+            "startTime": 21396.72,
+            "endTime": 21403.56,
+            "text": "into which he had been forced to involve Willem. In the examining room that night, Andy had refused to"
+          },
+          {
+            "startTime": 21403.56,
+            "endTime": 21410.32,
+            "text": "speak to him, he was so angry, and had actually muttered to himself as he made his stitches, each as neat and"
+          },
+          {
+            "startTime": 21410.32,
+            "endTime": 21416.5,
+            "text": "tiny as if he were embroidering them. Even before Andy had opened his mouth at his next appointment,"
+          },
+          {
+            "startTime": 21416.86,
+            "endTime": 21423.0,
+            "text": "he had known that he was furious. He had actually considered not coming in for his checkup at all,"
+          },
+          {
+            "startTime": 21423.42,
+            "endTime": 21430.38,
+            "text": "except he knew if he didn't, Andy would simply keep calling him, or worse, calling Willem, or worse"
+          },
+          {
+            "startTime": 21430.38,
+            "endTime": 21437.94,
+            "text": "yet, Harold, until he showed up. I should fucking have had you hospitalized, were Andy's first words to him,"
+          },
+          {
+            "startTime": 21437.94,
+            "endTime": 21445.94,
+            "text": "followed by, I'm such a fucking idiot. I think you're overreacting, he'd begun, but Andy ignored"
+          },
+          {
+            "startTime": 21445.94,
+            "endTime": 21451.44,
+            "text": "him. I happen to believe you weren't trying to kill yourself, or I'd have had you committed so fast"
+          },
+          {
+            "startTime": 21451.44,
+            "endTime": 21457.68,
+            "text": "your head would have spun, he said. It's only because statistically, anyone who cuts themselves"
+          },
+          {
+            "startTime": 21457.68,
+            "endTime": 21463.8,
+            "text": "as much as you do, and for as many years as you have, is in less immediate danger of suicide than"
+          },
+          {
+            "startTime": 21463.8,
+            "endTime": 21470.48,
+            "text": "someone who's less consistently self-injurious. Andy was fond of statistics, he sometimes suspected"
+          },
+          {
+            "startTime": 21470.48,
+            "endTime": 21477.6,
+            "text": "he made them up. But Jude, this is crazy, and that was way too close. Either you start seeing a shrink"
+          }
+        ]
+      }
     }
   ]
 }

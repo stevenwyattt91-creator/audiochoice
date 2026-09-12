@@ -20,16 +20,24 @@ namespace AudioChoice.Api.Processing;
 ///
 /// When a frontier model does become available, moving those tiers is changing two model names.
 /// No code, no redeploy of anything but configuration.
+///
+/// A third route -- a self-hosted vLLM server -- was added the same way: a tier names a local
+/// model identifier (see <see cref="IsVllmModel"/>) and this router sends it there instead,
+/// without OpenAI or Bedrock ever being asked. This is what lets the pipeline run with no
+/// OpenAI dependency at all when every tier names a local model, while leaving the OpenAI and
+/// Bedrock paths completely intact for rollback -- switching back is changing the three model
+/// names in configuration, not removing code.
 /// </remarks>
 public sealed class RoutingAnalysisModelClient(
-    IAnalysisModelClient bedrock,
-    IAnalysisModelClient openAI,
+    IAnalysisModelClient? bedrock,
+    IAnalysisModelClient? openAI,
+    IAnalysisModelClient? vllm,
     ILogger<RoutingAnalysisModelClient> logger) : IAnalysisModelClient
 {
     public string ProviderName => "routed";
 
     /// <summary>
-    /// Whether a model name belongs to OpenAI rather than Bedrock.
+    /// Whether a model name belongs to OpenAI rather than Bedrock or a local vLLM server.
     /// </summary>
     /// <remarks>
     /// Read from the name because the name is already the only thing distinguishing the tiers.
@@ -50,6 +58,22 @@ public sealed class RoutingAnalysisModelClient(
         model.Contains("meta.", StringComparison.OrdinalIgnoreCase) ||
         model.Contains("mistral.", StringComparison.OrdinalIgnoreCase);
 
+    /// <summary>
+    /// Whether a model name belongs to the self-hosted vLLM server rather than OpenAI or
+    /// Bedrock.
+    /// </summary>
+    /// <remarks>
+    /// vLLM model identifiers are whatever <c>--served-model-name</c> the server was started
+    /// with (see deploy/lambda/vllm-eval/docker-compose.yml), so there is no vendor-assigned
+    /// naming convention to key on the way "gpt" or "amazon." are. Matched on "qwen" and
+    /// "vllm" as the two names this pipeline actually uses today; add a case here rather than
+    /// widening either check if a genuinely different local model name is ever configured, so
+    /// an unrecognized name still fails loudly instead of being silently misrouted.
+    /// </remarks>
+    internal static bool IsVllmModel(string model) =>
+        model.Contains("qwen", StringComparison.OrdinalIgnoreCase) ||
+        model.Contains("vllm", StringComparison.OrdinalIgnoreCase);
+
     public Task<AnalysisModelResponse> CompleteJson(
         string model,
         string input,
@@ -58,8 +82,22 @@ public sealed class RoutingAnalysisModelClient(
         CancellationToken cancellationToken)
     {
         IAnalysisModelClient chosen;
-        if (IsOpenAIModel(model)) chosen = openAI;
-        else if (IsBedrockModel(model)) chosen = bedrock;
+        if (IsOpenAIModel(model))
+        {
+            chosen = openAI ?? throw new InvalidOperationException(
+                $"Model '{model}' names an OpenAI model, but no OpenAI client was configured.");
+        }
+        else if (IsBedrockModel(model))
+        {
+            chosen = bedrock ?? throw new InvalidOperationException(
+                $"Model '{model}' names a Bedrock model, but no Bedrock client was configured.");
+        }
+        else if (IsVllmModel(model))
+        {
+            chosen = vllm ?? throw new InvalidOperationException(
+                $"Model '{model}' names a local vLLM model, but no vLLM client was configured. " +
+                "Set AudioChoice:OpenAI:VllmEndpoint or check AnalysisProvider.");
+        }
         else
         {
             // Deliberately fatal. A misspelled model name that quietly fell through to one
@@ -67,7 +105,8 @@ public sealed class RoutingAnalysisModelClient(
             // would look ordinary.
             throw new InvalidOperationException(
                 $"Cannot tell which service hosts the model '{model}'. Bedrock names contain a " +
-                "provider prefix such as 'amazon.'; OpenAI names begin with 'gpt'.");
+                "provider prefix such as 'amazon.'; OpenAI names begin with 'gpt'; a local " +
+                "vLLM model name contains 'qwen' or 'vllm'.");
         }
 
         logger.LogDebug("{SchemaName} routed to {Provider} for {Model}.",

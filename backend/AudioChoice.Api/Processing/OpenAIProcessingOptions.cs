@@ -78,6 +78,28 @@ public sealed class OpenAIProcessingOptions
     /// </summary>
     public string BedrockRegion { get; init; } = string.Empty;
 
+    /// <summary>
+    /// Base URL for a self-hosted vLLM server's OpenAI-compatible API, used when a tier names
+    /// a model <see cref="RoutingAnalysisModelClient.IsVllmModel"/> recognizes as local rather
+    /// than OpenAI or Bedrock.
+    /// </summary>
+    public string VllmEndpoint { get; init; } = "http://127.0.0.1:8002/v1/";
+
+    /// <summary>
+    /// Bearer token for the vLLM server, if it requires one. Empty means no Authorization
+    /// header is sent -- the expected case for a same-host or same-VPC deployment with no
+    /// public exposure.
+    /// </summary>
+    public string VllmApiKey { get; init; } = string.Empty;
+
+    /// <summary>
+    /// Generous on purpose: a locally-hosted reasoning model (e.g. Qwen3.6) may emit a long
+    /// visible "thinking" block before its actual JSON answer, and this pipeline's own
+    /// evaluation hit real truncation failures at a default token budget that looked
+    /// generous for a non-reasoning model. See VllmModelClient.ExtractJsonObject's remarks.
+    /// </summary>
+    public int VllmMaxTokens { get; init; } = 8000;
+
     public string AnalysisModel { get; init; } = "gpt-5.6-luna";
     public string SceneVerificationModel { get; init; } = "gpt-5.6-terra";
     public string SceneEscalationModel { get; init; } = "gpt-5.6-sol";
@@ -150,7 +172,14 @@ public sealed class OpenAIProcessingOptions
     // overriding Terra outright, guarding against the same-passage-different-verdict
     // variance a real rescan exposed on this pipeline. A scan made under the prior version
     // had only one Sol opinion behind an escalated result, not a majority.
-    public string ScannerVersion { get; init; } = "5.4-sol-majority-vote";
+    // Bumped again for the switch to a self-hosted vLLM model (Qwen3.6-27B) as the
+    // analysis transport. The classification policy this file enforces is unchanged --
+    // only which model answers Luna/Terra/Sol's prompts changed -- but the model itself is a
+    // different one, evaluated separately (see scripts/eval/ground_truth_scenes.json) rather
+    // than assumed to answer identically to OpenAI's GPT-5.6 family on every passage. A
+    // result written under the prior version came from a different model entirely, and must
+    // never be presented as though this one had produced it.
+    public string ScannerVersion { get; init; } = "6.0-vllm-qwen";
     /// <summary>Only jobs in this lane may be claimed by this worker instance.</summary>
     public string ProcessingLane { get; init; } = ScanProcessingLanes.AzureOpenAI;
     /// <summary>
