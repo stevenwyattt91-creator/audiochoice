@@ -22,6 +22,18 @@ struct PaywallGate: View {
     @ObservedObject private var purchases = PurchaseManager.shared
     @State private var hasCheckedAccess = false
 
+    /// Whether the four-page intro guide has been seen, held here rather than in `AudioChoiceApp`
+    /// so the tour runs on the far side of the gate.
+    ///
+    /// Every page of it points at something the subscription pays for, so it belongs after access
+    /// is granted, not before: shown earlier it described features the account could not open, and
+    /// it delayed the one screen a new listener actually needs to act on.
+    ///
+    /// Still device-wide rather than per-account, which is deliberate -- it records that this
+    /// person has seen the tour on this phone, and `AuthSession.signOut()` leaves it alone so
+    /// signing back in does not replay it.
+    @AppStorage("onboardingCompleted") private var onboardingCompleted = false
+
     private var hasAccess: Bool {
         purchases.access.isActive && gatedAccessPlans.contains(purchases.access.plan)
     }
@@ -34,7 +46,11 @@ struct PaywallGate: View {
                     ProgressView().tint(ACTheme.accent)
                 }
             } else if hasAccess {
-                RootTabView()
+                if onboardingCompleted {
+                    RootTabView()
+                } else {
+                    OnboardingScreen(completed: $onboardingCompleted)
+                }
             } else {
                 NavigationStack {
                     PaywallScreen()
@@ -70,6 +86,7 @@ private struct PaywallScreen: View {
     @State private var confirmingSignOut = false
     @State private var confirmingDelete = false
     @State private var deletingAccount = false
+    @State private var redeemingCode = false
 
     var body: some View {
         ScrollView {
@@ -113,18 +130,17 @@ private struct PaywallScreen: View {
                         .foregroundStyle(.black)
                         .disabled(purchases.isPurchasing)
 
-                        Button("Restore Purchases") { Task { await restore() } }
-                            .disabled(purchases.isPurchasing)
+                        secondaryActions
                     }
                 } else if purchases.isLoadingProducts {
                     ProgressView("Checking availability…")
                 } else {
                     VStack(spacing: 10) {
-                        Text("AudioChoice is not available for purchase yet. Please check back soon.")
+                        Text("Subscriptions are not loading right now. You can still redeem a "
+                            + "code, or restore a subscription you already have.")
                             .multilineTextAlignment(.center)
                             .foregroundStyle(ACTheme.secondaryText)
-                        Button("Restore Purchases") { Task { await restore() } }
-                            .disabled(purchases.isPurchasing)
+                        secondaryActions
                     }
                 }
 
@@ -167,6 +183,39 @@ private struct PaywallScreen: View {
             Text("This permanently deletes your library, filter choices, and account. This cannot be undone. If you have an active subscription, cancel it separately in your Apple ID subscription settings.")
         }
         .task { await purchases.loadProducts() }
+        // Apple's own redemption sheet rather than a text field of ours: an offer code is checked
+        // by the App Store, and redeeming one *is* the purchase, so there is nothing for this app
+        // to validate or charge. A redemption started here comes back through the same
+        // `Transaction.updates` listener as any other purchase, which submits it to the server and
+        // republishes `access` -- so the gate opens on its own, with no navigation from here.
+        .offerCodeRedemption(isPresented: $redeemingCode) { result in
+            switch result {
+            case .success:
+                // Reports only that the sheet closed without error, not that a code was accepted,
+                // so the entitlement still has to be re-read before concluding anything. Harmless
+                // when nothing was redeemed: both calls are the same ones the buttons make.
+                Task {
+                    await purchases.restorePurchases()
+                    await purchases.refreshAccess()
+                }
+            case let .failure(error):
+                errorMessage = error.localizedDescription
+            }
+        }
+    }
+
+    /// Redeem and Restore, shown whether or not StoreKit returned a product.
+    ///
+    /// Both belong in the no-product branch too. Redemption is Apple's sheet and needs nothing from
+    /// `purchases.products`, and someone who already subscribed still has to be able to get back in
+    /// on a new phone -- so a storefront that answers slowly, or not at all, must not leave this
+    /// screen with nothing to tap. That state is reachable in practice: it is what a newly approved
+    /// subscription looks like for the first while after review, before it finishes propagating.
+    @ViewBuilder private var secondaryActions: some View {
+        Button("Redeem a Code") { redeemingCode = true }
+            .disabled(purchases.isPurchasing)
+        Button("Restore Purchases") { Task { await restore() } }
+            .disabled(purchases.isPurchasing)
     }
 
     private func featureRow(_ icon: String, _ text: String) -> some View {

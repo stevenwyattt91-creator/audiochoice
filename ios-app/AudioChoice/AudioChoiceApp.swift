@@ -3,7 +3,6 @@ import SwiftUI
 
 @main
 struct AudioChoiceApp: App {
-    @AppStorage("onboardingCompleted") private var onboardingCompleted = false
     @StateObject private var authSession = AuthSession.shared
     @StateObject private var companionTransfers = CompanionTransferCoordinator.shared
     @Environment(\.scenePhase) private var scenePhase
@@ -30,12 +29,17 @@ struct AudioChoiceApp: App {
                     NavigationStack {
                         AccountScreen(isLaunchScreen: true)
                     }
-                } else if !onboardingCompleted {
-                    OnboardingScreen(completed: $onboardingCompleted)
                 } else {
                     // The app itself is the paid feature at this launch -- there is no free tier
                     // beyond creating an account. PaywallGate decides, on every sign-in and on
                     // every relaunch, whether the signed-in account may reach RootTabView at all.
+                    //
+                    // The intro guide is deliberately no longer a branch of its own here. Every
+                    // page of it describes something behind the subscription -- importing, the
+                    // transfer tool, filters, the reading edition -- so running it at this point
+                    // toured four features an account could not reach yet, and did so before the
+                    // listener had been asked to subscribe. It now runs from inside PaywallGate,
+                    // once access is granted and immediately before RootTabView.
                     PaywallGate()
                 }
                 }
