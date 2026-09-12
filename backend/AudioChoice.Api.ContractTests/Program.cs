@@ -3503,6 +3503,58 @@ Assert(
         "defines, so a normalised report could not be written.");
 }
 
+// Every report carries a position unit, so the not-null column can always be satisfied.
+{
+    var recorded = FilterReports.Validate(
+        Guid.NewGuid(),
+        new FilterReportRequest(
+            new BookFingerprint(1, new string('a', 64), 1, null, "m4b", null, null, null, null, null, null, null),
+            FilterReportKind.MissedContent,
+            PositionSeconds: 10));
+    Assert(
+        recorded is not null && !string.IsNullOrWhiteSpace(recorded.PositionUnit),
+        "A validated report carried no position unit, which the not-null column would refuse.");
+}
+
+// The filter_reports INSERT must bind exactly as many parameters as its own values clause
+// declares.
+//
+// Asserted against the source text because there is no database here, and this is the one
+// failure a contract test could still have caught. Migration 027 added position_unit to the
+// column list and $13 to the values clause; the matching bind was never added. Postgres
+// rejected all 12-parameter binds, the store turned that into null, and the endpoint answered
+// 400 "A fingerprint and a playback position are required." Both apps treat 400 as a permanent
+// refusal and delete the report, so every filter report ever submitted was destroyed -- while
+// the listener was thanked for it. Nothing failed loudly: the file store used by these tests
+// has no parameters to mismatch, so the suite stayed green throughout.
+{
+    var storePath = Path.Combine(
+        FindApiSourceDirectory(), "Services", "PostgresFilterReportStore.cs");
+    Assert(File.Exists(storePath), "PostgresFilterReportStore.cs is missing.");
+    var source = File.ReadAllText(storePath);
+
+    var insertStart = source.IndexOf("insert into filter_reports", StringComparison.Ordinal);
+    Assert(insertStart >= 0, "The filter_reports INSERT could not be found.");
+    var executeStart = source.IndexOf("ExecuteNonQuery", insertStart, StringComparison.Ordinal);
+    Assert(executeStart > insertStart, "The filter_reports INSERT is no longer followed by its execute.");
+    var recordBody = source[insertStart..executeStart];
+
+    var declared = System.Text.RegularExpressions.Regex
+        .Matches(recordBody, @"\$(\d+)")
+        .Select(match => int.Parse(match.Groups[1].Value))
+        .DefaultIfEmpty(0)
+        .Max();
+    var bound =
+        System.Text.RegularExpressions.Regex.Matches(recordBody, @"AddWithValue\(").Count +
+        System.Text.RegularExpressions.Regex.Matches(recordBody, @"AddNullable\(command,").Count;
+
+    Assert(
+        declared > 0 && declared == bound,
+        $"The filter_reports INSERT declares {declared} parameters but binds {bound}. Postgres " +
+        "refuses the bind, the store reports null, and the endpoint tells the listener their " +
+        "report was malformed -- which both apps treat as permanent and delete.");
+}
+
 // VllmModelClient.TryParseContextLengthOverflow -- must read vLLM's real reported input
 // token count and context window from its own error message, since that is the only
 // number CompleteJson's adaptive retry can trust (a client-side token count would not even
@@ -3612,6 +3664,18 @@ static string FindMigrationsDirectory()
         directory = directory.Parent;
     }
     throw new DirectoryNotFoundException("Could not locate Database/Migrations.");
+}
+
+static string FindApiSourceDirectory()
+{
+    var directory = new DirectoryInfo(AppContext.BaseDirectory);
+    while (directory is not null)
+    {
+        var candidate = Path.Combine(directory.FullName, "AudioChoice.Api");
+        if (Directory.Exists(candidate)) return candidate;
+        directory = directory.Parent;
+    }
+    throw new DirectoryNotFoundException("Could not locate AudioChoice.Api.");
 }
 
 static ExploreCatalogBook Catalogued(
