@@ -1125,6 +1125,81 @@ var retainedSceneEvents = SceneEventPostProcessor.Process(
 Assert(retainedSceneEvents.Count == 1,
     "A verified scene comfortably above the minimum lost its complete-scene skip.");
 
+// Cross-window backward extension: a real production regression. The analysis batches a
+// book in overlapping windows, so a scene's buildup and its eventual confirmed act can be
+// seen by two different windows. The earlier window, seeing only the buildup with no act
+// yet in view, correctly stays on the individual ladder rungs and never itself proposes
+// sexual_complete_scene. The later, overlapping window sees the act and correctly proposes
+// sexual_complete_scene, but anchored to where ITS OWN window began -- 14 seconds after the
+// real buildup a listener would also expect skipped had already started playing, matching
+// exactly the real ACOTAR Part 2 case this session traced to its root cause. The confirmed
+// scene must extend backward through the unbroken chain of the earlier window's own
+// individually-labeled sexual events immediately preceding it.
+{
+    var sexualImpliedMapping = ContentTaxonomy.Mappings["sexual_implied_activity"];
+    var extended = SceneEventPostProcessor.Process(
+        [
+            // The earlier window's own real buildup, never itself a complete scene.
+            new ScanEvent(Guid.NewGuid(), 20208.8, 20210.42, sexualImpliedMapping.CategoryID,
+                sexualImpliedMapping.GroupID, sexualImpliedMapping.EventID, .9,
+                "buildup-1", "Characters kiss each other"),
+            new ScanEvent(Guid.NewGuid(), 20217.16, 20219.18, sexualImpliedMapping.CategoryID,
+                sexualImpliedMapping.GroupID, sexualImpliedMapping.EventID, .9,
+                "buildup-2", "Characters kiss each other"),
+            // The later, overlapping window's confirmed scene, anchored to its own start.
+            new ScanEvent(Guid.NewGuid(), 20223.8, 20327.04, completeSceneMapping.CategoryID,
+                completeSceneMapping.GroupID, completeSceneMapping.EventID, .95,
+                "confirmed-scene", "A continuous romantic and sexual encounter"),
+        ],
+        [
+            new TranscriptSegment(20208.8, 20210.42, "He leaned down to kiss me."),
+            new TranscriptSegment(20210.7, 20211.7, "It was soft."),
+            new TranscriptSegment(20212.0, 20212.6, "Tentative."),
+            new TranscriptSegment(20213.0, 20217.0,
+                "Nothing like the wild, hard kisses we'd shared in the hall of the throne room."),
+            new TranscriptSegment(20217.16, 20219.18, "He brushed his lips against mine again."),
+            new TranscriptSegment(20219.4, 20220.9, "I didn't want apologies."),
+            new TranscriptSegment(20221.3, 20223.3, "Didn't want sympathy or coddling."),
+            new TranscriptSegment(20223.8, 20227.7,
+                "I gripped the front of his tunic, tugging him closer as I opened my mouth to him."),
+        ]);
+    // The buildup events themselves stay in the output too (they remain individually
+    // controllable events of their own, outside the Complete sex scenes switch); only the
+    // scene-level event's own boundary is expected to have moved.
+    var extendedScene = extended.Single(item => item.EventID == completeSceneMapping.EventID);
+    Assert(Math.Abs(extendedScene.StartTime - 20208.8) < 0.01,
+        $"A confirmed scene's start was not extended backward through the immediately " +
+        $"preceding, unbroken chain of the earlier window's own labeled buildup events " +
+        $"(got {extendedScene.StartTime}, expected 20208.8) -- this is the exact real " +
+        "listener-reported gap this fix exists to close.");
+}
+
+// The same shape, but with a real, much longer silence between the lower-rung event and the
+// confirmed scene -- well past MaximumLowerRungChainGapSeconds -- must NOT extend across it.
+// Otherwise this fix would let a scene's skip reach back across an unrelated moment that
+// merely happened to sit somewhere earlier in the same batch, rather than genuinely
+// adjoining the scene's own real buildup.
+{
+    var sexualSuggestiveMapping = ContentTaxonomy.Mappings["sexual_suggestive_dialogue"];
+    var notExtended = SceneEventPostProcessor.Process(
+        [
+            new ScanEvent(Guid.NewGuid(), 500, 502, sexualSuggestiveMapping.CategoryID,
+                sexualSuggestiveMapping.GroupID, sexualSuggestiveMapping.EventID, .9,
+                "unrelated-buildup", "Characters kiss each other"),
+            new ScanEvent(Guid.NewGuid(), 540, 565, completeSceneMapping.CategoryID,
+                completeSceneMapping.GroupID, completeSceneMapping.EventID, .95,
+                "later-confirmed-scene", "A continuous romantic and sexual encounter"),
+        ],
+        [new TranscriptSegment(490, 580,
+            "They kissed goodnight at the door. Morning came, and with it a different kind " +
+            "of tension entirely. He pulled her close and this time did not let go.")]);
+    var notExtendedScene = notExtended.Single(item => item.EventID == completeSceneMapping.EventID);
+    Assert(Math.Abs(notExtendedScene.StartTime - 540) < 1.0,
+        $"A confirmed scene's start was extended backward across a gap far larger than a " +
+        $"real buildup chain's own beats (got {notExtendedScene.StartTime}, expected ~540) " +
+        "-- this is exactly the false cross-window join the gap cap exists to prevent.");
+}
+
 // sexual_violence gets the same merge/word-snap/minimum-length treatment as
 // sexual_complete_scene, but clustered entirely separately -- a confirmed assault scene and
 // a confirmed consensual scene must never merge into one skip even when adjacent in time.

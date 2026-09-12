@@ -50,12 +50,43 @@ public static class SceneEventPostProcessor
     /// </remarks>
     private static readonly string[] SceneLabels = ["sexual_complete_scene", "sexual_violence"];
 
+    /// <summary>
+    /// The individual sexual-content labels below sexual_complete_scene on the ladder, whose
+    /// own continuous chain may extend a confirmed scene's start backward.
+    /// </summary>
+    /// <remarks>
+    /// A real production gap this exists to close: the analysis batches a book in
+    /// overlapping windows, so a scene's real buildup and its eventual confirmed act can each
+    /// be seen by a different window. The earlier window, seeing only the buildup with no act
+    /// yet in view, correctly stays on the individual ladder rungs (a kiss, an undressing) and
+    /// never itself proposes sexual_complete_scene -- the taxonomy's own ladder instructions
+    /// forbid that. The later, overlapping window sees the act and correctly proposes
+    /// sexual_complete_scene, but anchored to where ITS OWN window began, not to the true
+    /// earlier point the first window already saw. Neither window's individual judgment was
+    /// wrong; nothing previously reconnected their two partial views of one continuous scene.
+    /// This is that reconnection: it does not invent a start time, it only recognizes that an
+    /// unbroken run of the first window's own individually-labeled events immediately
+    /// preceding a confirmed scene IS that scene's real, earlier beginning.
+    /// </remarks>
+    private static readonly string[] LowerRungSexualLabels =
+    [
+        "sexual_suggestive_dialogue", "sexual_references", "sexual_nudity",
+        "sexual_implied_activity", "sexual_explicit_activity"
+    ];
+
     public static IReadOnlyList<ScanEvent> Process(
         IReadOnlyList<ScanEvent> events,
         IReadOnlyList<TranscriptSegment> segments)
     {
         var sceneMappings = SceneLabels.Select(label => ContentTaxonomy.Mappings[label]).ToArray();
         var sceneEventIDs = sceneMappings.Select(item => item.EventID).ToHashSet();
+        var lowerRungEventIDs = LowerRungSexualLabels
+            .Select(label => ContentTaxonomy.Mappings[label].EventID)
+            .ToHashSet();
+        var lowerRungEvents = events
+            .Where(item => lowerRungEventIDs.Contains(item.EventID))
+            .OrderBy(item => item.StartTime)
+            .ToArray();
 
         var audiobookStart = segments.Count == 0 ? 0 : segments.Min(item => item.StartTime);
         var mergedScenes = new List<ScanEvent>();
@@ -85,11 +116,13 @@ public static class SceneEventPostProcessor
                     continue;
                 }
 
-                mergedScenes.Add(Merge(cluster, mapping, audiobookStart, audiobookEnd, segments));
+                mergedScenes.Add(Merge(
+                    cluster, mapping, audiobookStart, audiobookEnd, segments, lowerRungEvents));
                 cluster = [candidate];
             }
 
-            mergedScenes.Add(Merge(cluster, mapping, audiobookStart, audiobookEnd, segments));
+            mergedScenes.Add(Merge(
+                cluster, mapping, audiobookStart, audiobookEnd, segments, lowerRungEvents));
         }
 
         if (!anySceneEvents) return events;
@@ -113,9 +146,11 @@ public static class SceneEventPostProcessor
         TaxonomyMapping mapping,
         double audiobookStart,
         double audiobookEnd,
-        IReadOnlyList<TranscriptSegment> segments)
+        IReadOnlyList<TranscriptSegment> segments,
+        IReadOnlyList<ScanEvent> lowerRungEvents)
     {
-        var rawStart = cluster.Min(item => item.StartTime);
+        var rawStart = ExtendStartThroughLowerRungChain(
+            cluster.Min(item => item.StartTime), lowerRungEvents, segments);
         var rawEnd = cluster.Max(item => item.EndTime);
 
         // Snapped to the transcript's own nearest word instead of padded by a flat number of
@@ -144,5 +179,63 @@ public static class SceneEventPostProcessor
         return new ScanEvent(
             Guid.NewGuid(), start, end, mapping.CategoryID, mapping.GroupID,
             mapping.EventID, confidence, stableKey, description);
+    }
+
+    /// <summary>
+    /// The largest silence, in seconds, between one lower-rung event's end and the next
+    /// (moving backward from a confirmed scene) that still counts as the same unbroken
+    /// buildup rather than an unrelated, merely nearby moment.
+    /// </summary>
+    /// <remarks>
+    /// Deliberately a time gap, not <see cref="TranscriptSentenceBoundaries.HasClearSentenceBetween"/>
+    /// -- that check is right for deciding whether two WIDE scene candidates are one
+    /// continuous passage, where a real topic change is many sentences away. It is the wrong
+    /// test here: each individual lower-rung event is typically one sentence on its own, so
+    /// of course an ordinary sentence terminator sits between two adjacent ones -- that is
+    /// just normal narration between one beat and the next within the SAME continuous scene
+    /// ("I didn't want apologies. Didn't want sympathy or coddling."), not evidence of a
+    /// break. A real production gap this fix closes measured 4.6-6.7 seconds between
+    /// consecutive buildup beats; this cap is set with real margin above that, well short of
+    /// a length that could plausibly bridge two genuinely separate moments of tension
+    /// scattered elsewhere in the same chapter.
+    /// </remarks>
+    private const double MaximumLowerRungChainGapSeconds = 20;
+
+    /// <summary>
+    /// Walks backward through <paramref name="lowerRungEvents"/> from
+    /// <paramref name="sceneStart"/>, extending the start earlier through any unbroken run of
+    /// individually-labeled sexual events immediately preceding the scene -- the earlier
+    /// analysis window's own view of this exact scene's real buildup, which never itself
+    /// became a sexual_complete_scene event because that window's own view ended before the
+    /// act it eventually leads into.
+    /// </summary>
+    /// <remarks>
+    /// This deliberately walks the model's own already-labeled events rather than
+    /// re-scanning raw transcript text, so this never extends a scene into narration no
+    /// detector ever flagged as sexual content at all -- it only recognizes that several
+    /// partial views the pipeline already trusted individually describe one continuous
+    /// moment.
+    /// </remarks>
+    private static double ExtendStartThroughLowerRungChain(
+        double sceneStart,
+        IReadOnlyList<ScanEvent> lowerRungEvents,
+        IReadOnlyList<TranscriptSegment> segments)
+    {
+        var earliestStart = sceneStart;
+        var candidates = lowerRungEvents
+            .Where(item => item.StartTime < sceneStart)
+            .OrderByDescending(item => item.StartTime)
+            .ToArray();
+
+        var chainEnd = sceneStart;
+        foreach (var candidate in candidates)
+        {
+            if (candidate.StartTime >= chainEnd) continue;
+            if (chainEnd - candidate.EndTime > MaximumLowerRungChainGapSeconds) break;
+            earliestStart = Math.Min(earliestStart, candidate.StartTime);
+            chainEnd = candidate.StartTime;
+        }
+
+        return earliestStart;
     }
 }

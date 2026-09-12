@@ -187,7 +187,16 @@ public sealed class OpenAIProcessingOptions
     // overlapping candidates of the same real scene, since the checkpoint keys those
     // constants feed did not change when the prompts did. This version bump is itself the
     // fix for that miss, not just documentation of it.
-    public string ScannerVersion { get; init; } = "6.1-vllm-qwen-prompt-fixes";
+    //
+    // Bumped again for SceneEventPostProcessor's cross-window backward extension (see its
+    // own remarks): a confirmed scene's boundary now extends earlier through the unbroken
+    // chain of a preceding overlapping window's own individually-labeled buildup events,
+    // closing a real ~14-second listener-reported gap where a scene's true start (seen only
+    // by an earlier window that never itself proposed a complete scene) was missing from
+    // every finalized result before this fix. This runs fresh on every scan regardless of
+    // checkpoint state, so no checkpoint version needed changing for correctness -- this
+    // bump exists to attribute results correctly, the same as every prior one here.
+    public string ScannerVersion { get; init; } = "6.2-vllm-qwen-cross-window-scene-boundary";
     /// <summary>Only jobs in this lane may be claimed by this worker instance.</summary>
     public string ProcessingLane { get; init; } = ScanProcessingLanes.AzureOpenAI;
     /// <summary>
