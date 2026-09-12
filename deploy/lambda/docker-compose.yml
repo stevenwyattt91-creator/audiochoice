@@ -141,9 +141,10 @@ services:
       # config value are untouched, not removed, specifically so this is a config edit and a
       # redeploy, never a code change or a rebuild of removed functionality.
       #
-      # ScannerVersion is bumped in OpenAIProcessingOptions.cs's own default (6.0-vllm-qwen)
-      # rather than repeated here, so a result written under the prior OpenAI-backed version
-      # is never presented as though this different model had produced it.
+      # ScannerVersion is bumped in OpenAIProcessingOptions.cs's own default
+      # (6.1-vllm-qwen-prompt-fixes) rather than repeated here, so a result written under the
+      # prior OpenAI-backed version -- or under an earlier vLLM prompt revision -- is never
+      # presented as though the current version had produced it.
       AudioChoice__OpenAI__AnalysisProvider: vllm
       AudioChoice__OpenAI__VllmEndpoint: http://127.0.0.1:8002/v1/
       AudioChoice__OpenAI__AnalysisModel: qwen3.6-27b

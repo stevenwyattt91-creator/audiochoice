@@ -30,7 +30,13 @@ public sealed class OpenAIContentAnalysisProvider(
     // second, consent-specific verification lane (VerifySceneBatch, ResolveSceneOutcome) that
     // did not exist under the prior version -- a cached answer from before this change never
     // considered whether the passage was non-consensual at all.
-    private const string BaseAnalysisPromptVersion = "5.1-sexual-violence";
+    //
+    // Bumped again: BuildInput's sexual-content ladder gained a worked example showing a
+    // passage that escalates mid-passage from sexual_suggestive_dialogue into
+    // sexual_implied_activity/sexual_complete_scene, so a candidate batch cached under the
+    // prior version was classified without that guidance and may under-report exactly the
+    // scenes this fix exists to catch.
+    private const string BaseAnalysisPromptVersion = "5.2-ladder-escalation-example";
     // Bumped for the keyword safety net's lane isolation fix: a candidate whose window
     // happens to match a checkpoint cached under the prior version may have been built
     // before a safety-net seed's own lane existed, when it could still get coalesced into a
@@ -59,10 +65,23 @@ public sealed class OpenAIContentAnalysisProvider(
     // Bumped together with ScannerVersion for the switch to a self-hosted vLLM model
     // (Qwen3.6-27B) as the analysis transport, so a cached checkpoint from OpenAI's model is
     // never silently reused as though this different model had produced it.
+    //
+    // Bumped again: two real prompt fixes were made to VerifySceneBatch's consensual-lane
+    // instructions and to Luna's first-pass sexual-content ladder instructions (see the
+    // worked examples added for cross-segment quote recovery and for consensual-rough-play
+    // vs non-consent), without this version changing. A real production consequence of that
+    // miss: a rescan of a real book after the fix landed still silently reused a scene
+    // candidate's checkpoint written under the OLD, unfixed prompt, producing a boundary
+    // ~14 seconds later than the newly-fixed candidate that overlapped it -- because the
+    // checkpoint key never changed, both the stale and the fresh answer were trusted as two
+    // independent real candidates instead of one being recognized as obsolete. Every
+    // classification-policy change here must bump this version; this is the exact failure
+    // the pattern exists to prevent, that this same session's earlier changes broke by
+    // omission.
     private const string SceneVerificationVersion =
-        "6.0-vllm-qwen";
+        "6.1-vllm-qwen-prompt-fixes";
     private const string SceneEscalationVersion =
-        "6.0-vllm-qwen";
+        "6.1-vllm-qwen-prompt-fixes";
     private readonly string _checkpointFolder = dataPaths.AnalysisCheckpoints;
     public string ScannerVersion => options.ScannerVersion;
 

@@ -179,7 +179,15 @@ public sealed class OpenAIProcessingOptions
     // than assumed to answer identically to OpenAI's GPT-5.6 family on every passage. A
     // result written under the prior version came from a different model entirely, and must
     // never be presented as though this one had produced it.
-    public string ScannerVersion { get; init; } = "6.0-vllm-qwen";
+    //
+    // Bumped again for two prompt fixes made to the local model's own classification
+    // policy (see OpenAIContentAnalysisProvider's BaseAnalysisPromptVersion/
+    // SceneVerificationVersion remarks): a result finalized under the prior version could
+    // silently mix a stale, pre-fix checkpoint with a fresh, post-fix one for two
+    // overlapping candidates of the same real scene, since the checkpoint keys those
+    // constants feed did not change when the prompts did. This version bump is itself the
+    // fix for that miss, not just documentation of it.
+    public string ScannerVersion { get; init; } = "6.1-vllm-qwen-prompt-fixes";
     /// <summary>Only jobs in this lane may be claimed by this worker instance.</summary>
     public string ProcessingLane { get; init; } = ScanProcessingLanes.AzureOpenAI;
     /// <summary>
