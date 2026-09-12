@@ -2194,6 +2194,24 @@ not withhold the scene event because the scene was small. A sexual_violence pass
 receives sexual_complete_scene -- report sexual_violence alone, spanning the same full extent a
 complete scene would (lead-in through to the point the story returns to non-sexual action).
 
+A passage often starts on a lower rung and escalates partway through -- do not label the whole
+passage at the rung it starts on. Judge each moment in it against the ladder again as the
+passage continues, the same way you would if it had been the start of a new passage.
+
+Example of a passage that starts as tension and escalates into activity within itself -- a real
+passage from a production book:
+"He grabbed my hands again, and bit my neck. His teeth clamped onto the tender spot where my
+neck met my shoulder. I couldn't move, couldn't think, and my world narrowed to the feeling of
+his lips and teeth against my skin. The push of his body against mine, the hard and the soft,
+made me see red, see lightning, made me grind my hips against his."
+The opening ("grabbed my hands", "bit my neck") is sexual_suggestive_dialogue: tension and
+physical contact, nothing more yet. But "made me grind my hips against his" is a sexual act
+already underway, not anticipation of one -- that sentence and everything from it onward is
+sexual_implied_activity (the act is certain; its mechanics are not narrated), and because this
+is a consensual encounter, sexual_complete_scene must also be emitted spanning the passage's own
+lead-in through this point. A model that labels this whole passage sexual_suggestive_dialogue
+because that is how it opens has under-reported it by two full rungs.
+
 If a sexual scene was already underway at the first supplied segment, set the scene start to
 that first segment's startTime. If it is still underway at the last supplied segment, set its
 end to that last segment's endTime. The server analyzes overlapping windows and will join those

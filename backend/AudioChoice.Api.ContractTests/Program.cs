@@ -3220,6 +3220,88 @@ Assert(
     "anyway, which is exactly how an unrelated real event's quote could wrongly confirm a " +
     "completely different proposed range.");
 
+// Cross-segment quote matching -- a real production regression. The first-pass prompt tells
+// the model to copy its quote from a single segment, but a real batch (a self-hosted model,
+// not OpenAI) showed this instruction is not always followed: a real proposed quote was
+// exactly two adjacent segments' text concatenated ("He grabbed my hands again," + "and bit
+// my neck." -> "He grabbed my hands again, and bit my neck."), rejected outright by the
+// single-segment-only version of FindPhraseInSegments even though every word of it is real,
+// contiguous, correctly-ordered transcript content.
+var adjacentPauseSegments = new[]
+{
+    new TranscriptSegment(19948.42, 19950.0, "He grabbed my hands again,", new[]
+    {
+        new TranscriptWord("He", 19948.42, 19948.6),
+        new TranscriptWord("grabbed", 19948.6, 19949.0),
+        new TranscriptWord("my", 19949.0, 19949.2),
+        new TranscriptWord("hands", 19949.2, 19949.6),
+        new TranscriptWord("again,", 19949.6, 19950.0),
+    }),
+    new TranscriptSegment(19950.1, 19951.44, "and bit my neck.", new[]
+    {
+        new TranscriptWord("and", 19950.1, 19950.3),
+        new TranscriptWord("bit", 19950.3, 19950.6),
+        new TranscriptWord("my", 19950.6, 19950.9),
+        new TranscriptWord("neck.", 19950.9, 19951.44),
+    }),
+};
+Assert(
+    TranscriptWordLocator.FindPhraseInSegments(
+        adjacentPauseSegments, "He grabbed my hands again, and bit my neck.")
+        is { } spannedPhrase &&
+        Math.Abs(spannedPhrase.StartTime - 19948.42) < 0.001 &&
+        Math.Abs(spannedPhrase.EndTime - 19951.44) < 0.001,
+    "A quote spanning exactly two adjacent segments, split only by the transcriber's own " +
+    "ordinary mid-sentence pause, was not located across the segment boundary.");
+
+// The same two segments, but with a real scene/topic-change gap between them rather than an
+// ordinary transcriber pause -- must NOT be spanned. Otherwise this fix would let a phrase
+// match across a break the transcriber never actually heard as one continuous moment, which
+// is the exact risk the original single-segment design existed to avoid.
+var distantSegments = new[]
+{
+    adjacentPauseSegments[0],
+    adjacentPauseSegments[1] with
+    {
+        StartTime = adjacentPauseSegments[1].StartTime + 45,
+        EndTime = adjacentPauseSegments[1].EndTime + 45,
+        Words = adjacentPauseSegments[1].Words!
+            .Select(word => word with { StartTime = word.StartTime + 45, EndTime = word.EndTime + 45 })
+            .ToArray(),
+    },
+};
+Assert(
+    TranscriptWordLocator.FindPhraseInSegments(
+        distantSegments, "He grabbed my hands again, and bit my neck.") is null,
+    "A quote spanning two segments separated by a real 45-second gap (a scene or topic " +
+    "change, not an ordinary pause) was matched anyway -- this is exactly the false " +
+    "cross-boundary match the span limit exists to prevent.");
+
+// A three-segment span, right at the widened limit, must still be found -- the fix is not
+// accidentally limited to exactly two segments.
+var threeSegmentSpan = new[]
+{
+    new TranscriptSegment(300.0, 301.0, "He leaned", new[]
+    {
+        new TranscriptWord("He", 300.0, 300.4), new TranscriptWord("leaned", 300.4, 301.0),
+    }),
+    new TranscriptSegment(301.1, 301.6, "in close", new[]
+    {
+        new TranscriptWord("in", 301.1, 301.3), new TranscriptWord("close", 301.3, 301.6),
+    }),
+    new TranscriptSegment(301.7, 302.3, "and kissed her.", new[]
+    {
+        new TranscriptWord("and", 301.7, 301.9), new TranscriptWord("kissed", 301.9, 302.1),
+        new TranscriptWord("her.", 302.1, 302.3),
+    }),
+};
+Assert(
+    TranscriptWordLocator.FindPhraseInSegments(threeSegmentSpan, "He leaned in close and kissed her.")
+        is { } threeSpan &&
+        Math.Abs(threeSpan.StartTime - 300.0) < 0.001 && Math.Abs(threeSpan.EndTime - 302.3) < 0.001,
+    "A quote spanning three tightly-adjacent segments was not located, even though it is " +
+    "within the widened span limit.");
+
 // The character-offset path a narrated book's own passages use, which carries no word list
 // at all -- only the passage's own text and its absolute starting offset.
 var bookPassage = new TranscriptSegment(

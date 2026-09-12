@@ -93,17 +93,54 @@ public static class TranscriptWordLocator
     }
 
     /// <summary>
+    /// How many consecutive segments a multi-segment quote match may span.
+    /// </summary>
+    /// <remarks>
+    /// The prompt tells the model to copy its quote from a single segment, but a real
+    /// production batch showed this instruction is not always followed once the batch is
+    /// large: a locally-hosted model can narrate one continuous clause split across two
+    /// consecutive segments the transcriber happened to break on a mid-sentence pause, and
+    /// copy the words spanning both -- e.g. a real production quote of
+    /// "He grabbed my hands again, and bit my neck." that is exactly two adjacent segments'
+    /// text ("He grabbed my hands again," / "and bit my neck.") joined together. Rejecting
+    /// that quote outright throws away a real, correctly-supported event purely because of
+    /// where the transcriber happened to draw a segment boundary. Bounded to a small span and
+    /// a short maximum gap (see <see cref="MaxSegmentGapForPhraseSpan"/>) so this stays a
+    /// narrow tolerance for a transcriber's own mid-sentence pause, not a general license to
+    /// stitch arbitrary segments together the way the single-segment design originally
+    /// avoided.
+    /// </remarks>
+    private const int MaxAdjacentSegmentSpan = 3;
+
+    /// <summary>
+    /// The largest silence, in seconds, between two consecutive segments that may still be
+    /// spanned by one matched quote.
+    /// </summary>
+    /// <remarks>
+    /// A real mid-sentence transcriber pause in this app's own production data measures well
+    /// under a second; a scene, topic, or chapter change is measured in many seconds or more.
+    /// Set well above the former and well below the latter so this only recovers the specific
+    /// failure it exists for -- one clause split by an ordinary pause -- and does not start
+    /// matching a phrase whose two halves were never actually part of the same spoken moment.
+    /// </remarks>
+    private const double MaxSegmentGapForPhraseSpan = 2.0;
+
+    /// <summary>
     /// Locates a phrase across a run of consecutive transcript segments, trying each
-    /// segment's own word list as a possible start.
+    /// segment's own word list as a possible start, then a short run of tightly-adjacent
+    /// segments concatenated together.
     /// </summary>
     /// <remarks>
     /// A model-proposed event's supporting text is not guaranteed to sit inside one segment:
     /// the transcriber's segment boundaries follow pauses in the audio, not sentence
-    /// structure, so a short phrase can straddle two. Each candidate segment is searched
-    /// independently rather than concatenating every word list in the range, because
-    /// concatenation would let a phrase match across a gap the transcriber never actually
-    /// heard as continuous -- the end of one segment's last word beside the start of an
-    /// unrelated segment's first.
+    /// structure, so a short phrase can straddle two. Each candidate segment is tried alone
+    /// first, which covers the overwhelming majority of quotes and carries none of the
+    /// cross-boundary risk below. Only when that fails does this widen to a bounded run of
+    /// consecutive segments (see <see cref="MaxAdjacentSegmentSpan"/> and
+    /// <see cref="MaxSegmentGapForPhraseSpan"/>) -- deliberately not every word list in the
+    /// whole supplied range, which would let a phrase match across a gap the transcriber
+    /// never actually heard as continuous, coincidentally joining the end of one segment's
+    /// last word to the start of an unrelated segment's first.
     /// </remarks>
     public static WordSpan? FindPhraseInSegments(
         IReadOnlyList<TranscriptSegment> segments,
@@ -113,6 +150,25 @@ public static class TranscriptWordLocator
         {
             var found = FindPhrase(segment.Words, phrase);
             if (found is not null) return found;
+        }
+
+        for (var start = 0; start < segments.Count; start += 1)
+        {
+            if (segments[start].Words is not { Count: > 0 } firstWords) continue;
+
+            var spanned = new List<TranscriptWord>(firstWords);
+            var span = Math.Min(MaxAdjacentSegmentSpan, segments.Count - start);
+            for (var offset = 1; offset < span; offset += 1)
+            {
+                var previous = segments[start + offset - 1];
+                var next = segments[start + offset];
+                if (next.StartTime - previous.EndTime > MaxSegmentGapForPhraseSpan) break;
+                if (next.Words is not { Count: > 0 } nextWords) break;
+
+                spanned.AddRange(nextWords);
+                var found = FindPhrase(spanned, phrase);
+                if (found is not null) return found;
+            }
         }
         return null;
     }
