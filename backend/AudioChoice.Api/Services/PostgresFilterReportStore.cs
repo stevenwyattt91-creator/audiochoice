@@ -31,14 +31,30 @@ public sealed class PostgresFilterReportStore(NpgsqlDataSource dataSource) : IFi
         AddNullable(command, report.ScanEventID);
         AddNullable(command, report.CategoryID);
         command.Parameters.AddWithValue(report.ReportedAt);
+        // Never null: FilterReports.Validate normalises it, so the not-null column is always
+        // satisfied. Missing this line is what made every report fail -- the column and its
+        // $13 placeholder were added with migration 027 and the value was not, so Postgres
+        // rejected the bind, the catch below turned that into null, and the endpoint reported
+        // the listener's perfectly good report as malformed.
+        command.Parameters.AddWithValue(report.PositionUnit);
 
-        // A report about a book the account does not own is refused by the foreign key on
-        // users only, not on editions, so an unmatched edition still records.
         try
         {
             return command.ExecuteNonQuery() > 0 ? report : null;
         }
-        catch (PostgresException)
+        // Only a missing account. A report about a book nobody owns is still worth keeping --
+        // there is no foreign key on editions, precisely so an unmatched edition records -- but
+        // a report whose account has been deleted has nowhere to live, and no retry will change
+        // that, so null (and the 400 it becomes) is the honest answer.
+        //
+        // Deliberately narrow. Catching every PostgresException here is what hid the bug above
+        // for as long as it existed: a bind failure, a missing column, a dead connection and a
+        // deleted account all became the same null, and the endpoint told the listener their
+        // report was malformed. Both apps treat that 400 as permanent and delete the report, so
+        // a server-side fault silently destroyed the evidence instead of being retried. Anything
+        // that is not a missing account now propagates, becomes a 500, and gets tried again.
+        catch (PostgresException error)
+            when (error.SqlState == PostgresErrorCodes.ForeignKeyViolation)
         {
             return null;
         }
