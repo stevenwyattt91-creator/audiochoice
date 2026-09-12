@@ -2014,6 +2014,30 @@ the narration is euphemistic or non-graphic. This lane is for consensual activit
 passage instead shows the act was non-consensual, reject it here (accepted=false) rather than
 reclassifying it -- a separate sexual-violence review handles that case.
 
+Rough physicality during an established romantic or sexual encounter -- biting, pinning,
+gripping, growling, a partner briefly pushing the other away mid-encounter, or resistance that
+reads as heightened arousal rather than a refusal -- is not by itself evidence of non-consent.
+Judge consent from what the passage actually establishes about the characters' own intent, not
+from the intensity of the physical description alone: a bite that pins rather than injures, or
+a shove followed immediately by the same character pressing back into contact, is consistent
+with mutual, escalating desire in a consensual encounter and must not be read as refusal just
+because the vocabulary is forceful. Reserve a non-consent reading for what the passage itself
+makes unambiguous: a stated refusal that is not reversed or contradicted by the character's own
+next action, incapacitation, explicit coercion, or a threat. A passage that mixes some
+resistance-sounding language with clear mutual escalation (grinding, drawing closer, wanting
+more) is evidence of consensual intensity, not evidence against consent.
+
+Example -- a real passage from a production book, correctly accepted as consensual:
+"He grabbed my hands again, and bit my neck. His teeth clamped onto the tender spot where my
+neck met my shoulder. I couldn't move, couldn't think, and my world narrowed to the feeling of
+his lips and teeth against my skin. The push of his body against mine, the hard and the soft,
+made me see red, see lightning, made me grind my hips against his." An earlier moment in this
+same encounter has her push him away and him smile "like an animal" in response -- taken alone,
+that could read as refusal met with menace. Read against what follows in the same passage
+(grinding into him, heat, wanting more), the earlier resistance is the encounter's own
+back-and-forth intensity, not a withdrawn refusal that the biting then overrides. accepted must
+be true here.
+
 accepted may be true only when BOTH evidence booleans are true and confidence is at least
 0.85. Otherwise accepted must be false. Set needsEscalation=true only when the candidate is
 still a plausible ongoing sexual scene but the evidence, confidence, or exact boundaries are

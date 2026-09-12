@@ -46,6 +46,7 @@ import json
 import sys
 import urllib.error
 import urllib.request
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 GROUND_TRUTH_PATH = Path(__file__).parent / "ground_truth_scenes.json"
@@ -73,6 +74,30 @@ of an ongoing sexual encounter. A combination of these cues must not be downgrad
 the narration is euphemistic or non-graphic. This lane is for consensual activity only: if the
 passage instead shows the act was non-consensual, reject it here (accepted=false) rather than
 reclassifying it -- a separate sexual-violence review handles that case.
+
+Rough physicality during an established romantic or sexual encounter -- biting, pinning,
+gripping, growling, a partner briefly pushing the other away mid-encounter, or resistance that
+reads as heightened arousal rather than a refusal -- is not by itself evidence of non-consent.
+Judge consent from what the passage actually establishes about the characters' own intent, not
+from the intensity of the physical description alone: a bite that pins rather than injures, or
+a shove followed immediately by the same character pressing back into contact, is consistent
+with mutual, escalating desire in a consensual encounter and must not be read as refusal just
+because the vocabulary is forceful. Reserve a non-consent reading for what the passage itself
+makes unambiguous: a stated refusal that is not reversed or contradicted by the character's own
+next action, incapacitation, explicit coercion, or a threat. A passage that mixes some
+resistance-sounding language with clear mutual escalation (grinding, drawing closer, wanting
+more) is evidence of consensual intensity, not evidence against consent.
+
+Example -- a real passage from a production book, correctly accepted as consensual:
+"He grabbed my hands again, and bit my neck. His teeth clamped onto the tender spot where my
+neck met my shoulder. I couldn't move, couldn't think, and my world narrowed to the feeling of
+his lips and teeth against my skin. The push of his body against mine, the hard and the soft,
+made me see red, see lightning, made me grind my hips against his." An earlier moment in this
+same encounter has her push him away and him smile "like an animal" in response -- taken alone,
+that could read as refusal met with menace. Read against what follows in the same passage
+(grinding into him, heat, wanting more), the earlier resistance is the encounter's own
+back-and-forth intensity, not a withdrawn refusal that the biting then overrides. accepted must
+be true here.
 
 accepted may be true only when BOTH evidence booleans are true and confidence is at least
 0.85. Otherwise accepted must be false. Set needsEscalation=true only when the candidate is
@@ -360,51 +385,91 @@ def main() -> int:
     parser.add_argument("--max-tokens", type=int, default=2048,
                          help="Higher than a typical answer needs -- Qwen3.6 may emit a "
                               "visible thinking block before its actual JSON answer.")
-    parser.add_argument("--timeout", type=int, default=120)
+    parser.add_argument("--timeout", type=int, default=240,
+                         help="Raised from 120s: under concurrency, a request can genuinely "
+                              "queue behind others on the GPU before it even starts serving, "
+                              "on top of a reasoning model's own long visible thinking block.")
+    parser.add_argument("--concurrency", type=int, default=8,
+                         help="How many cases to send at once. Each case is an independent "
+                              "single-candidate request, so the vLLM server (max_num_seqs=8 "
+                              "in this app's own deploy config) already batches this many "
+                              "concurrently on one GPU without cross-contaminating results -- "
+                              "this was previously sent one at a time, serializing 35 cases' "
+                              "worth of a reasoning model's visible thinking tokens for no "
+                              "reason. Set to 1 to reproduce the old fully-sequential behavior.")
     args = parser.parse_args()
 
     ground_truth = json.loads(GROUND_TRUTH_PATH.read_text(encoding="utf-8"))
     cases = ground_truth["cases"]
 
     print(f"Evaluating {len(cases)} ground-truth case(s) against {args.model} "
-          f"at {args.base_url}\n")
+          f"at {args.base_url} (concurrency={args.concurrency})\n")
 
-    results = []
-    for case in cases:
+    def run_one(case: dict) -> dict:
         prompt = build_prompt(case)
         try:
             raw_response = call_model(
                 args.base_url, args.model, args.api_key, prompt, args.max_tokens, args.timeout
             )
-        except (urllib.error.URLError, urllib.error.HTTPError) as error:
-            print(f"[{case['id']}] REQUEST FAILED: {error}")
-            results.append({"id": case["id"], "verdict": f"FAIL (request error: {error})"})
-            continue
+        # Deliberately broader than urllib.error.URLError/HTTPError alone: a socket-level
+        # TimeoutError (raised directly, not wrapped in URLError, when a slow request under
+        # concurrency exceeds --timeout) previously propagated out of this worker thread and
+        # crashed the whole run via the next future.result() call, losing every case that had
+        # not printed yet. One case timing out must fail only that case.
+        except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError, OSError) as error:
+            return {"id": case["id"], "verdict": f"FAIL (request error: {error})",
+                    "raw_parsed": None, "raw_response": None}
 
         parsed = extract_json_object(raw_response)
         outcome = score_case(case, parsed)
-        results.append(outcome)
+        outcome["raw_response"] = raw_response
+        return outcome
 
-        print(f"[{case['id']}] {outcome['verdict']}")
-        if parsed and parsed.get("candidates"):
-            result = parsed["candidates"][0]
-            category = case.get("category", "sexual")
-            if category.startswith("violence_"):
-                print(f"    dwellsOnPhysicalDamage={result.get('dwellsOnPhysicalDamage')} "
-                      f"confidence={result.get('confidence')}")
-            elif category.startswith("self_harm"):
-                print(f"    accepted={result.get('accepted')} "
-                      f"label={result.get('label')} "
-                      f"confidence={result.get('confidence')} "
-                      f"safeDescription={result.get('safeDescription')!r}")
-            else:
-                print(f"    accepted={result.get('accepted')} "
-                      f"startTime={result.get('startTime')} "
-                      f"confidence={result.get('confidence')} "
-                      f"safeDescription={result.get('safeDescription')!r}")
-        elif parsed is None:
-            print(f"    raw response (truncated): {raw_response[:300]!r}")
-        print()
+    # Dispatched concurrently (I/O-bound HTTP calls; vLLM's own request queue is what
+    # actually batches these on the GPU), but printed in the ground-truth file's own order
+    # as each result becomes available, not completion order -- a case earlier in the file
+    # finishing later than one behind it must not scramble the printed report.
+    results = [None] * len(cases)
+    with ThreadPoolExecutor(max_workers=max(1, args.concurrency)) as pool:
+        futures = {pool.submit(run_one, case): index for index, case in enumerate(cases)}
+        completed = 0
+        pending = {}
+        next_to_print = 0
+        for future in as_completed(futures):
+            index = futures[future]
+            results[index] = future.result()
+            completed += 1
+            pending[index] = True
+            # Flush any run of consecutive completed results starting at next_to_print, so
+            # output stays in ground-truth order without waiting for every case to finish.
+            while next_to_print in pending:
+                outcome = results[next_to_print]
+                case = cases[next_to_print]
+                parsed = outcome.get("raw_parsed")
+                raw_response = outcome.pop("raw_response", None)
+                print(f"[{case['id']}] {outcome['verdict']}  ({completed}/{len(cases)} done)")
+                if parsed and parsed.get("candidates"):
+                    result = parsed["candidates"][0]
+                    category = case.get("category", "sexual")
+                    if category.startswith("violence_"):
+                        print(f"    dwellsOnPhysicalDamage={result.get('dwellsOnPhysicalDamage')} "
+                              f"confidence={result.get('confidence')}")
+                    elif category.startswith("self_harm"):
+                        print(f"    accepted={result.get('accepted')} "
+                              f"label={result.get('label')} "
+                              f"confidence={result.get('confidence')} "
+                              f"safeDescription={result.get('safeDescription')!r}")
+                    else:
+                        print(f"    accepted={result.get('accepted')} "
+                              f"startTime={result.get('startTime')} "
+                              f"confidence={result.get('confidence')} "
+                              f"safeDescription={result.get('safeDescription')!r}")
+                elif parsed is None and raw_response is not None:
+                    print(f"    raw response (truncated): {raw_response[:300]!r}")
+                print()
+                sys.stdout.flush()
+                del pending[next_to_print]
+                next_to_print += 1
 
     scored = [r for r in results if not r["verdict"].startswith("AMBIGUOUS")]
     ambiguous_count = len(results) - len(scored)
