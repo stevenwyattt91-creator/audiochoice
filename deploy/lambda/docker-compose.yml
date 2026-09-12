@@ -19,10 +19,20 @@ services:
     # pipeline also could not reliably agree with itself on across 29+ independent calls.
     #
     # GPU budget: this host's single A100 40GB also runs the whisper transcription
-    # container (idle ~2.5GB, headroom under load). --gpu-memory-utilization 0.70 caps this
-    # service at roughly 28GB. Measured directly on this host: AWQ INT4 weight loading
-    # alone takes just under 20GB, so anything below ~0.55 leaves no room for a KV cache at
-    # all and the engine refuses to start ("No available memory for the cache blocks").
+    # container (idle ~2.4GB measured via nvidia-smi --query-compute-apps; large-v3-turbo
+    # under real concurrent transcription load typically runs a few GB above that, not the
+    # much larger jump a 27B LLM's own footprint would suggest). --gpu-memory-utilization
+    # 0.70 capped this service at ~28GB and measured, at --max-model-len 65536, only enough
+    # KV cache for 1.28x concurrency (vLLM's own startup log: "GPU KV cache size: 83,740
+    # tokens, Maximum concurrency for 65,536 tokens per request: 1.28x") -- meaning almost
+    # every real, full-size production request serialized behind the one before it despite
+    # ContentAnalysisConcurrency/SceneVerificationConcurrency/SceneEscalationConcurrency all
+    # allowing several in flight at once. Raised to 0.82 (~33.6GB), leaving ~7GB headroom for
+    # whisper's real concurrent-load footprint, comfortably above its idle usage. AWQ INT4
+    # weight loading alone takes just under 20GB, so anything below ~0.55 leaves no room for
+    # a KV cache at all and the engine refuses to start ("No available memory for the cache
+    # blocks"). Re-measure the real startup log's own concurrency line after any further
+    # change here rather than assuming the ratio holds.
     #
     # --max-model-len 65536, not 32768: a real production Luna first-pass batch (Content
     # AnalysisModel, up to MaximumSegmentsPerAnalysisRequest=100 transcript segments) hit
@@ -54,7 +64,7 @@ services:
       --quantization awq
       --port 8002
       --max-model-len 65536
-      --gpu-memory-utilization 0.70
+      --gpu-memory-utilization 0.82
       --max-num-seqs 8
       --served-model-name qwen3.6-27b
     deploy:
