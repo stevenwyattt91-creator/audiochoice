@@ -370,13 +370,17 @@ if (openAIOptions.WorkerEnabled)
 {
     var usesBedrockAnalysis = string.Equals(
         openAIOptions.AnalysisProvider, "bedrock", StringComparison.OrdinalIgnoreCase);
+    var usesVllmAnalysis = string.Equals(
+        openAIOptions.AnalysisProvider, "vllm", StringComparison.OrdinalIgnoreCase);
     var usesOpenAITranscription = !string.Equals(
         openAIOptions.TranscriptionProvider, "faster-whisper", StringComparison.OrdinalIgnoreCase);
     // Required only by whatever actually calls OpenAI. A worker transcribing on the local GPU
-    // and classifying on Bedrock needs no OpenAI account, and demanding a key it will never
-    // use would refuse to start over a setting that does not apply.
-    // A tier may name an OpenAI model even when the pipeline is otherwise on Bedrock, so the
-    // key is required by what the tiers actually name rather than by the provider setting.
+    // and classifying on Bedrock -- or now, entirely on a self-hosted vLLM server -- needs no
+    // OpenAI account, and demanding a key it will never use would refuse to start over a
+    // setting that does not apply.
+    // A tier may name an OpenAI model even when the pipeline is otherwise on Bedrock or vLLM,
+    // so the key is required by what the tiers actually name rather than by the provider
+    // setting alone.
     var anyTierUsesOpenAI = new[]
         {
             openAIOptions.AnalysisModel,
@@ -386,7 +390,8 @@ if (openAIOptions.WorkerEnabled)
             .Append(openAIOptions.EffectiveViolenceVerificationModel)
         .Any(RoutingAnalysisModelClient.IsOpenAIModel);
     if (string.IsNullOrWhiteSpace(openAIOptions.ApiKey) &&
-        (!usesBedrockAnalysis || usesOpenAITranscription || anyTierUsesOpenAI))
+        (!(usesBedrockAnalysis || usesVllmAnalysis) ||
+         usesOpenAITranscription || anyTierUsesOpenAI))
     {
         throw new InvalidOperationException(
             "AudioChoice:OpenAI:ApiKey is required when the scan worker uses OpenAI for " +
@@ -419,6 +424,18 @@ if (openAIOptions.WorkerEnabled)
                 Math.Max(30, openAIOptions.AnalysisRequestTimeoutSeconds));
         });
 
+    // Same timeout reasoning as OpenAIProcessing above: a locally-hosted model serving a long
+    // Luna batch under real load can take well past the platform's hidden 100-second default,
+    // and a client-side timeout throws before VllmModelClient's own retry loop ever sees it.
+    builder.Services.AddHttpClient(
+        "VllmProcessing",
+        client =>
+        {
+            client.BaseAddress = new Uri(openAIOptions.VllmEndpoint);
+            client.Timeout = TimeSpan.FromSeconds(
+                Math.Max(30, openAIOptions.AnalysisRequestTimeoutSeconds));
+        });
+
     builder.Services.AddSingleton<ITranscriptionProvider>(services =>
         string.Equals(openAIOptions.TranscriptionProvider, "faster-whisper", StringComparison.OrdinalIgnoreCase)
             ? new FasterWhisperTranscriptionProvider(
@@ -440,29 +457,46 @@ if (openAIOptions.WorkerEnabled)
     // How the models are reached. The scanner's judgement does not live here: every policy
     // that decides what a listener has removed stays in OpenAIContentAnalysisProvider, and
     // only the transport is selected. That is what makes a vendor change configuration.
-    if (usesBedrockAnalysis)
+    //
+    // "vllm" is a third AnalysisProvider value, alongside the existing "bedrock" and the
+    // OpenAI-only default. Deliberately built as an additional branch rather than a
+    // replacement for either: this is what lets a fully self-hosted deployment (every tier
+    // naming a local model, no OpenAI key required at all) exist side by side with the
+    // original OpenAI-only path in the same codebase, so reverting to OpenAI if the local
+    // model does not hold up in production is a configuration change -- the three model
+    // names plus AnalysisProvider -- not a code change or a redeploy of anything else.
+    if (usesBedrockAnalysis || usesVllmAnalysis)
     {
-        builder.Services.AddSingleton<IAmazonBedrockRuntime>(_ =>
-            string.IsNullOrWhiteSpace(openAIOptions.BedrockRegion)
-                ? new AmazonBedrockRuntimeClient()
-                : new AmazonBedrockRuntimeClient(
-                    Amazon.RegionEndpoint.GetBySystemName(openAIOptions.BedrockRegion)));
+        if (usesBedrockAnalysis)
+        {
+            builder.Services.AddSingleton<IAmazonBedrockRuntime>(_ =>
+                string.IsNullOrWhiteSpace(openAIOptions.BedrockRegion)
+                    ? new AmazonBedrockRuntimeClient()
+                    : new AmazonBedrockRuntimeClient(
+                        Amazon.RegionEndpoint.GetBySystemName(openAIOptions.BedrockRegion)));
+        }
 
-        // Routed rather than chosen once. The tiers are not equally well served: Nova does the
-        // bulk of the work well and cheaply, while the sexual-scene stages stay on OpenAI until
-        // a frontier model is reachable on Bedrock. Which service a tier uses is decided by the
-        // model it names, so moving one later is a configuration change.
+        // Routed rather than chosen once. Which service a tier uses is decided by the model
+        // it names, so moving one later -- OpenAI to Bedrock, OpenAI to a local vLLM model,
+        // or back -- is a configuration change, never a code change.
         builder.Services.AddSingleton<IAnalysisModelClient>(services =>
             new RoutingAnalysisModelClient(
-                bedrock: new BedrockConverseModelClient(
-                    services.GetRequiredService<IAmazonBedrockRuntime>(),
-                    openAIOptions,
-                    services.GetRequiredService<ILogger<BedrockConverseModelClient>>()),
+                bedrock: usesBedrockAnalysis
+                    ? new BedrockConverseModelClient(
+                        services.GetRequiredService<IAmazonBedrockRuntime>(),
+                        openAIOptions,
+                        services.GetRequiredService<ILogger<BedrockConverseModelClient>>())
+                    : null,
                 openAI: new OpenAIResponsesModelClient(
                     services.GetRequiredService<IHttpClientFactory>()
                         .CreateClient("OpenAIProcessing"),
                     openAIOptions,
                     services.GetRequiredService<ILogger<OpenAIResponsesModelClient>>()),
+                vllm: new VllmModelClient(
+                    services.GetRequiredService<IHttpClientFactory>()
+                        .CreateClient("VllmProcessing"),
+                    openAIOptions,
+                    services.GetRequiredService<ILogger<VllmModelClient>>()),
                 services.GetRequiredService<ILogger<RoutingAnalysisModelClient>>()));
     }
     else

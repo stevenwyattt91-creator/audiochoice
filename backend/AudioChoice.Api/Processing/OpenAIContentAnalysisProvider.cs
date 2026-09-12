@@ -56,10 +56,13 @@ public sealed class OpenAIContentAnalysisProvider(
     // A cached checkpoint from before this change holds only one Sol answer per candidate,
     // which this version bump keeps from being silently read as though it already reflected
     // a majority of three.
+    // Bumped together with ScannerVersion for the switch to a self-hosted vLLM model
+    // (Qwen3.6-27B) as the analysis transport, so a cached checkpoint from OpenAI's model is
+    // never silently reused as though this different model had produced it.
     private const string SceneVerificationVersion =
-        "5.4-sol-majority-vote";
+        "6.0-vllm-qwen";
     private const string SceneEscalationVersion =
-        "5.4-sol-majority-vote";
+        "6.0-vllm-qwen";
     private readonly string _checkpointFolder = dataPaths.AnalysisCheckpoints;
     public string ScannerVersion => options.ScannerVersion;
 
