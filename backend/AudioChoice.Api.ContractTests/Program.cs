@@ -3421,6 +3421,103 @@ Assert(
         "defines, so a normalised report could not be written.");
 }
 
+// VllmModelClient.TryParseContextLengthOverflow -- must read vLLM's real reported input
+// token count and context window from its own error message, since that is the only
+// number CompleteJson's adaptive retry can trust (a client-side token count would not even
+// use the same tokenizer the server measured against).
+{
+    var parsed = VllmModelClient.TryParseContextLengthOverflow(
+        """{"error":{"message":"This model's maximum context length is 65536 tokens. However, you requested 8000 output tokens and your prompt contains at least 57537 input tokens, for a total of at least 65537 tokens. Please reduce the length of the input prompt or the number of requested output tokens. (parameter=input_tokens, value=57537)","type":"BadRequestError","param":"input_tokens","code":400}}""");
+    Assert(
+        parsed is { ContextWindow: 65536, InputTokens: 57537 },
+        "A real vLLM context-length-exceeded error was not parsed for its window and input " +
+        "token count.");
+
+    Assert(
+        VllmModelClient.TryParseContextLengthOverflow("""{"error":{"message":"some other error"}}""")
+            is null,
+        "An unrelated error body was misread as a context-length overflow.");
+}
+
+// VllmModelClient.CompleteJson's adaptive max_tokens retry -- exercised against a fake HTTP
+// handler rather than only unit-testing the parser, because the real regression this
+// covers ("The node already has a parent") only appeared when the request body was
+// actually rebuilt and sent a second time with the same JsonObject schema instance reused
+// across attempts.
+{
+    var schema = new System.Text.Json.Nodes.JsonObject
+    {
+        ["type"] = "object",
+        ["properties"] = new System.Text.Json.Nodes.JsonObject
+        {
+            ["candidates"] = new System.Text.Json.Nodes.JsonObject { ["type"] = "array" }
+        }
+    };
+
+    var attempts = 0;
+    var handler = new FakeRoutedHttpMessageHandler(request =>
+    {
+        attempts += 1;
+        if (attempts == 1)
+        {
+            return new HttpResponseMessage(System.Net.HttpStatusCode.BadRequest)
+            {
+                Content = new StringContent(
+                    """{"error":{"message":"This model's maximum context length is 65536 tokens. However, you requested 8000 output tokens and your prompt contains at least 60000 input tokens, for a total of at least 68000 tokens.","type":"BadRequestError"}}""")
+            };
+        }
+        return new HttpResponseMessage(System.Net.HttpStatusCode.OK)
+        {
+            Content = new StringContent(
+                """{"choices":[{"message":{"content":"{\"candidates\":[]}"}}],"usage":{"prompt_tokens":60000,"completion_tokens":10}}""")
+        };
+    });
+    var httpClient = new HttpClient(handler) { BaseAddress = new Uri("http://127.0.0.1:8002/v1/") };
+    var vllmOptions = new OpenAIProcessingOptions { VllmMaxTokens = 8000 };
+    var vllmClient = new VllmModelClient(httpClient, vllmOptions, NullLogger<VllmModelClient>.Instance);
+
+    var response = await vllmClient.CompleteJson(
+        "qwen3.6-27b", "some prompt", "test_schema", schema, CancellationToken.None);
+    Assert(
+        attempts == 2,
+        "A real context-length overflow did not trigger exactly one adaptive retry before " +
+        "succeeding.");
+    Assert(
+        response.Json == "{\"candidates\":[]}",
+        "The retried request's successful response was not returned to the caller.");
+}
+
+// The same overflow, but with no viable max_tokens left even at the minimum -- must fail
+// loudly with a clear message rather than retry forever or return an unusably small budget.
+{
+    var schema = new System.Text.Json.Nodes.JsonObject { ["type"] = "object" };
+    var handler = new FakeRoutedHttpMessageHandler(_ => new HttpResponseMessage(
+        System.Net.HttpStatusCode.BadRequest)
+    {
+        Content = new StringContent(
+            """{"error":{"message":"This model's maximum context length is 65536 tokens. However, you requested 8000 output tokens and your prompt contains at least 65500 input tokens, for a total of at least 73500 tokens.","type":"BadRequestError"}}""")
+    });
+    var httpClient = new HttpClient(handler) { BaseAddress = new Uri("http://127.0.0.1:8002/v1/") };
+    var vllmOptions = new OpenAIProcessingOptions { VllmMaxTokens = 8000 };
+    var vllmClient = new VllmModelClient(httpClient, vllmOptions, NullLogger<VllmModelClient>.Instance);
+
+    var threw = false;
+    try
+    {
+        await vllmClient.CompleteJson(
+            "qwen3.6-27b", "some prompt", "test_schema", schema, CancellationToken.None);
+    }
+    catch (HttpRequestException error)
+    {
+        threw = true;
+        Assert(
+            error.Message.Contains("too large for the local model's context window"),
+            "An unrecoverable context overflow's error message did not explain why.");
+    }
+    Assert(threw, "An unrecoverable context overflow (no viable max_tokens remaining) did " +
+        "not fail loudly.");
+}
+
 Console.WriteLine("AudioChoice backend contract tests passed.");
 
 static string FindMigrationsDirectory()
@@ -3864,4 +3961,17 @@ sealed class FakeProcessRunner(double duration) : IProcessRunner
         return Task.FromResult(
             new ProcessExecutionResult(0, string.Empty, string.Empty));
     }
+}
+
+/// <summary>
+/// Routes each request through a caller-supplied function rather than one fixed body, so a
+/// single test can return different responses across successive retry attempts (the
+/// single-string <see cref="FakeHttpMessageHandler"/> above can only ever return one answer).
+/// </summary>
+sealed class FakeRoutedHttpMessageHandler(Func<HttpRequestMessage, HttpResponseMessage> respond)
+    : HttpMessageHandler
+{
+    protected override Task<HttpResponseMessage> SendAsync(
+        HttpRequestMessage request, CancellationToken cancellationToken) =>
+        Task.FromResult(respond(request));
 }

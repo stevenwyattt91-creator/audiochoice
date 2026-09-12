@@ -71,7 +71,12 @@ public sealed class VllmModelClient(
                     ["json_schema"] = new JsonObject
                     {
                         ["name"] = schemaName,
-                        ["schema"] = schema,
+                        // Deep-cloned on every attempt: a JsonNode may only ever belong to one
+                        // parent, and this loop can rebuild the request body more than once
+                        // (the adaptive max_tokens retry below). Reusing the same schema
+                        // instance across attempts threw "The node already has a parent" on
+                        // the very first retry this fix was meant to enable.
+                        ["schema"] = schema.DeepClone(),
                         ["strict"] = true
                     }
                 }
