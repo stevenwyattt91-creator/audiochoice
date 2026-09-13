@@ -60,6 +60,15 @@ public sealed class VllmModelClient(
         // token reproduce identically no matter how many times the same request is retried.
         var temperature = 0.0;
 
+        // Tracks the context-overflow branch's own attempt count and the input-token count
+        // it was last told about. Kept separate from the ordinary retry `attempt` counter:
+        // this correction is meant to run independent of MaximumRetries (see that branch's
+        // own remarks), but "independent of a budget" was never meant to mean "unbounded" --
+        // see MaximumContextOverflowRetries below for the real production loop this guards
+        // against.
+        var contextOverflowAttempts = 0;
+        int? previousOverflowInputTokens = null;
+
         for (var attempt = 0; ; attempt += 1)
         {
             var body = new JsonObject
@@ -224,6 +233,47 @@ public sealed class VllmModelClient(
                 var overflow = TryParseContextLengthOverflow(errorBody);
                 if (overflow is { } detected)
                 {
+                    // Real production bug this guards against, observed under the first heavy
+                    // concurrent-batch load this pipeline was ever run at (10 books x 8-way
+                    // model concurrency): vLLM's own "at least N input tokens" figure is not a
+                    // stable count of one unchanged prompt -- it climbed by ~257 tokens on every
+                    // successive retry of the exact same request, 75 times in 5 minutes, never
+                    // once going down. Every prior assumption in this branch treated that number
+                    // as fixed and safe to shrink max_tokens against; when it drifts upward at
+                    // roughly the same rate max_tokens shrinks, the two chase each other and
+                    // this loop never converges and never had a cap, because a size correction
+                    // was never expected to need one. Detecting "the reported input size did not
+                    // actually shrink" is what catches this without needing to know why vLLM's
+                    // count drifts under load (heavier concurrent KV cache and prefix-cache
+                    // churn is the likely cause, but this fix does not depend on that being
+                    // right).
+                    if (previousOverflowInputTokens is { } previousInputTokens &&
+                        detected.InputTokens >= previousInputTokens)
+                    {
+                        throw new HttpRequestException(
+                            $"{schemaName} failed with HTTP {(int)response.StatusCode}: the " +
+                            "model's own reported input-token count did not shrink between " +
+                            $"context-overflow retries ({previousInputTokens} then " +
+                            $"{detected.InputTokens} of {detected.ContextWindow}) -- this cannot " +
+                            "converge by reducing max_tokens alone, most likely because heavy " +
+                            "concurrent load is making the server's own count drift rather than " +
+                            "the prompt itself growing. Stopped after " +
+                            $"{contextOverflowAttempts + 1} attempt(s) rather than retrying " +
+                            "without end.");
+                    }
+                    previousOverflowInputTokens = detected.InputTokens;
+
+                    contextOverflowAttempts += 1;
+                    if (contextOverflowAttempts > MaximumContextOverflowRetries)
+                    {
+                        throw new HttpRequestException(
+                            $"{schemaName} failed with HTTP {(int)response.StatusCode}: exceeded " +
+                            $"{MaximumContextOverflowRetries} context-overflow retries against " +
+                            $"the model's {detected.ContextWindow}-token context window without " +
+                            "converging on a viable max_tokens. Stopped rather than retrying " +
+                            "without end.");
+                    }
+
                     var revisedMaxTokens = detected.ContextWindow - detected.InputTokens - TokenSafetyMargin;
                     if (revisedMaxTokens > MinimumViableMaxTokens && revisedMaxTokens < maxTokens)
                     {
@@ -277,6 +327,16 @@ public sealed class VllmModelClient(
     /// risks a second, needless overflow on the same candidate.
     /// </summary>
     private const int TokenSafetyMargin = 256;
+
+    /// <summary>
+    /// Hard ceiling on the context-overflow branch's own retries, independent of
+    /// <see cref="OpenAIProcessingOptions.MaximumRetries"/> by design (see that branch's own
+    /// remarks) -- but "independent of that budget" is not the same as "no budget at all".
+    /// A genuine size correction against a stable input-token count converges in one or two
+    /// attempts; this exists only to stop a candidate whose reported input size will not
+    /// stop drifting from consuming a GPU concurrency slot forever.
+    /// </summary>
+    private const int MaximumContextOverflowRetries = 10;
 
     /// <summary>
     /// Below this, a revised max_tokens is not worth attempting: this pipeline's own JSON

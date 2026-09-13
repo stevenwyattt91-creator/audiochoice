@@ -3853,6 +3853,60 @@ Assert(
         "not fail loudly.");
 }
 
+// A real production regression this covers: under heavy concurrent GPU load, vLLM's own
+// reported "input tokens counted" was observed climbing on every successive retry of the
+// exact same unchanged request (75 times in 5 minutes, one candidate, no convergence) while
+// max_tokens shrank by the same amount to compensate -- the two chased each other forever,
+// with no cap on this retry path (see CompleteJson's own remarks on why it deliberately
+// does not share MaximumRetries' budget). Must fail loudly and quickly, not hang the whole
+// job's GPU concurrency slot indefinitely.
+{
+    var schema = new System.Text.Json.Nodes.JsonObject { ["type"] = "object" };
+    var reportedInputTokens = 49537;
+    var attemptsMade = 0;
+    var handler = new FakeRoutedHttpMessageHandler(_ =>
+    {
+        attemptsMade += 1;
+        var body =
+            "{\"error\":{\"message\":\"This model's maximum context length is 65536 " +
+            "tokens. However, you requested 8000 output tokens and your prompt contains " +
+            $"at least {reportedInputTokens} input tokens, for a total of at least " +
+            "73500 tokens.\",\"type\":\"BadRequestError\"}}";
+        // Climbs on every attempt, exactly like the real drifting count under load -- never
+        // once shrinks, so no fixed max_tokens reduction can ever converge.
+        reportedInputTokens += 257;
+        return new HttpResponseMessage(System.Net.HttpStatusCode.BadRequest)
+        {
+            Content = new StringContent(body)
+        };
+    });
+    var httpClient = new HttpClient(handler) { BaseAddress = new Uri("http://127.0.0.1:8002/v1/") };
+    var vllmOptions = new OpenAIProcessingOptions { VllmMaxTokens = 16000 };
+    var vllmClient = new VllmModelClient(httpClient, vllmOptions, NullLogger<VllmModelClient>.Instance);
+
+    var threw = false;
+    try
+    {
+        await vllmClient.CompleteJson(
+            "qwen3.6-27b", "some prompt", "test_schema", schema, CancellationToken.None);
+    }
+    catch (HttpRequestException error)
+    {
+        threw = true;
+        Assert(
+            error.Message.Contains("did not shrink"),
+            "A context-overflow retry whose reported input size never shrinks did not " +
+            "explain that as the reason it gave up. Message: " + error.Message);
+    }
+    Assert(threw, "A context-overflow retry loop whose reported input size climbs on every " +
+        "attempt did not fail loudly -- this is the real production infinite-retry bug.");
+    Assert(
+        attemptsMade <= 3,
+        "A drifting context-overflow count was retried far more than needed to detect it " +
+        $"is not converging ({attemptsMade} attempts) -- the drift check should catch " +
+        "this within a couple of attempts, not let it run for many more.");
+}
+
 Console.WriteLine("AudioChoice backend contract tests passed.");
 
 static string FindMigrationsDirectory()
