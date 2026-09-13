@@ -135,6 +135,137 @@ public static class KnownWorkCatalog
             TotalParts: null,
             IsDramatized: false,
             KnownIdentifiers: ["B0DSCGNTXS"]),
+
+        // Added for a real drop-folder ingestion batch: each of these carried a usable
+        // author tag by the time it reached this catalogue (see the drop-folder watcher's
+        // own tag-reading fix), so none of them strictly needed a KnownWorkCatalog entry
+        // to become publishable -- but slightly different bracket/part wording between a
+        // series' own parts (seen here as "(1 of 3)" on one file and "(Part 2 of 3)" on
+        // its sibling) would otherwise render as three inconsistently-formatted entries
+        // in Explore rather than one clean series.
+        new KnownWork(
+            CanonicalTitle: "A Court of Wings and Ruin",
+            Author: "Sarah J. Maas",
+            SeriesTitle: "A Court of Thorns and Roses",
+            SeriesNumber: 3,
+            TotalParts: 3,
+            IsDramatized: true,
+            KnownIdentifiers: []),
+
+        new KnownWork(
+            CanonicalTitle: "A Court of Frost and Starlight",
+            Author: "Sarah J. Maas",
+            SeriesTitle: "A Court of Thorns and Roses",
+            SeriesNumber: 3,
+            TotalParts: null,
+            IsDramatized: true,
+            KnownIdentifiers: []),
+
+        new KnownWork(
+            CanonicalTitle: "A Court of Silver Flames",
+            Author: "Sarah J. Maas",
+            SeriesTitle: "A Court of Thorns and Roses",
+            SeriesNumber: 4,
+            TotalParts: 2,
+            IsDramatized: true,
+            KnownIdentifiers: []),
+
+        new KnownWork(
+            CanonicalTitle: "Onyx Storm",
+            Author: "Rebecca Yarros",
+            SeriesTitle: "The Empyrean",
+            SeriesNumber: 3,
+            TotalParts: 2,
+            IsDramatized: true,
+            KnownIdentifiers: []),
+
+        new KnownWork(
+            CanonicalTitle: "Golden Son",
+            Author: "Pierce Brown",
+            SeriesTitle: "Red Rising",
+            SeriesNumber: 2,
+            TotalParts: 2,
+            IsDramatized: true,
+            KnownIdentifiers: ["B0CGFYB9ZZ", "B0CKY5V8Z2"]),
+
+        new KnownWork(
+            CanonicalTitle: "Morning Star",
+            Author: "Pierce Brown",
+            SeriesTitle: "Red Rising",
+            SeriesNumber: 3,
+            TotalParts: 2,
+            IsDramatized: true,
+            KnownIdentifiers: ["B0CTWQ44B4", "B0D5DKK1VS"]),
+
+        new KnownWork(
+            CanonicalTitle: "Iron Gold",
+            Author: "Pierce Brown",
+            SeriesTitle: "Red Rising",
+            SeriesNumber: 4,
+            TotalParts: 2,
+            IsDramatized: true,
+            KnownIdentifiers: ["B0DJMXQDB4", "B0DWVBTHZM"]),
+
+        new KnownWork(
+            CanonicalTitle: "Quicksilver",
+            Author: "Callie Hart",
+            SeriesTitle: "The Fae & Alchemy Series",
+            SeriesNumber: 1,
+            TotalParts: null,
+            IsDramatized: false,
+            KnownIdentifiers: []),
+
+        new KnownWork(
+            CanonicalTitle: "Haunting Adeline",
+            Author: "H. D. Carlton",
+            SeriesTitle: "Cat and Mouse Duet",
+            SeriesNumber: 1,
+            TotalParts: null,
+            IsDramatized: false,
+            KnownIdentifiers: []),
+
+        new KnownWork(
+            CanonicalTitle: "11/22/63",
+            Author: "Stephen King",
+            SeriesTitle: null,
+            SeriesNumber: null,
+            TotalParts: null,
+            IsDramatized: false,
+            KnownIdentifiers: [])
+        {
+            // Filed with a hyphenated numeric filename ("11-22-63") on this batch's own
+            // file, which NormalizeTitle strips down to plain digits -- matched here as an
+            // alternate spelling rather than relying on that to collide with the canonical
+            // slash-formatted title by coincidence.
+            AlternateTitles = ["11-22-63"],
+        },
+
+        new KnownWork(
+            CanonicalTitle: "World War Z",
+            Author: "Max Brooks",
+            SeriesTitle: null,
+            SeriesNumber: null,
+            TotalParts: null,
+            IsDramatized: false,
+            KnownIdentifiers: []),
+
+        new KnownWork(
+            CanonicalTitle: "Lights Out",
+            Author: "Navessa Allen",
+            SeriesTitle: null,
+            SeriesNumber: null,
+            TotalParts: null,
+            IsDramatized: false,
+            KnownIdentifiers: []),
+
+        new KnownWork(
+            CanonicalTitle: "It",
+            Author: "Stephen King",
+            SeriesTitle: null,
+            SeriesNumber: null,
+            TotalParts: null,
+            IsDramatized: false,
+            KnownIdentifiers: []),
     ];
 
     /// <summary>Every known identifier, mapped back to the work that carries it.</summary>
