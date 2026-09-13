@@ -117,17 +117,15 @@ private struct PaywallScreen: View {
                         Button {
                             Task { await subscribe(product) }
                         } label: {
-                            HStack {
+                            // The spinner replaces the label rather than sitting beside it, so the
+                            // button keeps its size while a purchase is in flight.
+                            if purchases.isPurchasing {
+                                ProgressView().tint(.black)
+                            } else {
                                 Text("Subscribe — \(product.displayPrice)/month")
-                                Spacer()
-                                if purchases.isPurchasing { ProgressView() }
                             }
-                            .frame(maxWidth: .infinity)
-                            .padding()
                         }
-                        .buttonStyle(.borderedProminent)
-                        .tint(ACTheme.accent)
-                        .foregroundStyle(.black)
+                        .buttonStyle(ACPrimaryButtonStyle())
                         .disabled(purchases.isPurchasing)
 
                         secondaryActions
@@ -148,22 +146,38 @@ private struct PaywallScreen: View {
                     Text(errorMessage).foregroundStyle(.orange).multilineTextAlignment(.center)
                 }
 
-                VStack(spacing: 4) {
-                    Button("Sign Out", role: .destructive) { confirmingSignOut = true }
-                    Button(deletingAccount ? "Deleting…" : "Delete Account", role: .destructive) {
-                        confirmingDelete = true
-                    }
-                    .disabled(deletingAccount)
-                    .font(.footnote)
-                }
-                .padding(.top, 8)
-
                 Spacer().frame(height: 12)
             }
             .padding(.horizontal, 28)
         }
         .background(ACTheme.background.ignoresSafeArea())
         .navigationBarTitleDisplayMode(.inline)
+        // Sign Out and Delete Account moved off the main column and into the overflow menu.
+        //
+        // Deleting is not removed, and must not be: `PaywallGate` stands in for the whole app for an
+        // account with no entitlement, so `RootTabView` -- and with it Profile and the delete control
+        // on `AccountScreen` -- cannot be reached from here. A reviewer creates an account, buys
+        // nothing, and lands on exactly this screen, which is the state Review Guideline 5.1.1(v)
+        // is about. Signing out is not a substitute; the account still exists afterwards.
+        //
+        // The guideline asks that deletion be findable, not that it be prominent, and two red
+        // destructive buttons directly beneath the subscribe button was the wrong emphasis for the
+        // first screen a paying listener sees. A menu satisfies both.
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Menu {
+                    Button("Sign Out", role: .destructive) { confirmingSignOut = true }
+                    Button(deletingAccount ? "Deleting…" : "Delete Account", role: .destructive) {
+                        confirmingDelete = true
+                    }
+                    .disabled(deletingAccount)
+                } label: {
+                    Image(systemName: "ellipsis.circle")
+                        .foregroundStyle(ACTheme.secondaryText)
+                }
+                .accessibilityLabel("Account options")
+            }
+        }
         .confirmationDialog(
             "Sign out of AudioChoice?",
             isPresented: $confirmingSignOut,
@@ -218,16 +232,9 @@ private struct PaywallScreen: View {
         // next to a solid button. Outlined rather than a second solid one so there is still a
         // visible default action: two identical filled buttons stacked leave nothing to say
         // which one the app expects most people to press.
-        Button {
-            redeemingCode = true
-        } label: {
-            Text("Redeem a Code")
-                .frame(maxWidth: .infinity)
-                .padding()
-        }
-        .buttonStyle(.bordered)
-        .tint(ACTheme.accent)
-        .disabled(purchases.isPurchasing)
+        Button("Redeem a Code") { redeemingCode = true }
+            .buttonStyle(ACSecondaryButtonStyle())
+            .disabled(purchases.isPurchasing)
 
         // Deliberately left as the quietest of the three. Restoring is the rarest intent --
         // it only applies to someone who already paid on another device -- and it was

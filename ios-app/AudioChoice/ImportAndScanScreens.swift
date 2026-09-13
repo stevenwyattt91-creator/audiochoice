@@ -107,12 +107,13 @@ struct ImportScreen: View {
                 }
 
                 ForEach(importedRecords) { record in
-                    if let localFileName = record.localFileName {
-                        NavigationLink {
-                            ScanProgressScreen(
-                                record: record,
-                                fileURL: AudiobookImportService.audioURL(fileName: localFileName)
-                            )
+                    if record.localFileName != nil {
+                        // Routes through `scanTargetID` rather than carrying its own destination, so
+                        // both ways of reaching a scan -- this button and the automatic push after a
+                        // single import -- are the same push. That is what lets "Go to Library" pop
+                        // it: clearing one identifier now dismisses either.
+                        Button {
+                            scanTargetID = record.id
                         } label: {
                             Label("Scan \(record.book.title)", systemImage: "waveform.badge.magnifyingglass")
                                 .lineLimit(1)
@@ -177,6 +178,16 @@ struct ImportScreen: View {
         .onChange(of: transferCoordinator.pendingURL) { _, url in
             guard let url else { return }
             Task { await receiveTransfer(url) }
+        }
+        // "Go to Library" leaves this tab, so the finished import is cleared here rather than by
+        // replacing the whole tab's identity, which is what used to swallow the tab change. Coming
+        // back to Import then shows a fresh screen instead of the previous book's file name and a
+        // Scan button for a book that has already been scanned.
+        .onReceive(NotificationCenter.default.publisher(for: .showAudioChoiceLibrary)) { _ in
+            scanTargetID = nil
+            importedRecords = []
+            selectedFileName = nil
+            importError = nil
         }
     }
 

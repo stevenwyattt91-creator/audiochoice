@@ -177,24 +177,48 @@ struct LibraryScreen: View {
         }
     }
 
+    /// A book saved to the account whose audio is not on this device.
+    ///
+    /// Laid out like `libraryCard` deliberately, rather than approximately. Without the top
+    /// alignment, the width cap on the text column and the priorities, a title long enough to wrap
+    /// grew the text column across the cover instead of wrapping inside its own space -- so the two
+    /// overlapped, which is exactly the state this card exists to describe and the one most likely
+    /// to carry a long title.
     private func unavailableBookCard(_ book: AccountLibraryBook) -> some View {
         ACCard {
-            HStack(spacing: 16) {
+            HStack(alignment: .top, spacing: 20) {
                 RemoteBookCover(
                     url: (try? CloudScanClient.configured())?.coverURL(for: book.coverImageURL),
                     title: book.title
                 )
-                .frame(width: 90, height: 126)
+                .frame(width: 82, height: 116)
+                .clipped()
+                .layoutPriority(1)
                 VStack(alignment: .leading, spacing: 7) {
-                    Text(book.title).font(.headline)
-                    Text(book.author ?? "Audiobook").foregroundStyle(ACTheme.secondaryText)
+                    Text(book.title)
+                        .font(.headline)
+                        .multilineTextAlignment(.leading)
+                        .lineLimit(3)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Text(book.author ?? "Audiobook")
+                        .foregroundStyle(ACTheme.secondaryText)
+                        .lineLimit(2)
                     Text("Saved to your account • Resume at \(timeText(book.playbackPositionSeconds))")
-                        .font(.caption).foregroundStyle(ACTheme.accent)
-                    Text("Re-import audio to listen").font(.caption).foregroundStyle(ACTheme.secondaryText)
+                        .font(.caption)
+                        .foregroundStyle(ACTheme.accent)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Text("Re-import audio to listen")
+                        .font(.caption)
+                        .foregroundStyle(ACTheme.secondaryText)
                 }
-                Spacer()
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .layoutPriority(2)
+                Spacer(minLength: 0)
                 NavigationLink { ImportScreen() } label: { Image(systemName: "square.and.arrow.down") }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(ACTheme.accent)
             }
+            .frame(minHeight: 116, alignment: .top)
         }
     }
 
