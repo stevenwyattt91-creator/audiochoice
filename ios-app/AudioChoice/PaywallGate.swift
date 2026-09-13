@@ -212,9 +212,28 @@ private struct PaywallScreen: View {
     /// screen with nothing to tap. That state is reachable in practice: it is what a newly approved
     /// subscription looks like for the first while after review, before it finishes propagating.
     @ViewBuilder private var secondaryActions: some View {
-        Button("Redeem a Code") { redeemingCode = true }
-            .disabled(purchases.isPurchasing)
+        // Same footprint and weight as Subscribe, outlined rather than filled. A listener
+        // arriving with an influencer's code is looking for somewhere to type it, and as a
+        // plain text link this sat below the fold of the eye entirely -- it read as fine print
+        // next to a solid button. Outlined rather than a second solid one so there is still a
+        // visible default action: two identical filled buttons stacked leave nothing to say
+        // which one the app expects most people to press.
+        Button {
+            redeemingCode = true
+        } label: {
+            Text("Redeem a Code")
+                .frame(maxWidth: .infinity)
+                .padding()
+        }
+        .buttonStyle(.bordered)
+        .tint(ACTheme.accent)
+        .disabled(purchases.isPurchasing)
+
+        // Deliberately left as the quietest of the three. Restoring is the rarest intent --
+        // it only applies to someone who already paid on another device -- and it was
+        // competing with the two actions that a new listener actually needs.
         Button("Restore Purchases") { Task { await restore() } }
+            .font(.footnote)
             .disabled(purchases.isPurchasing)
     }
 
