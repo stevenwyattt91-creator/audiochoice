@@ -54,10 +54,13 @@ services:
     #
     # --max-num-seqs 8: lowered back from AWQ's 16 -- FP8's larger weight footprint leaves
     # meaningfully less KV cache room for concurrent Mamba cache blocks (see the GPU budget
-    # remarks above), and this app's own concurrency ceiling (ContentAnalysisConcurrency (2)
-    # + SceneVerificationConcurrency (2) + SceneEscalationConcurrency (2) = 6 today) does not
-    # need more than this to avoid becoming the bottleneck. Raise only after confirming the
-    # real available-block count logged at startup.
+    # remarks above). This app's own concurrency settings below (ContentAnalysisConcurrency,
+    # SceneVerificationConcurrency, SceneEscalationConcurrency) are now each raised to 8 to
+    # match this ceiling directly, after measuring real production KV cache usage peak
+    # around only 23% while "Running" requests never exceeded 2 at the old 2/2/2 setting --
+    # the GPU had far more concurrent capacity reserved than the app was ever asking for.
+    # Raise this value further only after confirming the real available-block count logged
+    # at startup.
     #
     # Served model name matches RoutingAnalysisModelClient.IsVllmModel's check (contains
     # "qwen") and the three AudioChoice__OpenAI__*Model values below -- all three must agree
@@ -185,9 +188,16 @@ services:
       AudioChoice__OpenAI__TranscriptionConcurrencyPerWorker: "4"
       # Bounded parallel model work: independent transcript windows can run together,
       # while Terra remains the gate before any Sol escalation.
-      AudioChoice__OpenAI__ContentAnalysisConcurrency: "2"
-      AudioChoice__OpenAI__SceneVerificationConcurrency: "2"
-      AudioChoice__OpenAI__SceneEscalationConcurrency: "2"
+      #
+      # Raised from 2/2/2 to 8/8/8, matching vLLM's own --max-num-seqs 8 above. Real
+      # measured KV cache usage during a live scan peaked around 23% and "Running"
+      # requests never exceeded 2 at once -- these three explicit overrides were the
+      # actual reason: they silently took precedence over OpenAIProcessingOptions' own
+      # code defaults (already raised to 8/8/8) every time this container started,
+      # so raising the C# default alone never took effect until this file changed too.
+      AudioChoice__OpenAI__ContentAnalysisConcurrency: "8"
+      AudioChoice__OpenAI__SceneVerificationConcurrency: "8"
+      AudioChoice__OpenAI__SceneEscalationConcurrency: "8"
       # Review every transcript window so euphemistic sexual cues are not
       # excluded before Terra/Sol receive them.
       # Keep Whisper local, then send only high-recall candidate windows to OpenAI.
