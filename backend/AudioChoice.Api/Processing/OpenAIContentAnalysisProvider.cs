@@ -51,7 +51,16 @@ public sealed class OpenAIContentAnalysisProvider(
     // dialogue should not also silence kissing, and vice versa). A cached first-pass answer
     // from before this change never had sexual_kissing available to propose at all, and
     // would have folded a real kissing scene into sexual_suggestive_dialogue the old way.
-    private const string BaseAnalysisPromptVersion = "5.4-sexual-kissing";
+    //
+    // Bumped again: VllmModelClient now disables Qwen3.6's default "thinking" mode
+    // (chat_template_kwargs enable_thinking=false) on every request through it, to fix
+    // real production turnaround -- individual Terra/Sol verification calls were measured
+    // taking 300-500+ seconds each purely on the model's own invisible reasoning trace, on
+    // an answer that is a handful of structured fields. Whether the model reasoned before
+    // answering is not observable in a cached checkpoint's own JSON, so a stale answer from
+    // before this change could otherwise be silently trusted as though it came from the
+    // same (slower, chain-of-thought) model this pipeline was evaluated and tuned against.
+    private const string BaseAnalysisPromptVersion = "5.5-no-thinking";
     // Bumped for the keyword safety net's lane isolation fix: a candidate whose window
     // happens to match a checkpoint cached under the prior version may have been built
     // before a safety-net seed's own lane existed, when it could still get coalesced into a
@@ -104,10 +113,14 @@ public sealed class OpenAIContentAnalysisProvider(
     // changes ExcludeLoneWeakSingletons' entry-gate behavior for a label that did not exist
     // under the prior version at all. Bumped so this policy change is never silently read
     // as though it already governed a checkpoint written before sexual_kissing existed.
+    //
+    // Bumped again together with BaseAnalysisPromptVersion: Qwen3.6's default reasoning is
+    // now disabled on every VllmModelClient request (see that field's own remarks) to fix
+    // real production turnaround on Terra/Sol verification calls specifically.
     private const string SceneVerificationVersion =
-        "6.4-sexual-kissing";
+        "6.5-no-thinking";
     private const string SceneEscalationVersion =
-        "6.4-sexual-kissing";
+        "6.5-no-thinking";
     private readonly string _checkpointFolder = dataPaths.AnalysisCheckpoints;
     public string ScannerVersion => options.ScannerVersion;
 

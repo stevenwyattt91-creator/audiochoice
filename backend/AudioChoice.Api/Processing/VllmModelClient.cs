@@ -55,6 +55,10 @@ public sealed class VllmModelClient(
         // it a real one, and no fixed max_tokens value is safe against every candidate a real
         // book can produce.
         var maxTokens = options.VllmMaxTokens;
+        // 0 (greedy decoding) everywhere except a genuinely-repeated parse failure -- see
+        // that branch's own remarks for why greedy decoding is exactly what makes a bad
+        // token reproduce identically no matter how many times the same request is retried.
+        var temperature = 0.0;
 
         for (var attempt = 0; ; attempt += 1)
         {
@@ -63,8 +67,21 @@ public sealed class VllmModelClient(
                 ["model"] = model,
                 ["messages"] = new JsonArray(
                     new JsonObject { ["role"] = "user", ["content"] = input }),
-                ["temperature"] = 0,
+                ["temperature"] = temperature,
                 ["max_tokens"] = maxTokens,
+                // Qwen3.6 reasons by default: it emits a long, invisible "thinking" block
+                // before every JSON answer, even for a plain accept/reject call, which is
+                // why a single Terra/Sol verification call was measured taking 300-500+
+                // seconds in real production use -- an order of magnitude slower than an
+                // answer this small should ever need, and the actual reason retries on a
+                // failed call were taking so long to exhaust that a whole scan's turnaround
+                // became unworkable. This pipeline's own answers are short, structured
+                // yes/no-plus-fields decisions with a strict schema already enforcing the
+                // shape of the output; the visible reasoning trace it was paying for was
+                // never itself returned to a listener or used by any code here. Disabling it
+                // per vLLM's own documented Qwen3 mechanism removes that entire block from
+                // every call's latency budget, not just the failing ones.
+                ["chat_template_kwargs"] = new JsonObject { ["enable_thinking"] = false },
                 ["response_format"] = new JsonObject
                 {
                     ["type"] = "json_schema",
@@ -154,22 +171,27 @@ public sealed class VllmModelClient(
                                 content[..Math.Min(content.Length, 500)]);
                         }
 
-                        // A real production case this covers: at temperature 0 the same
-                        // request, sent unchanged, reproduced the identical corrupted output
-                        // on every one of 7 attempts across two separate scan jobs -- a
-                        // single stray non-ASCII token appeared mid-string, breaking the JSON
-                        // string's own closing quote, at the same character position every
-                        // time. vLLM's continuous batching is not bit-deterministic across
-                        // requests the way a single isolated call would be: which other
-                        // requests happen to share a batch step can change a borderline
-                        // token's decode even at temperature 0, and an unchanged max_tokens
-                        // value across retries left this candidate free to land in the exact
-                        // same batch shape and reproduce the exact same bad token every time.
-                        // Nudging max_tokens by a small, varying amount changes the batch
-                        // shape without materially changing the useful output budget, giving
-                        // a genuinely different attempt a chance the identical retry never
-                        // had. Floors at MinimumViableMaxTokens so repeated nudging can never
-                        // shrink the budget below room for a real answer.
+                        // A real production case this covers, confirmed by direct
+                        // observation: at temperature 0 (greedy decoding) the same request,
+                        // sent completely unchanged including max_tokens, reproduced the
+                        // identical corrupted output on every one of 7 attempts across two
+                        // separate scan jobs -- the same single stray non-English token
+                        // appeared mid-string at the exact same character position every
+                        // time, breaking the JSON string's own closing quote. This ruled out
+                        // an earlier theory that nudging max_tokens alone (to shift which
+                        // requests share a vLLM batch step) would be enough: greedy decoding
+                        // means the token sequence up to the point of failure does not depend
+                        // on max_tokens at all, so that nudge changed nothing about the
+                        // tokens actually generated and this candidate kept failing at
+                        // exactly the same spot regardless. What actually varies the outcome
+                        // is temperature itself -- a small positive value breaks the greedy
+                        // decode's own determinism, giving the retry a real chance at a
+                        // different (and very likely correct) token where greedy decoding
+                        // picked a bad one. Kept small and reverted every attempt that
+                        // doesn't need it (see the temperature reset above the retry loop)
+                        // so this remains a targeted escape from a reproducible bad decode,
+                        // not a general loosening of an otherwise-deterministic pipeline.
+                        temperature = Math.Min(0.4, temperature + ParseRetryTemperatureStep);
                         maxTokens = Math.Max(
                             MinimumViableMaxTokens, maxTokens - ParseRetryTokenNudge);
 
@@ -177,9 +199,9 @@ public sealed class VllmModelClient(
                         logger.LogWarning(
                             "{SchemaName} on {Model} returned a successful response with no " +
                             "parseable JSON content; retry {Attempt} after {Delay}, with " +
-                            "max_tokens nudged to {MaxTokens} to change the request's batch " +
-                            "shape. Response (truncated): {Content}",
-                            schemaName, model, attempt + 1, parseRetryDelay, maxTokens,
+                            "temperature raised to {Temperature} to escape a reproducible " +
+                            "greedy-decode error. Response (truncated): {Content}",
+                            schemaName, model, attempt + 1, parseRetryDelay, temperature,
                             content[..Math.Min(content.Length, 500)]);
                         await Task.Delay(parseRetryDelay, cancellationToken);
                         continue;
@@ -265,14 +287,31 @@ public sealed class VllmModelClient(
     private const int MinimumViableMaxTokens = 512;
 
     /// <summary>
-    /// How much a parse-failure retry shrinks max_tokens by, purely to change the request's
-    /// batch shape rather than to correct a real budget shortfall (see the parse-failure
-    /// retry's own remarks above for why an unchanged request can reproduce an identical bad
-    /// decode indefinitely). Small relative to VllmMaxTokens so several retries in a row still
-    /// leave a realistic budget, and large enough that it reliably lands the request in a
-    /// different vLLM batch step than the attempt before it.
+    /// How much a parse-failure retry shrinks max_tokens by. Kept as a small secondary
+    /// adjustment alongside the temperature increase (see that field's own remarks): on its
+    /// own this did not resolve a real reproducible greedy-decode failure, since greedy
+    /// decoding's token sequence does not depend on max_tokens up to the point of failure --
+    /// but once temperature is no longer exactly 0, a slightly different budget is one more
+    /// small variable working in the retry's favor rather than against it.
     /// </summary>
     private const int ParseRetryTokenNudge = 137;
+
+    /// <summary>
+    /// How much a parse-failure retry raises temperature by, each attempt, from its normal 0.
+    /// </summary>
+    /// <remarks>
+    /// This is the fix that actually resolves a genuinely reproducible bad decode: a real
+    /// production candidate reproduced the identical corrupted output at temperature 0 on 7
+    /// consecutive attempts across two separate scan jobs, because greedy decoding is a pure
+    /// function of the prompt and model weights alone -- an unchanged request has nothing
+    /// left to vary the outcome. Every other field in this pipeline's design deliberately
+    /// keeps temperature at 0 for genuine determinism (repeatable checkpoints, comparable
+    /// eval runs); this is the one narrow exception, applied only after a parse failure has
+    /// already happened, applied by the smallest amount that still changes the sampled token,
+    /// and capped low enough that it does not turn this into a materially different model
+    /// than the one every other request in this pipeline reaches.
+    /// </remarks>
+    private const double ParseRetryTemperatureStep = 0.1;
 
     private static readonly Regex ContextLengthOverflowPattern = new(
         @"maximum context length is (?<window>\d+) tokens\. However, you requested (?<requested>\d+) output tokens and your prompt contains at least (?<input>\d+) input tokens",

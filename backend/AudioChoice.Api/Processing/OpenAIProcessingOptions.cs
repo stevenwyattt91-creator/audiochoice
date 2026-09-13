@@ -230,7 +230,14 @@ public sealed class OpenAIProcessingOptions
     // the prior version graded every kiss as suggestive dialogue regardless of intensity,
     // per a real listener report that a kissing scene should not be tied to the same switch
     // as flirtatious conversation.
-    public string ScannerVersion { get; init; } = "6.4-sexual-kissing";
+    //
+    // Bumped again: disabled Qwen3.6's default reasoning ("thinking") mode on every
+    // request, to fix real production turnaround -- individual verification calls were
+    // measured at 300-500+ seconds each purely on the model's own invisible reasoning
+    // trace. A result produced under the prior version came from a model that reasoned
+    // before every answer; this version did not, which is a real change to how each
+    // decision was reached even though the output schema is unchanged.
+    public string ScannerVersion { get; init; } = "6.5-no-thinking";
     /// <summary>Only jobs in this lane may be claimed by this worker instance.</summary>
     public string ProcessingLane { get; init; } = ScanProcessingLanes.AzureOpenAI;
     /// <summary>
