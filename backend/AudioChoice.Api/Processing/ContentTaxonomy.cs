@@ -17,6 +17,7 @@ public static class ContentTaxonomy
             ["sexual_explicit_activity"] = Map(1, 5),
             ["sexual_complete_scene"] = Map(1, 6),
             ["sexual_violence"] = Map(1, 7),
+            ["sexual_kissing"] = Map(1, 8),
             ["profanity_mild"] = Map(2, 1),
             ["profanity_strong"] = Map(2, 2),
             ["profanity_sexual"] = Map(2, 3),
@@ -86,7 +87,7 @@ public static class ContentTaxonomy
     [
         "sexual_suggestive_dialogue", "sexual_references", "sexual_nudity",
         "sexual_implied_activity", "sexual_explicit_activity", "sexual_complete_scene",
-        "sexual_violence",
+        "sexual_violence", "sexual_kissing",
         "profanity_mild", "profanity_strong", "profanity_sexual", "profanity_slur",
         "violence_graphic", "violence_torture", "violence_children", "violence_animals",
         "substance_alcohol_use", "substance_intoxication", "substance_drug_reference",

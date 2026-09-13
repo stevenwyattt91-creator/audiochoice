@@ -199,28 +199,31 @@ public static class FaqContent
                 "of it on while removing one particular moment. Individual moments are described " +
                 "plainly, without repeating the content."),
             new FaqEntry(
-                "What is the difference between the six sexual content filters?",
+                "What is the difference between the sexual content filters?",
                 "They are a ladder, and each one means a different amount. Suggestive dialogue is " +
-                "flirtation, tension and kissing, however charged. Sexual references are sex spoken " +
-                "about rather than happening: a past encounter, a crude joke. Nudity is a body " +
-                "described unclothed, or clothing coming off, with nothing further in that passage. " +
-                "Implied sexual activity is sex that happens where the narration fades out or cuts " +
-                "away. Explicit sexual activity is a sexual act described as it happens. Complete " +
-                "sex scenes is the whole scene, from its lead-in to where the story returns to " +
-                "something else, and it is applied to every scene containing implied or explicit " +
-                "activity, including short ones."),
+                "flirtation, tension and anticipation, with no kissing in it. Kissing is its own " +
+                "filter, for a kiss the narration lingers on or a sustained, passionate kiss -- a " +
+                "quick kiss goodbye or a peck on the cheek does not count. Sexual references are " +
+                "sex spoken about rather than happening: a past encounter, a crude joke. Nudity is " +
+                "a body described unclothed, or clothing coming off, with nothing further in that " +
+                "passage. Implied sexual activity is sex that happens where the narration fades " +
+                "out or cuts away. Explicit sexual activity is a sexual act described as it " +
+                "happens. Complete sex scenes is the whole scene, from its lead-in to where the " +
+                "story returns to something else, and it is applied to every scene containing " +
+                "implied or explicit activity, including short ones."),
             new FaqEntry(
                 "If I turn on a stronger filter, does it include the milder ones?",
                 "No, and this is the one that surprises people. Each toggle removes only what it " +
-                "names. Switching on Complete sex scenes does not switch on Suggestive dialogue, so " +
-                "if you want kissing removed as well as scenes, turn on both."),
+                "names. Switching on Complete sex scenes does not switch on Suggestive dialogue or " +
+                "Kissing, so if you want kissing removed as well as scenes, turn on both."),
             new FaqEntry(
-                "Kissing was removed and I only wanted sex scenes filtered. Why?",
-                "That was a fault in how scenes were graded and it has been corrected. Kissing and " +
-                "undressing now sit under Suggestive dialogue and Nudity, not Explicit sexual " +
-                "activity. A book scanned before the correction keeps its old grading until it is " +
-                "scanned again, so re-import it or use Scan this audiobook on the player to pick up " +
-                "the new one."),
+                "I turned off Suggestive dialogue, but a kissing scene still played. Why?",
+                "Kissing has its own filter, separate from Suggestive dialogue, so it needs its " +
+                "own switch turned on. This is deliberate: turning off flirtatious dialogue does " +
+                "not mean a listener also wants kissing gone, and turning off kissing does not mean " +
+                "they want all charged conversation gone either. A book scanned before Kissing " +
+                "existed as its own filter keeps its old grading until it is scanned again, so " +
+                "re-import it or use Scan this audiobook on the player to pick up the new one."),
             new FaqEntry(
                 "Can a whole scene be removed rather than single lines?",
                 "Yes. Some categories cover a passage rather than a word, and the passage is removed " +

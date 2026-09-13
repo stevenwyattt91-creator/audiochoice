@@ -224,7 +224,13 @@ public sealed class OpenAIProcessingOptions
     // scan can produce, and a result written under the prior version came from a more
     // heavily quantized model with no protection against a single-call ladder
     // under-report -- it must not be presented as though this version had produced it.
-    public string ScannerVersion { get; init; } = "6.3-vllm-qwen-fp8";
+    //
+    // Bumped again for the sexual_kissing taxonomy addition: kissing beyond a brief peck is
+    // now its own switch, split out of sexual_suggestive_dialogue. A result written under
+    // the prior version graded every kiss as suggestive dialogue regardless of intensity,
+    // per a real listener report that a kissing scene should not be tied to the same switch
+    // as flirtatious conversation.
+    public string ScannerVersion { get; init; } = "6.4-sexual-kissing";
     /// <summary>Only jobs in this lane may be claimed by this worker instance.</summary>
     public string ProcessingLane { get; init; } = ScanProcessingLanes.AzureOpenAI;
     /// <summary>

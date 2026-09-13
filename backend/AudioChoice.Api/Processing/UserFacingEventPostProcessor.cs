@@ -115,6 +115,7 @@ public static class UserFacingEventPostProcessor
         var completeScene = ContentTaxonomy.Mappings["sexual_complete_scene"].GroupID;
         var references = ContentTaxonomy.Mappings["sexual_references"].GroupID;
         var suggestiveDialogue = ContentTaxonomy.Mappings["sexual_suggestive_dialogue"].GroupID;
+        var kissing = ContentTaxonomy.Mappings["sexual_kissing"].GroupID;
 
         if (groups.Contains(nudity) && (groups.Contains(explicitActivity) || groups.Contains(completeScene)))
             return "A character removes clothing during an intimate encounter";
@@ -126,6 +127,10 @@ public static class UserFacingEventPostProcessor
             return "Characters are described in an intimate encounter";
         if (groups.Contains(implied))
             return "An intimate encounter is implied";
+        if (groups.Contains(kissing) && groups.Contains(suggestiveDialogue))
+            return "Characters kiss during a suggestive moment";
+        if (groups.Contains(kissing))
+            return "Characters kiss";
         if (groups.Contains(references) && groups.Contains(suggestiveDialogue))
             return "Suggestive dialogue and sexual references occur";
         if (groups.Contains(suggestiveDialogue))

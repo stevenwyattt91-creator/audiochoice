@@ -70,7 +70,7 @@ public static class SceneEventPostProcessor
     /// </remarks>
     private static readonly string[] LowerRungSexualLabels =
     [
-        "sexual_suggestive_dialogue", "sexual_references", "sexual_nudity",
+        "sexual_suggestive_dialogue", "sexual_kissing", "sexual_references", "sexual_nudity",
         "sexual_implied_activity", "sexual_explicit_activity"
     ];
 

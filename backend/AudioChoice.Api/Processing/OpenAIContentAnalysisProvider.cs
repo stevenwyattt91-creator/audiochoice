@@ -44,7 +44,14 @@ public sealed class OpenAIContentAnalysisProvider(
     // under a served name that now points at a materially different model. This is the
     // same failure this session already found and fixed once for a prompt change; a model
     // swap needs the identical protection.
-    private const string BaseAnalysisPromptVersion = "5.3-qwen-fp8";
+    //
+    // Bumped again: added sexual_kissing as its own rung, split out of
+    // sexual_suggestive_dialogue, so a kiss the narration lingers on can be its own switch
+    // separate from flirtatious dialogue (a real listener report: turning off suggestive
+    // dialogue should not also silence kissing, and vice versa). A cached first-pass answer
+    // from before this change never had sexual_kissing available to propose at all, and
+    // would have folded a real kissing scene into sexual_suggestive_dialogue the old way.
+    private const string BaseAnalysisPromptVersion = "5.4-sexual-kissing";
     // Bumped for the keyword safety net's lane isolation fix: a candidate whose window
     // happens to match a checkpoint cached under the prior version may have been built
     // before a safety-net seed's own lane existed, when it could still get coalesced into a
@@ -91,10 +98,16 @@ public sealed class OpenAIContentAnalysisProvider(
     // from QuantTrio/Qwen3.6-27B-AWQ to Qwen/Qwen3.6-27B-FP8 without options.*Model's own
     // served-name strings changing, so this must be bumped explicitly rather than relying
     // on the model name itself to invalidate stale checkpoints.
+    //
+    // Bumped again together with BaseAnalysisPromptVersion: sexual_kissing joined
+    // WeakSexualEventIDs alongside sexual_suggestive_dialogue and sexual_references, which
+    // changes ExcludeLoneWeakSingletons' entry-gate behavior for a label that did not exist
+    // under the prior version at all. Bumped so this policy change is never silently read
+    // as though it already governed a checkpoint written before sexual_kissing existed.
     private const string SceneVerificationVersion =
-        "6.3-vllm-qwen-fp8";
+        "6.4-sexual-kissing";
     private const string SceneEscalationVersion =
-        "6.3-vllm-qwen-fp8";
+        "6.4-sexual-kissing";
     private readonly string _checkpointFolder = dataPaths.AnalysisCheckpoints;
     public string ScannerVersion => options.ScannerVersion;
 
@@ -511,7 +524,7 @@ public sealed class OpenAIContentAnalysisProvider(
     [
         "sexual_suggestive_dialogue", "sexual_references", "sexual_nudity",
         "sexual_implied_activity", "sexual_explicit_activity", "sexual_complete_scene",
-        "sexual_violence"
+        "sexual_violence", "sexual_kissing"
     ];
 
     internal static bool HasSexualContentEvent(AnalysisPayload payload) =>
@@ -811,6 +824,7 @@ public sealed class OpenAIContentAnalysisProvider(
         return label switch
         {
             "sexual_suggestive_dialogue" => "Suggestive dialogue or innuendo occurs",
+            "sexual_kissing" => "Characters kiss",
             "sexual_references" => "A sexual reference is made",
             "sexual_nudity" => "A character removes clothing or is described without clothing",
             "sexual_implied_activity" => "An intimate encounter is implied",
@@ -1194,7 +1208,7 @@ Candidates:
         {
             "sexual_suggestive_dialogue", "sexual_references", "sexual_nudity",
             "sexual_implied_activity", "sexual_explicit_activity", "sexual_complete_scene",
-            "sexual_violence"
+            "sexual_violence", "sexual_kissing"
         }.Select(label => ContentTaxonomy.Mappings[label].EventID).ToHashSet();
         var lunaSexualRanges = events
             .Where(item => sexualEventIDs.Contains(item.EventID))
@@ -1262,7 +1276,7 @@ Candidates:
         {
             "sexual_suggestive_dialogue", "sexual_references", "sexual_nudity",
             "sexual_implied_activity", "sexual_explicit_activity", "sexual_complete_scene",
-            "sexual_violence"
+            "sexual_violence", "sexual_kissing"
         }.Select(label => ContentTaxonomy.Mappings[label].EventID).ToHashSet();
         var sexualCandidateEvents = events
             .Where(item => sexualEventIDs.Contains(item.EventID))
@@ -1480,8 +1494,16 @@ Candidates:
     }
 
     /// <summary>The weak, non-committal sexual-content labels a lone mention of should not reach Terra.</summary>
+    /// <remarks>
+    /// sexual_kissing joined this set alongside sexual_suggestive_dialogue and
+    /// sexual_references: a single kissing moment, on its own, is not a scene candidate and
+    /// never becomes one -- the ladder's own sustainedBeyondKissing test is exactly what
+    /// keeps kissing from qualifying as sexual_complete_scene by itself. The same cluster and
+    /// co-occurrence exceptions below still apply, so a kissing passage that is genuinely
+    /// building toward a scene is not excluded.
+    /// </remarks>
     private static readonly HashSet<Guid> WeakSexualEventIDs =
-        new[] { "sexual_suggestive_dialogue", "sexual_references" }
+        new[] { "sexual_suggestive_dialogue", "sexual_references", "sexual_kissing" }
             .Select(label => ContentTaxonomy.Mappings[label].EventID)
             .ToHashSet();
 
@@ -2267,16 +2289,27 @@ For isolated events, return the narrowest supported timestamps. A short referenc
 event: if three words carry it, the range should cover those three words and not the sentence
 or paragraph around them. Never widen a brief event to be safe -- a wide range on a passing
 reference removes narration the listener wanted to hear. 
-The six sexual levels below are a ladder, and each rung means one thing. A listener switches on
+The seven sexual levels below are a ladder, and each rung means one thing. A listener switches on
 the level they are not willing to hear, so a passage placed a rung too high is removed from
 someone who wanted it, and a rung too low is heard by someone who did not. Choose the highest
 rung the passage actually reaches, and only that one, except where a complete scene is also
 required below. sexual_violence sits apart from this ladder entirely; see its own definition
 below for when it replaces the ladder rather than adding to it.
 
-sexual_suggestive_dialogue -- flirtation, innuendo, wanting, tension. Kissing and embracing belong
-here, however charged, and so does a passage that is only anticipation. Kissing is NOT explicit
-activity at any intensity.
+sexual_suggestive_dialogue -- flirtation, innuendo, wanting, tension, and anticipation: a charged
+conversation, a longing glance, biting, grabbing, or other physical contact short of kissing, a
+character imagining what might happen next. Kissing itself belongs to sexual_kissing below, not
+here, however brief the rest of the passage's tension is; everything else on this rung (biting,
+grabbing, an embrace with no kiss in it, wanting) stays exactly as it was.
+
+sexual_kissing -- a kiss, or a sustained series of kisses, that goes beyond a brief, incidental
+peck: a kiss the narration lingers on, a sustained or passionate kiss. A quick kiss goodbye, a
+peck on the cheek or forehead, or a kiss mentioned only in passing with nothing more said about
+it does not reach this rung -- that is not sexual content at all, or stays
+sexual_suggestive_dialogue if the surrounding passage is otherwise charged. Kissing is NOT
+explicit activity at any intensity: however long or passionate a kiss is described, it stays
+this rung unless the passage goes on to convey an actual sexual act beyond the kiss itself, in
+which case follow the escalation rule below.
 
 sexual_references -- sex spoken about rather than happening: a past encounter recalled, a crude
 joke, a comment on someone's history, an offer not taken up.
@@ -2308,8 +2341,8 @@ to another character, or the setting alone. A passage that is ambiguous about co
 the narration itself is uncertain, is not sexual_violence; use the ordinary ladder instead and
 let a human reviewer resolve the ambiguity. This is its own category, not a rung on the ladder
 above: a passage is sexual_violence or it is a consensual sexual_suggestive_dialogue /
-sexual_references / sexual_nudity / sexual_implied_activity / sexual_explicit_activity /
-sexual_complete_scene, never both. Do not emit sexual_complete_scene for a passage reported as
+sexual_kissing / sexual_references / sexual_nudity / sexual_implied_activity /
+sexual_explicit_activity / sexual_complete_scene, never both. Do not emit sexual_complete_scene for a passage reported as
 sexual_violence, and do not emit sexual_violence for a passage that is ordinary threat, assault,
 or violence with no sexual element -- that remains a violence label if it qualifies for one.
 Treat this with at least the same care as violence_graphic: report it when the passage actually

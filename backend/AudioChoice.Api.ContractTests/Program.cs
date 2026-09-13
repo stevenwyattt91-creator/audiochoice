@@ -926,6 +926,54 @@ Assert(abbreviationBetween.Count == 1,
         keptBesideStrong.Any(item => item.StableKey == "beside-strong-weak"),
         "A weak mention sharing an unbroken passage with a stronger label was excluded " +
         "instead of kept as context for that activity.");
+
+    // sexual_kissing follows the exact same entry-gate rule as sexual_suggestive_dialogue
+    // and sexual_references: a lone kiss is not a scene candidate on its own, but a dense
+    // cluster of kissing mentions still reaches Terra.
+    var kissingMapping = ContentTaxonomy.Mappings["sexual_kissing"];
+    var loneKissMention = new[]
+    {
+        new ScanEvent(Guid.NewGuid(), 100, 105, kissingMapping.CategoryID,
+            kissingMapping.GroupID, kissingMapping.EventID, .7, "lone-kiss"),
+    };
+    Assert(
+        OpenAIContentAnalysisProvider.ExcludeLoneWeakSingletons(
+            loneKissMention, wideNarrativeSegments).Count == 0,
+        "An isolated kissing mention with nothing else nearby was still sent toward Terra.");
+
+    var denseKissCluster = new[]
+    {
+        new ScanEvent(Guid.NewGuid(), 100, 105, kissingMapping.CategoryID,
+            kissingMapping.GroupID, kissingMapping.EventID, .7, "kiss-cluster-1"),
+        new ScanEvent(Guid.NewGuid(), 106, 110, kissingMapping.CategoryID,
+            kissingMapping.GroupID, kissingMapping.EventID, .7, "kiss-cluster-2"),
+        new ScanEvent(Guid.NewGuid(), 111, 115, kissingMapping.CategoryID,
+            kissingMapping.GroupID, kissingMapping.EventID, .7, "kiss-cluster-3"),
+    };
+    Assert(
+        OpenAIContentAnalysisProvider.ExcludeLoneWeakSingletons(
+            denseKissCluster, wideNarrativeSegments).Count == 3,
+        "A dense cluster of three kissing mentions with nothing separating them was " +
+        "excluded from reaching Terra.");
+}
+
+// sexual_kissing's safe description and taxonomy mapping exist and are distinct from
+// sexual_suggestive_dialogue's, so a kissing scene reads as kissing rather than dialogue.
+{
+    Assert(
+        OpenAIContentAnalysisProvider.SafeDescriptionForEvent("sexual_kissing", null) ==
+            "Characters kiss",
+        "sexual_kissing's default safe description is missing or changed.");
+    var kissingMapping = ContentTaxonomy.Mappings["sexual_kissing"];
+    var dialogueMapping = ContentTaxonomy.Mappings["sexual_suggestive_dialogue"];
+    Assert(
+        kissingMapping.EventID != dialogueMapping.EventID &&
+            kissingMapping.GroupID != dialogueMapping.GroupID,
+        "sexual_kissing shares an identifier with sexual_suggestive_dialogue, so a listener " +
+        "could not turn one off without the other.");
+    Assert(
+        kissingMapping.CategoryID == dialogueMapping.CategoryID,
+        "sexual_kissing is not in the same Sexual Content category as the rest of the ladder.");
 }
 
 // Sol dispatch gating: only what is genuinely ambiguous or borderline reaches Sol, so the
