@@ -97,8 +97,17 @@ public sealed class OpenAIProcessingOptions
     /// visible "thinking" block before its actual JSON answer, and this pipeline's own
     /// evaluation hit real truncation failures at a default token budget that looked
     /// generous for a non-reasoning model. See VllmModelClient.ExtractJsonObject's remarks.
+    ///
+    /// Raised from 8000 after a real production batch (a dense, heavily sexual-content
+    /// passage) deterministically hit this exact ceiling on every retry -- the model's own
+    /// visible reasoning plus a long list of individually-labeled events for the passage
+    /// consistently exceeded 8000 tokens before finishing its JSON answer, cutting it off at
+    /// the identical character position across at least six independent attempts, which is
+    /// what proved this was a real budget shortfall and not a transient serving hiccup.
+    /// The H100 host's much larger KV cache headroom (see docker-compose.yml's own remarks)
+    /// makes a bigger per-request budget affordable in a way it was not on the prior A100.
     /// </summary>
-    public int VllmMaxTokens { get; init; } = 8000;
+    public int VllmMaxTokens { get; init; } = 16000;
 
     public string AnalysisModel { get; init; } = "gpt-5.6-luna";
     public string SceneVerificationModel { get; init; } = "gpt-5.6-terra";
