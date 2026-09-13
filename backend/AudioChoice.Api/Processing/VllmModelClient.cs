@@ -154,12 +154,32 @@ public sealed class VllmModelClient(
                                 content[..Math.Min(content.Length, 500)]);
                         }
 
+                        // A real production case this covers: at temperature 0 the same
+                        // request, sent unchanged, reproduced the identical corrupted output
+                        // on every one of 7 attempts across two separate scan jobs -- a
+                        // single stray non-ASCII token appeared mid-string, breaking the JSON
+                        // string's own closing quote, at the same character position every
+                        // time. vLLM's continuous batching is not bit-deterministic across
+                        // requests the way a single isolated call would be: which other
+                        // requests happen to share a batch step can change a borderline
+                        // token's decode even at temperature 0, and an unchanged max_tokens
+                        // value across retries left this candidate free to land in the exact
+                        // same batch shape and reproduce the exact same bad token every time.
+                        // Nudging max_tokens by a small, varying amount changes the batch
+                        // shape without materially changing the useful output budget, giving
+                        // a genuinely different attempt a chance the identical retry never
+                        // had. Floors at MinimumViableMaxTokens so repeated nudging can never
+                        // shrink the budget below room for a real answer.
+                        maxTokens = Math.Max(
+                            MinimumViableMaxTokens, maxTokens - ParseRetryTokenNudge);
+
                         var parseRetryDelay = TimeSpan.FromSeconds(Math.Pow(2, attempt));
                         logger.LogWarning(
                             "{SchemaName} on {Model} returned a successful response with no " +
-                            "parseable JSON content; retry {Attempt} after {Delay}. Response " +
-                            "(truncated): {Content}",
-                            schemaName, model, attempt + 1, parseRetryDelay,
+                            "parseable JSON content; retry {Attempt} after {Delay}, with " +
+                            "max_tokens nudged to {MaxTokens} to change the request's batch " +
+                            "shape. Response (truncated): {Content}",
+                            schemaName, model, attempt + 1, parseRetryDelay, maxTokens,
                             content[..Math.Min(content.Length, 500)]);
                         await Task.Delay(parseRetryDelay, cancellationToken);
                         continue;
@@ -243,6 +263,16 @@ public sealed class VllmModelClient(
     /// thinking block is accounted for.
     /// </summary>
     private const int MinimumViableMaxTokens = 512;
+
+    /// <summary>
+    /// How much a parse-failure retry shrinks max_tokens by, purely to change the request's
+    /// batch shape rather than to correct a real budget shortfall (see the parse-failure
+    /// retry's own remarks above for why an unchanged request can reproduce an identical bad
+    /// decode indefinitely). Small relative to VllmMaxTokens so several retries in a row still
+    /// leave a realistic budget, and large enough that it reliably lands the request in a
+    /// different vLLM batch step than the attempt before it.
+    /// </summary>
+    private const int ParseRetryTokenNudge = 137;
 
     private static readonly Regex ContextLengthOverflowPattern = new(
         @"maximum context length is (?<window>\d+) tokens\. However, you requested (?<requested>\d+) output tokens and your prompt contains at least (?<input>\d+) input tokens",
