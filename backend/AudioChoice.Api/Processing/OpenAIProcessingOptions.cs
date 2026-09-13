@@ -44,8 +44,19 @@ public sealed class OpenAIProcessingOptions
     /// is received, so the retry loop below it never saw the failure at all. A rescan that had
     /// already spent most of an hour on transcription and 90% of its analysis was lost to a
     /// single slow response on the home stretch, with nothing to retry against.
+    ///
+    /// Raised from 300 after a real production job (ACOTAR Part 1 reanalysis, right after the
+    /// FP8 model swap and VllmMaxTokens' 8000-to-16000 raise) failed outright: the same Terra
+    /// verification candidate timed out at exactly 300 seconds on 7 consecutive attempts before
+    /// exhausting MaximumRetries. This request is sent at temperature 0, so an identical retry
+    /// of a genuinely slow answer takes the same ~300+ seconds every time -- MaximumRetries
+    /// cannot rescue a request whose real generation time exceeds the timeout, only a longer
+    /// timeout can. Measured against real H100 FP8 throughput under this pipeline's own
+    /// concurrency (~50 tokens/s per concurrent request, two requests sharing the GPU): a
+    /// response using most of VllmMaxTokens' 16000-token budget can legitimately take
+    /// 300-500+ seconds, which the prior 300-second ceiling did not leave room for.
     /// </remarks>
-    public int AnalysisRequestTimeoutSeconds { get; init; } = 300;
+    public int AnalysisRequestTimeoutSeconds { get; init; } = 600;
     /// <summary>
     /// Which service the three analysis models are reached through: "openai" or "bedrock".
     /// </summary>
