@@ -36,7 +36,15 @@ public sealed class OpenAIContentAnalysisProvider(
     // sexual_implied_activity/sexual_complete_scene, so a candidate batch cached under the
     // prior version was classified without that guidance and may under-report exactly the
     // scenes this fix exists to catch.
-    private const string BaseAnalysisPromptVersion = "5.2-ladder-escalation-example";
+    //
+    // Bumped again: swapped the underlying model from QuantTrio/Qwen3.6-27B-AWQ (INT4) to
+    // Qwen/Qwen3.6-27B-FP8, without options.AnalysisModel's own served-name string changing
+    // (both answer to "qwen3.6-27b") -- the checkpoint key this version feeds would
+    // otherwise silently keep serving the older, more heavily quantized model's answers
+    // under a served name that now points at a materially different model. This is the
+    // same failure this session already found and fixed once for a prompt change; a model
+    // swap needs the identical protection.
+    private const string BaseAnalysisPromptVersion = "5.3-qwen-fp8";
     // Bumped for the keyword safety net's lane isolation fix: a candidate whose window
     // happens to match a checkpoint cached under the prior version may have been built
     // before a safety-net seed's own lane existed, when it could still get coalesced into a
@@ -78,10 +86,15 @@ public sealed class OpenAIContentAnalysisProvider(
     // classification-policy change here must bump this version; this is the exact failure
     // the pattern exists to prevent, that this same session's earlier changes broke by
     // omission.
+    //
+    // Bumped again together with BaseAnalysisPromptVersion: the underlying model swapped
+    // from QuantTrio/Qwen3.6-27B-AWQ to Qwen/Qwen3.6-27B-FP8 without options.*Model's own
+    // served-name strings changing, so this must be bumped explicitly rather than relying
+    // on the model name itself to invalidate stale checkpoints.
     private const string SceneVerificationVersion =
-        "6.1-vllm-qwen-prompt-fixes";
+        "6.3-vllm-qwen-fp8";
     private const string SceneEscalationVersion =
-        "6.1-vllm-qwen-prompt-fixes";
+        "6.3-vllm-qwen-fp8";
     private readonly string _checkpointFolder = dataPaths.AnalysisCheckpoints;
     public string ScannerVersion => options.ScannerVersion;
 

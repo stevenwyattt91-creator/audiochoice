@@ -205,7 +205,15 @@ public sealed class OpenAIProcessingOptions
     // every finalized result before this fix. This runs fresh on every scan regardless of
     // checkpoint state, so no checkpoint version needed changing for correctness -- this
     // bump exists to attribute results correctly, the same as every prior one here.
-    public string ScannerVersion { get; init; } = "6.2-vllm-qwen-cross-window-scene-boundary";
+    //
+    // Bumped again for the model swap from QuantTrio/Qwen3.6-27B-AWQ (INT4) to
+    // Qwen/Qwen3.6-27B-FP8, and for the first pass's own new second-opinion double-check on
+    // sexual-content-bearing batches (see OpenAIContentAnalysisProvider's
+    // MergeSexualContentEvents remarks): both are real quality changes to the answers a
+    // scan can produce, and a result written under the prior version came from a more
+    // heavily quantized model with no protection against a single-call ladder
+    // under-report -- it must not be presented as though this version had produced it.
+    public string ScannerVersion { get; init; } = "6.3-vllm-qwen-fp8";
     /// <summary>Only jobs in this lane may be claimed by this worker instance.</summary>
     public string ProcessingLane { get; init; } = ScanProcessingLanes.AzureOpenAI;
     /// <summary>
