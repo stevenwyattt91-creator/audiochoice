@@ -98,3 +98,123 @@ extension View {
             .tint(ACTheme.accent)
     }
 }
+
+/// A text field wrapped in the app's own chrome.
+///
+/// Exists because the sign-in screen was a `Form`: bare `TextField`s on system-styled list rows,
+/// which on this near-black theme read as unstyled text with no indication of where a field began,
+/// which one was active, or that it was a control at all. Every other surface in AudioChoice is an
+/// `ACCard` on `ACTheme.background`, so sign-in looked like a different app -- and it is the first
+/// screen anyone sees.
+///
+/// The focus ring is the point. A field that does not visibly respond to being tapped is the single
+/// clearest tell of an unfinished app, and it is also the thing that makes a password field feel
+/// unsafe to type into.
+struct ACField<Field: View>: View {
+    var icon: String
+    var isFocused: Bool
+    /// Drawn in place of the trailing edge when supplied -- a password reveal toggle, a validation
+    /// tick -- so the control sits inside the field rather than beside it.
+    var accessory: AnyView?
+    @ViewBuilder var field: Field
+
+    init(
+        icon: String,
+        isFocused: Bool,
+        accessory: AnyView? = nil,
+        @ViewBuilder field: () -> Field
+    ) {
+        self.icon = icon
+        self.isFocused = isFocused
+        self.accessory = accessory
+        self.field = field()
+    }
+
+    var body: some View {
+        HStack(spacing: 13) {
+            Image(systemName: icon)
+                .font(.system(size: 16, weight: .medium))
+                .foregroundStyle(isFocused ? ACTheme.accent : ACTheme.secondaryText)
+                .frame(width: 21)
+            field
+                .font(.body)
+                .foregroundStyle(.white)
+                .tint(ACTheme.accent)
+            if let accessory { accessory }
+        }
+        .padding(.horizontal, 16)
+        .frame(height: 54)
+        .background(ACTheme.panelRaised)
+        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .stroke(
+                    isFocused ? ACTheme.accent.opacity(0.85) : ACTheme.border,
+                    lineWidth: isFocused ? 1.6 : 1
+                )
+        }
+        .animation(.easeOut(duration: 0.16), value: isFocused)
+    }
+}
+
+/// The app's filled call to action: Subscribe, Sign In, Create Account.
+///
+/// A style rather than a copied modifier stack, because these buttons sit on three different
+/// screens and had drifted apart -- different heights, corner radii and pressed behaviour on each,
+/// which is what made the set feel assembled rather than designed.
+struct ACPrimaryButtonStyle: ButtonStyle {
+    @Environment(\.isEnabled) private var isEnabled
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(.headline)
+            .frame(maxWidth: .infinity)
+            .frame(height: 54)
+            .background(
+                // Dimmed rather than greyed when disabled: the accent still reads as the action
+                // being waited on, where grey reads as an action that is gone.
+                ACTheme.accent.opacity(isEnabled ? (configuration.isPressed ? 0.84 : 1) : 0.30)
+            )
+            .foregroundStyle(isEnabled ? .black : Color.black.opacity(0.55))
+            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .scaleEffect(configuration.isPressed ? 0.985 : 1)
+            .animation(.easeOut(duration: 0.12), value: configuration.isPressed)
+    }
+}
+
+/// The outlined companion to `ACPrimaryButtonStyle`, for an action of equal footing but lower
+/// expectation -- redeeming a code beside subscribing.
+struct ACSecondaryButtonStyle: ButtonStyle {
+    @Environment(\.isEnabled) private var isEnabled
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(.headline)
+            .frame(maxWidth: .infinity)
+            .frame(height: 54)
+            .background(ACTheme.accent.opacity(configuration.isPressed ? 0.14 : 0.07))
+            .foregroundStyle(ACTheme.accent.opacity(isEnabled ? 1 : 0.4))
+            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .stroke(ACTheme.accent.opacity(isEnabled ? 0.55 : 0.2), lineWidth: 1)
+            }
+            .scaleEffect(configuration.isPressed ? 0.985 : 1)
+            .animation(.easeOut(duration: 0.12), value: configuration.isPressed)
+    }
+}
+
+/// "or" between the email form and the third-party buttons, with a rule either side.
+struct ACDivider: View {
+    var label: String
+
+    var body: some View {
+        HStack(spacing: 14) {
+            Rectangle().fill(ACTheme.border).frame(height: 1)
+            Text(label)
+                .font(.footnote)
+                .foregroundStyle(ACTheme.secondaryText)
+            Rectangle().fill(ACTheme.border).frame(height: 1)
+        }
+    }
+}

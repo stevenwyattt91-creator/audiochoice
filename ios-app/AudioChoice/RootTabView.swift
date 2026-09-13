@@ -4,7 +4,6 @@ struct RootTabView: View {
     @Environment(\.scenePhase) private var scenePhase
     @ObservedObject private var scanRecovery = ScanRecoveryManager.shared
     @State private var selectedTab = 0
-    @State private var importFlowID = UUID()
     var body: some View {
         TabView(selection: $selectedTab) {
             NavigationStack {
@@ -22,7 +21,6 @@ struct RootTabView: View {
             NavigationStack {
                 ImportScreen()
             }
-            .id(importFlowID)
             .tabItem { Label("Import", systemImage: "square.and.arrow.down") }
             .tag(2)
 
@@ -34,8 +32,13 @@ struct RootTabView: View {
         }
         .tint(ACTheme.accent)
         .task { await scanRecovery.recoverPendingScans() }
+        // Only the tab changes here. This used to also replace the Import tab's `.id()`, which was
+        // what stopped "Go to Library" working at all: giving a TabView child a new identity in the
+        // same update that changes the selection makes the TabView re-establish that child and its
+        // `.tag`, and the selection change was lost with it -- so the button appeared to do nothing.
+        // ImportScreen now clears its own flow when it sees this notification, which is where that
+        // state belongs anyway and costs no view identity churn.
         .onReceive(NotificationCenter.default.publisher(for: .showAudioChoiceLibrary)) { _ in
-            importFlowID = UUID()
             selectedTab = 0
         }
         .onChange(of: scenePhase) {
