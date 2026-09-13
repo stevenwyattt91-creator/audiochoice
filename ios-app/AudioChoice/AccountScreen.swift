@@ -25,109 +25,17 @@ struct AccountScreen: View {
     @State private var confirmingDelete = false
     @State private var deletingAccount = false
 
+    /// Which field the keyboard is in, so Return advances instead of doing nothing.
+    private enum Field: Hashable { case email, password, confirmPassword, referral }
+    @FocusState private var focusedField: Field?
+    @State private var revealPassword = false
+
     var body: some View {
-        Form {
-            if isLaunchScreen && session.user == nil {
-                Section {
-                    VStack(spacing: 8) {
-                        Image(systemName: "headphones")
-                            .font(.system(size: 54, weight: .light))
-                            .foregroundStyle(ACTheme.accent)
-                        HStack(spacing: 0) {
-                            Text("Audio")
-                            Text("Choice").foregroundStyle(ACTheme.accent)
-                        }
-                        .font(.largeTitle.bold())
-                        Text("Listen Your Way")
-                            .foregroundStyle(ACTheme.secondaryText)
-                    }
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 20)
-                    .listRowBackground(Color.clear)
-                }
-            }
-
-            if let user = session.user {
-                Section("Signed In") {
-                    LabeledContent("Name", value: user.displayName)
-                    LabeledContent("Email", value: user.email)
-                    LabeledContent("Method", value: user.provider.capitalized)
-                    Button("Sign Out", role: .destructive) { session.signOut() }
-                    Button("Delete Account", role: .destructive) { confirmingDelete = true }
-                        .disabled(deletingAccount)
-                }
+        Group {
+            if session.user == nil {
+                signInLayout
             } else {
-                Section(creatingAccount ? "Create Account" : "Sign In") {
-                    TextField("Email", text: $email)
-                        .keyboardType(.emailAddress)
-                        .textInputAutocapitalization(.never)
-                        .textContentType(.emailAddress)
-                    SecureField("Password", text: $password)
-                        .textContentType(creatingAccount ? .newPassword : .password)
-                    if creatingAccount {
-                        SecureField("Confirm password", text: $confirmPassword)
-                            .textContentType(.newPassword)
-                        Text("Use at least 12 characters.")
-                            .font(.caption)
-                            .foregroundStyle(ACTheme.secondaryText)
-                        // Said as soon as they diverge, rather than on submit. Finding out after
-                        // pressing Create means retyping both fields.
-                        if !confirmPassword.isEmpty && confirmPassword != password {
-                            Text("Those passwords do not match.")
-                                .font(.caption)
-                                .foregroundStyle(.orange)
-                        }
-                        TextField("Referral code (optional)", text: $referralCode)
-                            .textInputAutocapitalization(.characters)
-                            .autocorrectionDisabled()
-                            .onChange(of: referralCode) { _, newValue in checkReferralCode(newValue) }
-                        if !referralCode.isEmpty, let referralCodeValid {
-                            Text(referralCodeValid
-                                ? "Referral code accepted."
-                                : "That code was not recognized, but you can still create your account.")
-                                .font(.caption)
-                                .foregroundStyle(referralCodeValid ? ACTheme.accent : ACTheme.secondaryText)
-                        }
-                    }
-                    Button(creatingAccount ? "Create Account" : "Sign In") {
-                        Task { await submitEmail() }
-                    }
-                    .disabled(!canSubmit)
-                }
-
-                Section("Or continue with") {
-                    SignInWithAppleButton(.signIn) { request in
-                        request.requestedScopes = [.fullName, .email]
-                    } onCompletion: { result in
-                        Task { await handleApple(result) }
-                    }
-                    .signInWithAppleButtonStyle(.white)
-                    .frame(height: 50)
-                    .disabled(working)
-
-                    GoogleSignInButton(action: { Task { await signInWithGoogle() } })
-                        .frame(height: 50)
-                    .disabled(working)
-                }
-
-                Section {
-                    Button(creatingAccount ? "Already have an account? Sign In" : "New to AudioChoice? Create Account") {
-                        creatingAccount.toggle()
-                        confirmPassword = ""
-                        errorMessage = nil
-                    }
-                    // Offered on the sign-in path only. Someone creating an account has no password
-                    // to recover, and until this existed a listener who could not sign in had no
-                    // route back to their library at all -- their only option was a second account
-                    // on a different address, abandoning the books in the first.
-                    if !creatingAccount {
-                        Button("Forgot password?") { resettingPassword = true }
-                    }
-                }
-            }
-
-            if let errorMessage {
-                Section { Text(errorMessage).foregroundStyle(.orange) }
+                signedInForm
             }
         }
         .sheet(isPresented: $resettingPassword) {
@@ -156,6 +64,266 @@ struct AccountScreen: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbar(isLaunchScreen ? .hidden : .visible, for: .navigationBar)
         .acScreen()
+    }
+
+    // MARK: - Signed out
+
+    /// The first screen anyone sees, so it is built rather than borrowed.
+    ///
+    /// Deliberately not a `Form`. A form gave this screen iOS's grouped-list chrome -- system grey
+    /// headers, system row fills -- on top of a near-black theme, with bare text fields that showed
+    /// no edge, no focus and no sign of being controls. Every field now sits in `ACField`, the
+    /// keyboard walks the form in order, and the call to action matches Subscribe on the paywall.
+    private var signInLayout: some View {
+        ScrollView {
+            VStack(spacing: 20) {
+                if isLaunchScreen { brandMark.padding(.top, 8) }
+
+                Picker("", selection: $creatingAccount) {
+                    Text("Sign In").tag(false)
+                    Text("Create Account").tag(true)
+                }
+                .pickerStyle(.segmented)
+                .onChange(of: creatingAccount) { _, _ in
+                    confirmPassword = ""
+                    errorMessage = nil
+                    focusedField = nil
+                }
+
+                VStack(spacing: 12) {
+                    ACField(icon: "envelope", isFocused: focusedField == .email) {
+                        TextField("Email", text: $email)
+                            .keyboardType(.emailAddress)
+                            .textInputAutocapitalization(.never)
+                            .textContentType(.emailAddress)
+                            .autocorrectionDisabled()
+                            .focused($focusedField, equals: .email)
+                            .submitLabel(.next)
+                            .onSubmit { focusedField = .password }
+                    }
+
+                    ACField(
+                        icon: "lock",
+                        isFocused: focusedField == .password,
+                        accessory: AnyView(revealToggle)
+                    ) {
+                        passwordEntry(
+                            "Password",
+                            text: $password,
+                            field: .password,
+                            contentType: creatingAccount ? .newPassword : .password,
+                            submitLabel: creatingAccount ? .next : .go
+                        ) {
+                            if creatingAccount {
+                                focusedField = .confirmPassword
+                            } else if canSubmit {
+                                Task { await submitEmail() }
+                            }
+                        }
+                    }
+
+                    if creatingAccount {
+                        ACField(icon: "lock.rotation", isFocused: focusedField == .confirmPassword) {
+                            passwordEntry(
+                                "Confirm password",
+                                text: $confirmPassword,
+                                field: .confirmPassword,
+                                contentType: .newPassword,
+                                submitLabel: .next
+                            ) { focusedField = .referral }
+                        }
+
+                        // Both notes sit under the fields they describe rather than in a section of
+                        // their own, which is what a form forced.
+                        fieldNote(
+                            !confirmPassword.isEmpty && confirmPassword != password
+                                ? "Those passwords do not match."
+                                : "Use at least 12 characters.",
+                            tone: !confirmPassword.isEmpty && confirmPassword != password
+                                ? .orange
+                                : ACTheme.secondaryText
+                        )
+
+                        ACField(icon: "tag", isFocused: focusedField == .referral) {
+                            TextField("Referral code (optional)", text: $referralCode)
+                                .textInputAutocapitalization(.characters)
+                                .autocorrectionDisabled()
+                                .focused($focusedField, equals: .referral)
+                                .submitLabel(.go)
+                                .onSubmit { if canSubmit { Task { await submitEmail() } } }
+                                .onChange(of: referralCode) { _, newValue in checkReferralCode(newValue) }
+                        }
+
+                        if !referralCode.isEmpty, let referralCodeValid {
+                            fieldNote(
+                                referralCodeValid
+                                    ? "Referral code accepted."
+                                    : "That code was not recognized, but you can still create your account.",
+                                tone: referralCodeValid ? ACTheme.accent : ACTheme.secondaryText
+                            )
+                        }
+                    }
+                }
+
+                if let errorMessage {
+                    // Beside the button that produced it, not in a section at the bottom of the
+                    // screen where it could be scrolled past unseen.
+                    HStack(alignment: .top, spacing: 10) {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .foregroundStyle(.orange)
+                        Text(errorMessage)
+                            .font(.footnote)
+                            .foregroundStyle(.orange)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    .padding(14)
+                    .background(Color.orange.opacity(0.10))
+                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                }
+
+                Button {
+                    focusedField = nil
+                    Task { await submitEmail() }
+                } label: {
+                    // The spinner replaces the label rather than sitting beside it, so the button
+                    // does not change width partway through a sign-in.
+                    if working {
+                        ProgressView().tint(.black)
+                    } else {
+                        Text(creatingAccount ? "Create Account" : "Sign In")
+                    }
+                }
+                .buttonStyle(ACPrimaryButtonStyle())
+                .disabled(!canSubmit)
+
+                if !creatingAccount {
+                    Button("Forgot password?") { resettingPassword = true }
+                        .font(.footnote)
+                        .foregroundStyle(ACTheme.secondaryText)
+                }
+
+                ACDivider(label: "or continue with")
+                    .padding(.vertical, 2)
+
+                VStack(spacing: 10) {
+                    SignInWithAppleButton(.signIn) { request in
+                        request.requestedScopes = [.fullName, .email]
+                    } onCompletion: { result in
+                        Task { await handleApple(result) }
+                    }
+                    .signInWithAppleButtonStyle(.white)
+                    .frame(height: 54)
+                    .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                    .disabled(working)
+
+                    GoogleSignInButton(action: { Task { await signInWithGoogle() } })
+                        .frame(height: 54)
+                        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                        .disabled(working)
+                }
+
+                Spacer(minLength: 12)
+            }
+            .padding(.horizontal, 24)
+            .padding(.vertical, 20)
+        }
+        // Tapping the background puts the keyboard away, which a form gave for free and a
+        // ScrollView does not.
+        .scrollDismissesKeyboard(.interactively)
+        .contentShape(Rectangle())
+        .onTapGesture { focusedField = nil }
+    }
+
+    private var brandMark: some View {
+        VStack(spacing: 8) {
+            Image(systemName: "headphones")
+                .font(.system(size: 54, weight: .light))
+                .foregroundStyle(ACTheme.accent)
+            HStack(spacing: 0) {
+                Text("Audio")
+                Text("Choice").foregroundStyle(ACTheme.accent)
+            }
+            .font(.largeTitle.bold())
+            Text("Listen Your Way")
+                .foregroundStyle(ACTheme.secondaryText)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.bottom, 6)
+    }
+
+    private var revealToggle: some View {
+        Button {
+            revealPassword.toggle()
+        } label: {
+            Image(systemName: revealPassword ? "eye.slash" : "eye")
+                .font(.system(size: 15))
+                .foregroundStyle(ACTheme.secondaryText)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(revealPassword ? "Hide password" : "Show password")
+    }
+
+    /// A secure field that can be revealed, with every modifier applied to both forms.
+    ///
+    /// Written out twice rather than switching a `Group`, because the two are different view types
+    /// and attaching focus to the conditional wrapper instead of the field itself is how the
+    /// keyboard ends up refusing to advance.
+    @ViewBuilder
+    private func passwordEntry(
+        _ placeholder: String,
+        text: Binding<String>,
+        field: Field,
+        contentType: UITextContentType,
+        submitLabel: SubmitLabel,
+        onSubmit action: @escaping () -> Void
+    ) -> some View {
+        if revealPassword {
+            TextField(placeholder, text: text)
+                .textContentType(contentType)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+                .focused($focusedField, equals: field)
+                .submitLabel(submitLabel)
+                .onSubmit(action)
+        } else {
+            SecureField(placeholder, text: text)
+                .textContentType(contentType)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+                .focused($focusedField, equals: field)
+                .submitLabel(submitLabel)
+                .onSubmit(action)
+        }
+    }
+
+    private func fieldNote(_ text: String, tone: Color) -> some View {
+        Text(text)
+            .font(.caption)
+            .foregroundStyle(tone)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 4)
+    }
+
+    // MARK: - Signed in
+
+    /// Kept as a form on purpose: reached from Profile, it is a settings screen and reads correctly
+    /// as one. Only the front door needed rebuilding.
+    private var signedInForm: some View {
+        Form {
+            if let user = session.user {
+                Section("Signed In") {
+                    LabeledContent("Name", value: user.displayName)
+                    LabeledContent("Email", value: user.email)
+                    LabeledContent("Method", value: user.provider.capitalized)
+                    Button("Sign Out", role: .destructive) { session.signOut() }
+                    Button("Delete Account", role: .destructive) { confirmingDelete = true }
+                        .disabled(deletingAccount)
+                }
+            }
+            if let errorMessage {
+                Section { Text(errorMessage).foregroundStyle(.orange) }
+            }
+        }
     }
 
     /// Whether the form is complete enough to send.
