@@ -237,7 +237,13 @@ public sealed class OpenAIProcessingOptions
     // trace. A result produced under the prior version came from a model that reasoned
     // before every answer; this version did not, which is a real change to how each
     // decision was reached even though the output schema is unchanged.
-    public string ScannerVersion { get; init; } = "6.5-no-thinking";
+    //
+    // Bumped again: removed a JSON Schema maxLength bound on safeDescription that vLLM's
+    // guided-decoding backend was silently failing to enforce, corrupting output for any
+    // candidate whose natural description ran past 80 characters. A result written under
+    // the prior version may be missing a candidate this bug caused to fail outright, or may
+    // reflect a checkpoint saved after a lucky retry rather than the model's real answer.
+    public string ScannerVersion { get; init; } = "6.6-schema-maxlength-fix";
     /// <summary>Only jobs in this lane may be claimed by this worker instance.</summary>
     public string ProcessingLane { get; init; } = ScanProcessingLanes.AzureOpenAI;
     /// <summary>

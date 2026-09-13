@@ -60,7 +60,18 @@ public sealed class OpenAIContentAnalysisProvider(
     // answering is not observable in a cached checkpoint's own JSON, so a stale answer from
     // before this change could otherwise be silently trusted as though it came from the
     // same (slower, chain-of-thought) model this pipeline was evaluated and tuned against.
-    private const string BaseAnalysisPromptVersion = "5.5-no-thinking";
+    //
+    // Bumped again: removed the response schema's maxLength=80 bound on safeDescription (and
+    // the unused maxLength on profanityWord/quote) -- a real, reproducible production bug,
+    // not a quality tweak. vLLM's guided-decoding backend (xgrammar) silently drops a JSON
+    // Schema string's maxLength keyword rather than enforcing or rejecting it (a documented
+    // vLLM/xgrammar limitation), so the model had no actual signal to stop at 80 characters
+    // and kept generating past the schema's own declared limit with nothing able to close
+    // the string or object correctly -- corrupting the JSON deterministically, at the same
+    // ~80th character, on every retry of the same candidate. SafeDescription already
+    // truncates to 80 characters in code before anything is trusted, so the schema
+    // constraint was never doing safety work; it was only breaking generation.
+    private const string BaseAnalysisPromptVersion = "5.6-schema-maxlength-fix";
     // Bumped for the keyword safety net's lane isolation fix: a candidate whose window
     // happens to match a checkpoint cached under the prior version may have been built
     // before a safety-net seed's own lane existed, when it could still get coalesced into a
@@ -117,10 +128,16 @@ public sealed class OpenAIContentAnalysisProvider(
     // Bumped again together with BaseAnalysisPromptVersion: Qwen3.6's default reasoning is
     // now disabled on every VllmModelClient request (see that field's own remarks) to fix
     // real production turnaround on Terra/Sol verification calls specifically.
+    //
+    // Bumped again together with BaseAnalysisPromptVersion: removed
+    // SceneVerificationResponseSchema's maxLength=80 bound on safeDescription, a real
+    // production bug (see that field's own remarks) that was corrupting the JSON on any
+    // candidate whose natural description landed past 80 characters, deterministically,
+    // with no fix possible short of the model getting lucky with a shorter phrasing.
     private const string SceneVerificationVersion =
-        "6.5-no-thinking";
+        "6.6-schema-maxlength-fix";
     private const string SceneEscalationVersion =
-        "6.5-no-thinking";
+        "6.6-schema-maxlength-fix";
     private readonly string _checkpointFolder = dataPaths.AnalysisCheckpoints;
     public string ScannerVersion => options.ScannerVersion;
 
@@ -2479,16 +2496,20 @@ Transcript segments:
                             ["minimum"] = 0,
                             ["maximum"] = 1
                         },
-                        ["safeDescription"] = new JsonObject { ["type"] = "string", ["maxLength"] = 80 },
+                        // No maxLength here on purpose -- see SceneVerificationResponseSchema's
+                        // own remarks for why a length-bounded string in vLLM's guided-decoding
+                        // schema is a real production bug, not a safety net. SafeDescription
+                        // already truncates to 80 characters server-side before anything is
+                        // trusted or shown to a listener.
+                        ["safeDescription"] = new JsonObject { ["type"] = "string" },
                         ["profanityWord"] = new JsonObject
                         {
-                            ["type"] = new JsonArray("string", "null"),
-                            ["maxLength"] = 80
+                            ["type"] = new JsonArray("string", "null")
                         },
                         // Never shown to a listener. This is how AddEvent locates the exact
                         // words that justify the event in the transcript's own word timing,
                         // rather than trusting startTime/endTime as invented numbers.
-                        ["quote"] = new JsonObject { ["type"] = "string", ["maxLength"] = 200 }
+                        ["quote"] = new JsonObject { ["type"] = "string" }
                     }
                 }
             }
@@ -2533,14 +2554,29 @@ Transcript segments:
                             ["minimum"] = 0,
                             ["maximum"] = 1
                         },
-                        ["safeDescription"] = new JsonObject
-                        {
-                            ["type"] = "string",
-                            ["maxLength"] = 80
-                        },
+                        // No maxLength here, deliberately. Real production evidence traced
+                        // to this exact constraint: vLLM's guided-decoding backend
+                        // (xgrammar) silently drops a JSON Schema string's maxLength bound --
+                        // a documented, known vLLM limitation, not something specific to this
+                        // prompt or candidate -- so the model received no actual signal to
+                        // stop at 80 characters. It kept generating past the schema's own
+                        // limit with nothing to close the string or the surrounding object
+                        // correctly, corrupting the JSON at (or very near) the 80th
+                        // character on every attempt, deterministically, because the failure
+                        // is structural rather than a sampling accident: retrying an
+                        // unconstrained-in-practice schema against the same over-length
+                        // answer reproduces the same broken close every time. Confirmed by
+                        // an identical failure recurring across two different real
+                        // candidates, both truncating a safeDescription at exactly 80
+                        // characters. SafeDescription already truncates to 80 characters
+                        // server-side before anything is trusted or shown to a listener, so
+                        // the schema constraint was never doing safety work the code did not
+                        // already do -- only breaking generation for a description whose
+                        // natural length happened to land past 80.
+                        ["safeDescription"] = new JsonObject { ["type"] = "string" },
                         // Never shown to a listener. Confirms the refined startTime against
                         // the transcript's own word timing before it is trusted.
-                        ["quote"] = new JsonObject { ["type"] = "string", ["maxLength"] = 200 }
+                        ["quote"] = new JsonObject { ["type"] = "string" }
                     }
                 }
             }
