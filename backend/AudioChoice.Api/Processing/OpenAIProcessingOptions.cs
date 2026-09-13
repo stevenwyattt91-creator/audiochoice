@@ -14,9 +14,18 @@ public sealed class OpenAIProcessingOptions
     public int TranscriptionConcurrencyPerWorker { get; init; } = 2;
     public int TranscriptionMaximumRetries { get; init; } = 3;
     public int ScanWorkerConcurrency { get; init; } = 1;
-    public int ContentAnalysisConcurrency { get; init; } = 3;
-    public int SceneVerificationConcurrency { get; init; } = 3;
-    public int SceneEscalationConcurrency { get; init; } = 2;
+    // Raised from 3/3/2 to 8/8/8, matching vLLM's own --max-num-seqs 8 on the H100 box --
+    // real measured KV cache usage during a live scan peaked around 23% and "Running"
+    // requests never exceeded 2 at once, so the GPU had five to six times the concurrent
+    // capacity vLLM had already reserved sitting idle while these three stages each
+    // serialized their own work far below what the server could actually take at once.
+    // Purely a throughput change: the content, prompts, and model each request carries are
+    // identical to a request sent at the old, lower concurrency, so this does not change
+    // what is asked or how an answer is judged -- only how many independent candidates are
+    // asked about at the same time. No checkpoint version bump needed for the same reason.
+    public int ContentAnalysisConcurrency { get; init; } = 8;
+    public int SceneVerificationConcurrency { get; init; } = 8;
+    public int SceneEscalationConcurrency { get; init; } = 8;
     public string FasterWhisperModel { get; init; } = "large-v3-turbo";
     public string FasterWhisperFallbackModel { get; init; } = "large-v3";
     /// <summary>
