@@ -777,6 +777,84 @@ Assert(abbreviationBetween.Count == 1,
         "An empty transcript produced a batch range instead of none.");
 }
 
+// First-pass sexual-content double-check: a real production regression. The same batch,
+// sent unchanged, escalated a passage to sexual_implied_activity on one run and stayed at
+// sexual_suggestive_dialogue -- the ladder's lowest rung -- on a re-run, from ordinary
+// model sampling variance on a genuinely close call. HasSexualContentEvent decides whether
+// a batch needs the second, independent call at all; MergeSexualContentEvents combines the
+// two answers as a union once it does.
+{
+    // A batch with no sexual-content label at all does not need the second call.
+    var nonSexualPayload = new OpenAIContentAnalysisProvider.AnalysisPayload([
+        new OpenAIContentAnalysisProvider.ClassifiedEvent(
+            "violence_graphic", 10, 20, 0.9, "Graphic violence described", null, "quote")
+    ]);
+    Assert(
+        !OpenAIContentAnalysisProvider.HasSexualContentEvent(nonSexualPayload),
+        "A batch with no sexual-content label was flagged as needing the second first-pass call.");
+
+    // A batch with even one sexual-content label, at any rung, does.
+    var sexualPayload = new OpenAIContentAnalysisProvider.AnalysisPayload([
+        new OpenAIContentAnalysisProvider.ClassifiedEvent(
+            "sexual_suggestive_dialogue", 10, 20, 0.85, "Suggestive dialogue occurs", null, "quote")
+    ]);
+    Assert(
+        OpenAIContentAnalysisProvider.HasSexualContentEvent(sexualPayload),
+        "A batch with a sexual-content label was not flagged as needing the second first-pass call.");
+
+    // The real regression this fix closes: the first call only reaches the ladder's lowest
+    // rung for a passage; the second, independent call correctly escalates the identical
+    // passage. The merge must keep the escalation, not just the first call's own answer.
+    var firstCallUnderReports = new OpenAIContentAnalysisProvider.AnalysisPayload([
+        new OpenAIContentAnalysisProvider.ClassifiedEvent(
+            "sexual_suggestive_dialogue", 19948.4, 19951.4,
+            0.85, "A character bites another's neck", null, "and bit my neck")
+    ]);
+    var secondCallEscalates = new OpenAIContentAnalysisProvider.AnalysisPayload([
+        new OpenAIContentAnalysisProvider.ClassifiedEvent(
+            "sexual_suggestive_dialogue", 19948.4, 19951.4,
+            0.85, "A character bites another's neck", null, "and bit my neck"),
+        new OpenAIContentAnalysisProvider.ClassifiedEvent(
+            "sexual_implied_activity", 20001.8, 20003.4,
+            0.9, "A character grinds against another", null, "grind my hips against his")
+    ]);
+    var merged = OpenAIContentAnalysisProvider.MergeSexualContentEvents(
+        firstCallUnderReports, secondCallEscalates);
+    // Both calls' sexual-content events are kept, including the suggestive event both
+    // calls agreed on -- deduplication by StableKey happens later, in Analyze() itself,
+    // not in this merge. What matters here is that the escalation is present at all.
+    Assert(
+        merged.Events.Any(item => item.Label == "sexual_implied_activity"),
+        "A real escalation the second first-pass call found, that the first call missed, " +
+        "was not kept by the merge -- this is the exact real listener-facing gap this fix " +
+        "exists to close.");
+
+    // Merging is symmetric in the sense that matters: it never drops the FIRST call's own
+    // sexual-content event just because the second call did not repeat it.
+    var secondCallMissesIt = new OpenAIContentAnalysisProvider.AnalysisPayload([]);
+    var mergedKeepingFirst = OpenAIContentAnalysisProvider.MergeSexualContentEvents(
+        firstCallUnderReports, secondCallMissesIt);
+    Assert(
+        mergedKeepingFirst.Events.Count == 1,
+        "The first call's own sexual-content event was dropped when the second call found " +
+        "nothing, instead of the union of both calls' findings being kept.");
+
+    // Non-sexual events (violence, profanity, substance, self-harm) are taken from the
+    // first call alone -- the second call exists to protect the sexual-content ladder
+    // specifically, not to double-detect every category.
+    var firstWithViolence = new OpenAIContentAnalysisProvider.AnalysisPayload([
+        new OpenAIContentAnalysisProvider.ClassifiedEvent(
+            "violence_graphic", 5, 10, 0.9, "Graphic violence described", null, "quote")
+    ]);
+    var mergedWithViolence = OpenAIContentAnalysisProvider.MergeSexualContentEvents(
+        firstWithViolence, secondCallMissesIt);
+    Assert(
+        mergedWithViolence.Events.Count == 1 &&
+            mergedWithViolence.Events[0].Label == "violence_graphic",
+        "A non-sexual event from the first call was dropped by the merge, which should " +
+        "only ever add to or duplicate-filter the sexual-content labels.");
+}
+
 // Terra entry gate: a lone weak sexual-content mention never reaches Terra at all, but a
 // dense cluster of them, or one alongside a stronger label, still does.
 {

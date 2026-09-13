@@ -346,6 +346,14 @@ public sealed class OpenAIContentAnalysisProvider(
         return await Task.WhenAll(tasks);
     }
 
+    /// <summary>
+    /// Discriminates the first pass's own second, independent call on a batch that already
+    /// contains sexual content, from the first call's own checkpoint -- the same shape
+    /// <see cref="SecondSolVoteDiscriminator"/> already uses for Sol's second escalation
+    /// vote, so the two calls are never accidentally read back as the same cached answer.
+    /// </summary>
+    private const string SecondFirstPassVoteDiscriminator = "luna-vote-2";
+
     private async Task<ContentBatchResult> ProcessContentBatch(
         int index,
         (int StartIndex, int EndExclusive) range,
@@ -372,6 +380,41 @@ public sealed class OpenAIContentAnalysisProvider(
                     "Reused content-analysis checkpoint for batch {BatchNumber}; no API request was made.",
                     index + 1);
             }
+
+            // A real production regression this second call exists to close: the same
+            // batch, sent unchanged, escalated a passage to sexual_implied_activity on one
+            // run and stayed at sexual_suggestive_dialogue -- the ladder's lowest rung -- on
+            // a re-run, purely from ordinary model sampling variance on a genuinely close
+            // call. Sol's own escalation lane already runs a real majority vote across
+            // independent calls rather than trusting one answer (see ResolveMajorityVote);
+            // the first pass never had that same protection until now. Gated to only the
+            // batches that already contain at least one sexual-content event from the first
+            // call -- doubling every batch in the book, including the many with no sexual
+            // content at all, would double this pass's entire cost for a risk that is
+            // specific to the sexual-content ladder, not to profanity, violence, substance,
+            // or self-harm labels. A union rather than a strict majority: either call's
+            // sexual-content events are kept, since Terra's own review downstream is what
+            // actually decides a scene's fate -- an extra proposed candidate here costs one
+            // more verification call, while a missed real escalation costs the finding
+            // outright, and the second is the failure this pipeline treats as unacceptable.
+            if (HasSexualContentEvent(classified))
+            {
+                var secondCheckpointPath = CheckpointPath(batch, SecondFirstPassVoteDiscriminator);
+                var secondClassified = await LoadCheckpoint(secondCheckpointPath, cancellationToken);
+                if (secondClassified is null)
+                {
+                    secondClassified = await AnalyzeBatch(batch, cancellationToken);
+                    await SaveCheckpoint(secondCheckpointPath, secondClassified, cancellationToken);
+                }
+                else
+                {
+                    logger.LogInformation(
+                        "Reused second first-pass checkpoint for batch {BatchNumber}; no API request was made.",
+                        index + 1);
+                }
+                classified = MergeSexualContentEvents(classified, secondClassified);
+            }
+
             completed();
             return new ContentBatchResult(index, batch, classified);
         }
@@ -438,15 +481,53 @@ public sealed class OpenAIContentAnalysisProvider(
         return events.ToArray();
     }
 
-    private string CheckpointPath(IReadOnlyList<TranscriptSegment> segments)
+    private string CheckpointPath(
+        IReadOnlyList<TranscriptSegment> segments, string? discriminator = null)
     {
         // Keep the expensive high-recall pass reusable across scanner releases. Scanner
         // 2.3 adds an independent verifier but intentionally reuses the completed 2.2
         // candidate checkpoints instead of paying to generate them again.
-        var material = $"{options.AnalysisModel}|{BaseAnalysisPromptVersion}|" +
-            JsonSerializer.Serialize(segments);
+        var material = $"{options.AnalysisModel}|{BaseAnalysisPromptVersion}" +
+            (discriminator is null ? "" : $"|{discriminator}") +
+            $"|{JsonSerializer.Serialize(segments)}";
         var key = Hash(material);
         return Path.Combine(_checkpointFolder, $"{key}.json");
+    }
+
+    private static readonly HashSet<string> SexualContentLabels =
+    [
+        "sexual_suggestive_dialogue", "sexual_references", "sexual_nudity",
+        "sexual_implied_activity", "sexual_explicit_activity", "sexual_complete_scene",
+        "sexual_violence"
+    ];
+
+    internal static bool HasSexualContentEvent(AnalysisPayload payload) =>
+        payload.Events.Any(item => SexualContentLabels.Contains(item.Label));
+
+    /// <summary>
+    /// Combines two independent first-pass answers for the same batch into one, keeping
+    /// every sexual-content event either call proposed and every non-sexual event from the
+    /// first call alone.
+    /// </summary>
+    /// <remarks>
+    /// A union of sexual-content events, not a majority or an intersection: Terra's own
+    /// review downstream is the real gate on whether a proposed event survives to a
+    /// listener, so admitting an extra candidate here costs one more verification call
+    /// while dropping a real one costs the finding outright. Non-sexual events are taken
+    /// only from the first call, deliberately -- the second call exists to protect the
+    /// sexual-content ladder specifically (see ProcessContentBatch's own remarks), not to
+    /// double-detect profanity, violence, substance, or self-harm labels, where this
+    /// pipeline has not measured the same run-to-run escalation inconsistency.
+    /// </remarks>
+    internal static AnalysisPayload MergeSexualContentEvents(
+        AnalysisPayload first, AnalysisPayload second)
+    {
+        var merged = first.Events
+            .Where(item => !SexualContentLabels.Contains(item.Label))
+            .Concat(first.Events.Where(item => SexualContentLabels.Contains(item.Label)))
+            .Concat(second.Events.Where(item => SexualContentLabels.Contains(item.Label)))
+            .ToArray();
+        return new AnalysisPayload(merged);
     }
 
     private static async Task<AnalysisPayload?> LoadCheckpoint(
@@ -2407,7 +2488,7 @@ Transcript segments:
         }
     };
 
-    private sealed record AnalysisPayload(
+    internal sealed record AnalysisPayload(
         [property: JsonPropertyName("events")]
         IReadOnlyList<ClassifiedEvent> Events);
 
@@ -2416,7 +2497,7 @@ Transcript segments:
         IReadOnlyList<TranscriptSegment> Batch,
         AnalysisPayload Payload);
 
-    private sealed record ClassifiedEvent(
+    internal sealed record ClassifiedEvent(
         [property: JsonPropertyName("label")] string Label,
         [property: JsonPropertyName("startTime")] double StartTime,
         [property: JsonPropertyName("endTime")] double EndTime,

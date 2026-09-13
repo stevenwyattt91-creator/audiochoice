@@ -5,65 +5,69 @@ services:
     network_mode: host
     ipc: host
     volumes:
-      # Reuses the same cache whisper already persists to, so the ~15GB quantized model
-      # survives nightly instance replacement instead of re-downloading.
+      # Reuses the same cache whisper already persists to, so the ~40GB FP8 model survives
+      # nightly instance replacement instead of re-downloading.
       - /lambda/nfs/audiochoice-worker-state/huggingface-cache:/root/.cache/huggingface
     environment:
       # Only needed if the chosen model repo is gated on Hugging Face; leave unset otherwise.
       HUGGING_FACE_HUB_TOKEN: ${HUGGING_FACE_HUB_TOKEN:-}
-    # Same model, same settings this session's eval sidecar (deploy/lambda/vllm-eval)
-    # validated against a 35-case ground-truth set (scripts/eval/ground_truth_scenes.json)
-    # spanning sexual content, graphic violence, and self-harm across 12+ real books --
-    # 31/33 scored cases passed, the only 2 misses being the two hardest, most
-    # consent-ambiguous passages this session ever found, which OpenAI's own production
-    # pipeline also could not reliably agree with itself on across 29+ independent calls.
+    # Switched from the AWQ INT4 quantization (QuantTrio/Qwen3.6-27B-AWQ) to the model
+    # team's own FP8 release (Qwen/Qwen3.6-27B-FP8), now that the H100's larger KV cache
+    # budget can afford roughly double the weight footprint. Real production evidence this
+    # session traced a first-pass classification disagreeing with itself across identical
+    # re-runs of the same passage -- INT4's more aggressive quantization introduces real
+    # numerical noise on exactly the close, borderline calls this pipeline's escalation
+    # ladder depends on. Per Qwen's own release notes, FP8 (fine-grained, block size 128)
+    # measures "nearly identical" to the unquantized BF16 model, at half BF16's footprint --
+    # a materially better quality baseline than INT4 without paying BF16's full ~56GiB cost,
+    # which would leave too little KV cache headroom on this single-GPU host.
     #
-    # GPU budget: migrated from a single A100 40GB to a single H100 80GB PCIe specifically to
-    # relieve this real throughput ceiling -- on the A100, even after raising
-    # --gpu-memory-utilization from 0.70 to 0.82, vLLM's own startup log measured only 2.38x
-    # concurrency for full-length (65536-token) requests, and real production jobs still hit
-    # HttpClient timeouts queued behind other in-flight requests. AWQ INT4 weight loading
-    # takes just under 20GiB regardless of GPU (measured: "Model loading took 19.92 GiB
-    # memory"); the H100's extra ~40GiB over the A100 goes almost entirely to KV cache
-    # headroom, not to the model itself. --gpu-memory-utilization 0.85 (~69GiB) leaves ~12GiB
-    # for whisper's real concurrent-load footprint (idle measured at 2.4GB via
-    # nvidia-smi --query-compute-apps) plus a real margin above that, since this host is
-    # otherwise dedicated to this workload alone. Re-measure the real startup log's own
-    # concurrency line ("GPU KV cache size: ... Maximum concurrency for 65,536 tokens per
-    # request: ...x") after any further change here rather than assuming the ratio holds.
+    # This is a quality upgrade to reduce how often a close call is answered inconsistently
+    # from run to run -- not a claim it eliminates that risk outright. Some of it is
+    # inherent to batched GPU inference itself (floating-point operations are not perfectly
+    # associative across different batch compositions, so the identical prompt can
+    # legitimately answer slightly differently depending on concurrent load), which is why
+    # this pipeline separately runs a majority vote across independent model calls wherever
+    # a single answer is not trustworthy enough on its own (see ResolveMajorityVote for the
+    # escalation lane, and Luna's own first pass for the newer sexual-content case).
+    #
+    # GPU budget: this host's single H100 80GB also runs the whisper transcription
+    # container (idle ~2.4GB measured via nvidia-smi --query-compute-apps). FP8 weight
+    # loading is roughly double AWQ INT4's ~20GiB (measured "Model loading took 19.92 GiB
+    # memory" under AWQ) at comparable precision-per-byte, so expect roughly ~40GiB for the
+    # model itself. --gpu-memory-utilization 0.85 (~69GiB) leaves the same ~12GiB margin for
+    # whisper as before, with roughly ~28GiB left for KV cache -- less than AWQ's ~48GiB,
+    # so real concurrency will measure lower than the 10.37x AWQ achieved on this same host,
+    # while still comfortably ahead of the prior A100's 2.38x. Re-measure the real startup
+    # log's own concurrency line ("GPU KV cache size: ... Maximum concurrency for 65,536
+    # tokens per request: ...x") after this change rather than assuming a ratio holds.
     #
     # --max-model-len 65536, not 32768: a real production Luna first-pass batch (Content
     # AnalysisModel, up to MaximumSegmentsPerAnalysisRequest=100 transcript segments) hit
     # 24,769 input tokens on the very first live scan through this pipeline, and combined
-    # with VllmMaxTokens' output budget (8000) exceeded 32768 outright -- the job failed
-    # loudly with "This model's maximum context length is 32768 tokens... your prompt
-    # contains at least 24769 input tokens". 32768 was sized against this session's own
-    # eval excerpts (a few dozen transcript segments each), never against a real full-size
-    # production batch. Doubled here with real margin instead of tuned to the exact
-    # observed failure, since a longer chapter or a denser batch could need more still.
+    # with VllmMaxTokens' output budget exceeded 32768 outright -- the job failed loudly
+    # with "This model's maximum context length is 32768 tokens... your prompt contains at
+    # least 24769 input tokens". 32768 was sized against this session's own eval excerpts (a
+    # few dozen transcript segments each), never against a real full-size production batch.
+    # Doubled here with real margin instead of tuned to the exact observed failure, since a
+    # longer chapter or a denser batch could need more still.
     #
-    # --max-num-seqs 16: Qwen3.6 is a hybrid Mamba/attention (GDN) model -- every concurrent
-    # decode sequence needs its own Mamba cache block, separate from the regular KV cache.
-    # On the prior A100 host at gpu-memory-utilization=0.70 and --max-model-len 32768, only
-    # 94 Mamba cache blocks were available, well under vLLM's default max_num_seqs of 256,
-    # which made the engine refuse to start outright ("No available memory for the cache
-    # blocks"). Raised from 8 (the A100's own tuned value) now that the H100's larger KV
-    # cache budget has real room for it: production's own app-side concurrency ceiling is
-    # ContentAnalysisConcurrency (2) + SceneVerificationConcurrency (2) +
-    # SceneEscalationConcurrency (2) = 6 at most today, so 16 has real margin for both that
-    # and for raising those app-side settings later without immediately re-hitting this cap.
-    # Raise further only after confirming the real available-block count logged at startup.
+    # --max-num-seqs 8: lowered back from AWQ's 16 -- FP8's larger weight footprint leaves
+    # meaningfully less KV cache room for concurrent Mamba cache blocks (see the GPU budget
+    # remarks above), and this app's own concurrency ceiling (ContentAnalysisConcurrency (2)
+    # + SceneVerificationConcurrency (2) + SceneEscalationConcurrency (2) = 6 today) does not
+    # need more than this to avoid becoming the bottleneck. Raise only after confirming the
+    # real available-block count logged at startup.
     #
     # Served model name matches RoutingAnalysisModelClient.IsVllmModel's check (contains
     # "qwen") and the three AudioChoice__OpenAI__*Model values below -- all three must agree
     # for a tier's model name to resolve to this service rather than failing loudly.
     command: >
-      --model QuantTrio/Qwen3.6-27B-AWQ
-      --quantization awq
+      --model Qwen/Qwen3.6-27B-FP8
       --port 8002
       --max-model-len 65536
       --gpu-memory-utilization 0.85
-      --max-num-seqs 16
+      --max-num-seqs 8
       --served-model-name qwen3.6-27b
     deploy:
       resources:
