@@ -130,11 +130,40 @@ public sealed class VllmModelClient(
                     var content = root["choices"]?[0]?["message"]?["content"]?.GetValue<string>()
                         ?? throw new InvalidOperationException(
                             $"{schemaName} response did not contain message content.");
-                    var answer = ExtractJsonObject(content)
-                        ?? throw new InvalidOperationException(
-                            $"{schemaName} response content did not contain a parseable JSON " +
-                            "object -- the model may have been truncated mid-reasoning; check " +
-                            "AudioChoice:OpenAI:VllmMaxTokens.");
+                    var answer = ExtractJsonObject(content);
+                    if (answer is null)
+                    {
+                        // A real production failure this retry exists for: a successful
+                        // (HTTP 200) response whose content never contained a complete,
+                        // parseable JSON object, observed specifically under real concurrent
+                        // load -- the identical batch, sent in isolation with no other
+                        // request competing for the GPU at the same time, answered cleanly
+                        // and quickly. This is treated as a transient serving hiccup, the
+                        // same way a timeout is, rather than evidence the batch's own content
+                        // is unanswerable: unlike a genuine context-length overflow (handled
+                        // separately below, with its own unlimited-attempts recovery), this
+                        // has no measured cause to correct for, so it shares the ordinary
+                        // MaximumRetries budget instead of retrying without limit.
+                        if (attempt >= options.MaximumRetries)
+                        {
+                            throw new InvalidOperationException(
+                                $"{schemaName} response content did not contain a parseable " +
+                                "JSON object after " + (attempt + 1) + " attempt(s) -- the " +
+                                "model may have been truncated mid-reasoning; check " +
+                                "AudioChoice:OpenAI:VllmMaxTokens. Last response (truncated): " +
+                                content[..Math.Min(content.Length, 500)]);
+                        }
+
+                        var parseRetryDelay = TimeSpan.FromSeconds(Math.Pow(2, attempt));
+                        logger.LogWarning(
+                            "{SchemaName} on {Model} returned a successful response with no " +
+                            "parseable JSON content; retry {Attempt} after {Delay}. Response " +
+                            "(truncated): {Content}",
+                            schemaName, model, attempt + 1, parseRetryDelay,
+                            content[..Math.Min(content.Length, 500)]);
+                        await Task.Delay(parseRetryDelay, cancellationToken);
+                        continue;
+                    }
                     return new AnalysisModelResponse(
                         answer.ToJsonString(),
                         root["usage"]?["prompt_tokens"]?.GetValue<long>(),
