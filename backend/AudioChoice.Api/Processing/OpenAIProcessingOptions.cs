@@ -277,5 +277,9 @@ public sealed class OpenAIProcessingOptions
     public int MaximumSceneEscalationRequestsPerJob { get; init; } = 50;
     public int MaximumChunksPerJob { get; init; } = 500;
     public int MaximumTranscriptSegmentsPerJob { get; init; } = 100_000;
-    public double MaximumAudioDurationSeconds { get; init; } = 108_000;
+    // Raised together with Ffmpeg's MaximumInputDurationSeconds from 30 hours to 37, to
+    // admit a real omnibus/full-series audiobook file that exceeded the prior ceiling. This
+    // is the separate paid-processing-stage limit that would otherwise reject the same file
+    // here even if the earlier ffmpeg pre-processing check had let it through.
+    public double MaximumAudioDurationSeconds { get; init; } = 133_200;
 }

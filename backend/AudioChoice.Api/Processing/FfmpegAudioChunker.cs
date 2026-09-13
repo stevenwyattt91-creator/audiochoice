@@ -78,7 +78,10 @@ public sealed class FfmpegAudioChunkerOptions
     public double ChunkDurationSeconds { get; init; } = 600;
     public double OverlapSeconds { get; init; } = 2;
     public int SampleRate { get; init; } = 16_000;
-    public double MaximumInputDurationSeconds { get; init; } = 108_000;
+    // Raised from 30 hours (108,000s) to 37 hours to admit a real omnibus/full-series
+    // audiobook file that exceeded the prior ceiling and was rejected before transcription
+    // ever started.
+    public double MaximumInputDurationSeconds { get; init; } = 133_200;
 }
 
 public sealed class FfmpegAudioChunker(
