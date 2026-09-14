@@ -39,14 +39,14 @@ param apnsKeyID string = ''
 @description('The Apple Developer team the APNs key belongs to. Not a secret; it appears in the provider token as the issuer.')
 param apnsTeamID string = '8M67MANZ4S'
 
-@description('Whether Apple purchase verification is turned on. Requires appleSigningKeyPresent, since there is nothing to verify a StoreKit2 transaction against otherwise.')
-param applePurchasesEnabled bool = false
+@description('Whether Apple purchase verification is turned on. On by default: the subscription is live on the App Store, and with this off the server refuses every purchase Apple has already charged for.')
+param applePurchasesEnabled bool = true
 
 @description('The app bundle ID a verified Apple transaction must name. Leave as the app bundle ID; this is not a secret.')
 param applePurchasesBundleID string = 'com.audiochoice.mobile'
 
-@description('Comma-separated App Store Connect subscription product ids this server accepts. Leave empty to accept any product while only one exists.')
-param applePurchasesProductIDs string = ''
+@description('Comma-separated App Store Connect subscription product ids this server accepts. Set to the live product so a transaction for anything else in this bundle is refused.')
+param applePurchasesProductIDs string = 'Monthly'
 
 @description('The App Store Connect API key id, from Users and Access > Integrations > In-App Purchase. Not a secret by itself, but meaningless without appleSigningKeyPresent.')
 param applePurchasesKeyID string = ''
@@ -374,11 +374,21 @@ resource api 'Microsoft.App/containerApps@2024-03-01' = {
               value: narrationAwsRegion
             }
             {
-              // Off unless the signing key is also present -- there is otherwise nothing to
-              // verify a StoreKit2 transaction's signature against, so the endpoint would only be
-              // able to reject every request.
+              // Not gated on the signing key, and the earlier claim that it had to be was simply
+              // wrong. A StoreKit2 transaction is a JWS carrying its own signing certificate chain
+              // in the x5c header, and AppleJWS.VerifyAndDecode establishes trust by chaining that
+              // up to Apple Root CA G3, which is pinned in the server. No account key takes part in
+              // it. AppleKeyID, AppleIssuerID and AppleSigningKeyPem are read by nothing in this
+              // codebase; they exist for calling the App Store Server API, which no purchase path
+              // does.
+              //
+              // The cost of that mistake was total: appleSigningKeyPresent defaults false and the
+              // deploy workflow never passes it, so AppleEnabled was False in production while the
+              // subscription was live on the App Store. Every purchase was charged by Apple and then
+              // refused here with "Apple purchase verification is not yet configured on this server",
+              // no entitlement was written, and the listener stayed behind the paywall having paid.
               name: 'AudioChoice__Purchases__AppleEnabled'
-              value: string(applePurchasesEnabled && appleSigningKeyPresent)
+              value: string(applePurchasesEnabled)
             }
             {
               name: 'AudioChoice__Purchases__AppleBundleID'
