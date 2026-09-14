@@ -4050,6 +4050,47 @@ Assert(
         "this within a couple of attempts, not let it run for many more.");
 }
 
+// VllmModelClient.CompleteJson's per-call base temperature -- a real production fix: the
+// first-pass content-analysis call (schemaName "audiochoice_scan_events") must run at
+// Qwen's own documented non-thinking sampling temperature (0.7) to recover recall lost
+// when thinking mode was disabled, while every other call (Terra/Sol verification and
+// escalation) must stay at exactly 0 for their own reproducibility and majority-vote
+// guarantees. Exercised against the real request body sent, not just the response
+// handling, since a base-temperature regression here would silently degrade detection
+// quality with no error anywhere to catch it.
+{
+    string? capturedTemperature = null;
+    var schema = new System.Text.Json.Nodes.JsonObject { ["type"] = "object" };
+    var handler = new FakeRoutedHttpMessageHandler(request =>
+    {
+        capturedTemperature = System.Text.Json.Nodes.JsonNode.Parse(
+            request.Content!.ReadAsStringAsync().Result)!["temperature"]!.ToString();
+        return new HttpResponseMessage(System.Net.HttpStatusCode.OK)
+        {
+            Content = new StringContent(
+                """{"choices":[{"message":{"content":"{}"}}],"usage":{"prompt_tokens":1,"completion_tokens":1}}""")
+        };
+    });
+    var httpClient = new HttpClient(handler) { BaseAddress = new Uri("http://127.0.0.1:8002/v1/") };
+    var vllmClient = new VllmModelClient(
+        httpClient, new OpenAIProcessingOptions(), NullLogger<VllmModelClient>.Instance);
+
+    await vllmClient.CompleteJson(
+        "qwen3.6-27b", "some prompt", "audiochoice_scan_events", schema, CancellationToken.None);
+    Assert(
+        capturedTemperature == "0.7",
+        "The first-pass content-analysis call did not use Qwen's documented non-thinking " +
+        $"sampling temperature of 0.7. Sent: {capturedTemperature}");
+
+    await vllmClient.CompleteJson(
+        "qwen3.6-27b", "some prompt", "audiochoice_scene_verification", schema, CancellationToken.None);
+    Assert(
+        capturedTemperature == "0",
+        "A verification call's temperature was raised along with the first-pass call's -- " +
+        "Terra/Sol must stay at exactly 0 for their own reproducibility and majority vote. " +
+        $"Sent: {capturedTemperature}");
+}
+
 Console.WriteLine("AudioChoice backend contract tests passed.");
 
 static string FindMigrationsDirectory()

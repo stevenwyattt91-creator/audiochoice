@@ -258,7 +258,7 @@ public sealed class OpenAIProcessingOptions
     // candidate whose natural description ran past 80 characters. A result written under
     // the prior version may be missing a candidate this bug caused to fail outright, or may
     // reflect a checkpoint saved after a lucky retry rather than the model's real answer.
-    public string ScannerVersion { get; init; } = "6.6-schema-maxlength-fix";
+    public string ScannerVersion { get; init; } = "6.7-luna-temperature";
     /// <summary>Only jobs in this lane may be claimed by this worker instance.</summary>
     public string ProcessingLane { get; init; } = ScanProcessingLanes.AzureOpenAI;
     /// <summary>

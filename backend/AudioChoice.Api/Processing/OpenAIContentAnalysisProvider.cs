@@ -71,7 +71,15 @@ public sealed class OpenAIContentAnalysisProvider(
     // ~80th character, on every retry of the same candidate. SafeDescription already
     // truncates to 80 characters in code before anything is trusted, so the schema
     // constraint was never doing safety work; it was only breaking generation.
-    private const string BaseAnalysisPromptVersion = "5.6-schema-maxlength-fix";
+    //
+    // Bumped again: the first-pass content-analysis call now runs at temperature 0.7
+    // (Qwen's own documented non-thinking/instruct sampling value) instead of greedy
+    // decoding, to recover first-pass recall on subtler sexual-content cues lost when
+    // thinking mode was disabled (see VllmModelClient.CompleteJson's baseTemperature
+    // remarks for the real production evidence). A cached checkpoint from before this
+    // change was generated at temperature 0 and must not be silently trusted as though it
+    // came from the same sampling this version now uses.
+    private const string BaseAnalysisPromptVersion = "5.7-luna-temperature";
     // Bumped for the keyword safety net's lane isolation fix: a candidate whose window
     // happens to match a checkpoint cached under the prior version may have been built
     // before a safety-net seed's own lane existed, when it could still get coalesced into a

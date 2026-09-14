@@ -55,10 +55,34 @@ public sealed class VllmModelClient(
         // it a real one, and no fixed max_tokens value is safe against every candidate a real
         // book can produce.
         var maxTokens = options.VllmMaxTokens;
-        // 0 (greedy decoding) everywhere except a genuinely-repeated parse failure -- see
-        // that branch's own remarks for why greedy decoding is exactly what makes a bad
-        // token reproduce identically no matter how many times the same request is retried.
-        var temperature = 0.0;
+        // 0 (greedy decoding) for every verification/escalation call (Terra/Sol), which must
+        // stay reproducible for their own checkpointing and majority vote across independent
+        // calls -- except the first-pass content-analysis call itself, which gets Qwen's own
+        // documented non-thinking/instruct sampling temperature instead. Real production
+        // evidence this exists to close: disabling Qwen3.6's default reasoning (see
+        // BaseAnalysisPromptVersion's own remarks on why that was done) measurably reduced
+        // first-pass recall specifically on subtler, more ambiguous sexual-content cues --
+        // a real rescan of an already-verified book lost the bulk of its sexual-content
+        // events (627 -> 163) even though its transcript had full word timing and nothing
+        // else about the pipeline had changed. Qwen's own model card documents that its
+        // instruct/non-thinking mode was tuned and evaluated against temperature 0.7, not
+        // greedy decoding -- running it at 0 with reasoning off combines two departures from
+        // how the model was actually tuned, which a community-documented failure mode
+        // describes as producing output that is "not incorrect, just suboptimal in ways that
+        // don't surface as errors" (exactly the shape of this regression: no errors, no
+        // failures, just quietly fewer real detections). Scoped to only this one call by
+        // schemaName rather than raised everywhere: Terra and Sol's own reproducibility, and
+        // this pipeline's checkpoint-based cost control, both depend on every other call
+        // staying deterministic.
+        //
+        // Captured as its own named base rather than only assigned to `temperature`: the
+        // parse-failure retry branch further down nudges temperature upward from wherever it
+        // started, up to a small ceiling above that starting point -- a ceiling that was
+        // written assuming every call starts at exactly 0. Without this base, a retry on this
+        // one call would clamp back down toward that old absolute ceiling instead of climbing
+        // from 0.7, silently undoing this fix on the very calls that already needed help once.
+        var baseTemperature = schemaName == "audiochoice_scan_events" ? 0.7 : 0.0;
+        var temperature = baseTemperature;
 
         // Tracks the context-overflow branch's own attempt count and the input-token count
         // it was last told about. Kept separate from the ordinary retry `attempt` counter:
@@ -200,7 +224,12 @@ public sealed class VllmModelClient(
                         // doesn't need it (see the temperature reset above the retry loop)
                         // so this remains a targeted escape from a reproducible bad decode,
                         // not a general loosening of an otherwise-deterministic pipeline.
-                        temperature = Math.Min(0.4, temperature + ParseRetryTemperatureStep);
+                        // Clamped relative to baseTemperature, not to an absolute ceiling: a
+                        // call already starting above 0 (see baseTemperature's own remarks)
+                        // must keep climbing from where it started, never clamp back down
+                        // toward a ceiling sized for a base of 0.
+                        temperature = Math.Min(
+                            baseTemperature + 0.4, temperature + ParseRetryTemperatureStep);
                         maxTokens = Math.Max(
                             MinimumViableMaxTokens, maxTokens - ParseRetryTokenNudge);
 
