@@ -270,7 +270,18 @@ public sealed class OpenAIProcessingOptions
     // candidate whose natural description ran past 80 characters. A result written under
     // the prior version may be missing a candidate this bug caused to fail outright, or may
     // reflect a checkpoint saved after a lucky retry rather than the model's real answer.
-    public string ScannerVersion { get; init; } = "6.8-smaller-batches";
+    //
+    // Bumped again together with BaseAnalysisPromptVersion: sexual_kissing's own instructions
+    // said a peck on the cheek or forehead does not reach that rung, but named only those two
+    // locations and left "sustained" kisses elsewhere on the body ambiguous. A real audit of
+    // a completed scan (Red Rising) found 5 of 23 sexual_kissing events were kisses on the
+    // cheek, brow, or nose with no kiss on the mouth at all -- flagged despite the existing
+    // instruction, not because of a gap in it, but because it did not say kissing anywhere
+    // other than the mouth is categorically excluded regardless of how the narration
+    // describes it. The instruction now names every body location this pipeline has actually
+    // seen wrongly flagged and states plainly that a kiss elsewhere on the body is not sexual
+    // content at all, rather than leaving that conclusion to be inferred from two examples.
+    public string ScannerVersion { get; init; } = "6.9-mouth-only-kissing";
     /// <summary>Only jobs in this lane may be claimed by this worker instance.</summary>
     public string ProcessingLane { get; init; } = ScanProcessingLanes.AzureOpenAI;
     /// <summary>

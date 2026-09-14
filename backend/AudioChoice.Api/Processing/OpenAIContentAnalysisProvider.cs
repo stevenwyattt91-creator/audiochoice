@@ -86,7 +86,7 @@ public sealed class OpenAIContentAnalysisProvider(
     // the prior version was built from a 100-segment batch boundary that no longer exists;
     // reusing it here would silently keep serving results sliced along boundaries this
     // version was specifically changed to avoid.
-    private const string BaseAnalysisPromptVersion = "5.8-smaller-batches";
+    private const string BaseAnalysisPromptVersion = "5.9-mouth-only-kissing";
     // Bumped for the keyword safety net's lane isolation fix: a candidate whose window
     // happens to match a checkpoint cached under the prior version may have been built
     // before a safety-net seed's own lane existed, when it could still get coalesced into a
@@ -2347,14 +2347,17 @@ character imagining what might happen next. Kissing itself belongs to sexual_kis
 here, however brief the rest of the passage's tension is; everything else on this rung (biting,
 grabbing, an embrace with no kiss in it, wanting) stays exactly as it was.
 
-sexual_kissing -- a kiss, or a sustained series of kisses, that goes beyond a brief, incidental
-peck: a kiss the narration lingers on, a sustained or passionate kiss. A quick kiss goodbye, a
-peck on the cheek or forehead, or a kiss mentioned only in passing with nothing more said about
-it does not reach this rung -- that is not sexual content at all, or stays
-sexual_suggestive_dialogue if the surrounding passage is otherwise charged. Kissing is NOT
-explicit activity at any intensity: however long or passionate a kiss is described, it stays
-this rung unless the passage goes on to convey an actual sexual act beyond the kiss itself, in
-which case follow the escalation rule below.
+sexual_kissing -- a kiss, or a sustained series of kisses, on the mouth, that goes beyond a
+brief, incidental peck: a kiss the narration lingers on, a sustained or passionate kiss. This
+rung is for kissing on the mouth only. A kiss anywhere else on the body -- the cheek, forehead,
+brow, nose, hand, hair, or shoulder -- never reaches this rung, no matter how many times it is
+described, how affectionate it is, or how the narration lingers on it: a kiss on the cheek is
+not sexual content at all. Do not flag it. A quick kiss goodbye, a kiss mentioned only in
+passing with nothing more said about it, or any kiss not on the mouth stays unflagged, or stays
+sexual_suggestive_dialogue only if the surrounding passage is independently charged for other
+reasons. Kissing is NOT explicit activity at any intensity: however long or passionate a kiss on
+the mouth is described, it stays this rung unless the passage goes on to convey an actual sexual
+act beyond the kiss itself, in which case follow the escalation rule below.
 
 sexual_references -- sex spoken about rather than happening: a past encounter recalled, a crude
 joke, a comment on someone's history, an offer not taken up.
