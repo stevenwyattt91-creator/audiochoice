@@ -281,7 +281,27 @@ public sealed class OpenAIProcessingOptions
     // describes it. The instruction now names every body location this pipeline has actually
     // seen wrongly flagged and states plainly that a kiss elsewhere on the body is not sexual
     // content at all, rather than leaving that conclusion to be inferred from two examples.
-    public string ScannerVersion { get; init; } = "6.9-mouth-only-kissing";
+    //
+    // Bumped again for two fixes found by auditing a completed scan (11-22-63) against its own
+    // per-word transcript. Word snapping was already exact -- 106 of 107 sexual-content events
+    // landed on a word boundary to the hundredth of a second -- so both fixes are about what
+    // surrounds that, not the timing itself.
+    //
+    // First, identical findings are now collapsed. The first pass reports one passage several
+    // ways ("a character kisses another character", "... on the mouth", "... on the mouth.")
+    // and each phrasing became its own event, so a single four-second line produced three
+    // identical "Characters kiss" controls and roughly a third of that book's sexual-content
+    // events were redundant. A result written under the prior version carries those copies.
+    //
+    // Second, transcript seam de-duplication no longer requires the two copies to read
+    // identically. Whisper re-punctuates the overlap between chunks, so "Ditto, kind sir." and
+    // "me. Ditto, kind sir." were kept as two lines and their word timings interleaved,
+    // leaving "me. Ditto, Ditto, kind kind sir. sir." in the transcript. That doubled region is
+    // what put the one remaining audited boundary 0.36s off its word, and it was also being
+    // sent to the model twice. A transcript saved under the prior version still contains those
+    // doubled words, so a rescan alone does not fix an affected recording -- it needs
+    // re-transcribing.
+    public string ScannerVersion { get; init; } = "7.0-dedupe-events-and-seam-words";
     /// <summary>Only jobs in this lane may be claimed by this worker instance.</summary>
     public string ProcessingLane { get; init; } = ScanProcessingLanes.AzureOpenAI;
     /// <summary>

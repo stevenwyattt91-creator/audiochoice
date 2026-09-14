@@ -42,10 +42,12 @@ public static class UserFacingEventPostProcessor
                     }
                     : item).ToArray();
 
+        var deduplicated = Deduplicate(normalized);
+
         var profanityCategory = ContentTaxonomy.Mappings["profanity_mild"].CategoryID;
         var substanceCategory = ContentTaxonomy.Mappings["substance_alcohol_use"].CategoryID;
         var replacements = new Dictionary<Guid, ScanEvent>();
-        foreach (var group in normalized
+        foreach (var group in deduplicated
                      .Where(item => item.CategoryID != profanityCategory &&
                                     item.CategoryID != substanceCategory)
                      .GroupBy(item => item.CategoryID))
@@ -87,11 +89,44 @@ public static class UserFacingEventPostProcessor
             Flush();
         }
 
-        return normalized
+        return deduplicated
             .Select(item => replacements.GetValueOrDefault(item.Id, item))
             .OrderBy(item => item.StartTime)
             .ToArray();
     }
+
+    /// <summary>
+    /// Collapses findings that describe the same moment with the same control.
+    /// </summary>
+    /// <remarks>
+    /// The first pass legitimately reports one passage several ways -- "a character kisses
+    /// another character", "... on the mouth", "... on the mouth." -- and each phrasing became
+    /// its own event. Identical category, group, event and playback range means one control
+    /// over one range, so the extra copies changed nothing a listener could act on while
+    /// inflating the filter count the app displays (a real book showed three identical
+    /// "Characters kiss" entries for a single four-second line, and roughly a third of one
+    /// audit's sexual-content events were redundant this way).
+    ///
+    /// Only exact duplicates are collapsed. Two events sharing a range but sitting in
+    /// different groups -- a kiss and the suggestive dialogue around it -- remain separate,
+    /// because they are separate toggles and a listener may want one without the other.
+    ///
+    /// The survivor is chosen by highest confidence, then by StableKey ordinal so the choice
+    /// is deterministic: a rescan of the same recording must keep the same key, or a
+    /// listener's saved per-event preference would silently detach from its event.
+    /// </remarks>
+    private static ScanEvent[] Deduplicate(IReadOnlyList<ScanEvent> events) => events
+        .GroupBy(item => (
+            item.CategoryID,
+            item.GroupID,
+            item.EventID,
+            Start: Math.Round(item.StartTime, 2),
+            End: Math.Round(item.EndTime, 2)))
+        .Select(group => group
+            .OrderByDescending(item => item.Confidence)
+            .ThenBy(item => item.StableKey, StringComparer.Ordinal)
+            .First())
+        .ToArray();
 
     private static string ClusterDisplay(Guid categoryID, IReadOnlyList<ScanEvent> cluster)
     {

@@ -335,39 +335,137 @@ public sealed class ScanPipeline(
     /// means the same line is transcribed twice. Only overlapping ranges are treated as
     /// duplicates, so a line that genuinely recurs later in the book is kept.
     ///
-    /// Indexed by text rather than scanned. This ran once per completed chunk and compared
-    /// every segment against every segment kept so far, so the cost was quadratic in
-    /// transcript length and paid again on every chunk -- billions of string comparisons on a
-    /// long book, on the same host doing the transcription. Grouping by text first means each
-    /// segment is only compared against the handful that share its exact text.
+    /// Matching on exact text was not enough. Whisper does not transcribe the overlap
+    /// identically in both chunks -- it re-punctuates it, or carries a word in from just
+    /// before the boundary -- so "Ditto, kind sir." and "me. Ditto, kind sir." were treated as
+    /// two different lines and both kept. Their word timings then interleaved, and the
+    /// transcript read "me. Ditto, Ditto, kind kind sir. sir.". That doubled region is also
+    /// what put one audited filter boundary 0.36s off its word: the snap had two copies of the
+    /// same word to choose between.
+    ///
+    /// So a near-duplicate counts too, but only inside a genuine time overlap. Segments within
+    /// a chunk never overlap each other; only the seam between chunks produces that, which
+    /// makes the time-overlap requirement a strong guard against merging two lines that merely
+    /// resemble each other. When both copies survive the comparison the longer one is kept, so
+    /// a word only present in one copy is never dropped.
+    ///
+    /// Bounded rather than indexed. Comparing every segment against every segment kept so far
+    /// was quadratic and paid again on every chunk -- billions of comparisons on a long book,
+    /// on the same host doing the transcription. A 2-second seam spans only a handful of
+    /// segments, so looking back over a small window is both sufficient and cheap. End times
+    /// are not monotonic, which is why this looks back over a window instead of stopping at
+    /// the first segment that already ended.
     /// </remarks>
+    private const int DuplicateLookBackSegments = 40;
+    private const double DuplicateLookBackSeconds = 30;
+
     private static IReadOnlyList<TranscriptSegment> NormalizeSegments(
         IEnumerable<TranscriptSegment> segments)
     {
         var normalized = new List<TranscriptSegment>();
-        var keptByText = new Dictionary<string, List<TranscriptSegment>>(
-            StringComparer.OrdinalIgnoreCase);
+        var tokens = new List<string[]>();
 
         foreach (var segment in segments.OrderBy(item => item.StartTime))
         {
-            if (!keptByText.TryGetValue(segment.Text, out var sameText))
+            var segmentTokens = Tokenize(segment.Text);
+            var duplicateOf = -1;
+
+            var oldest = Math.Max(0, normalized.Count - DuplicateLookBackSegments);
+            for (var index = normalized.Count - 1; index >= oldest; index--)
             {
-                sameText = [];
-                keptByText[segment.Text] = sameText;
+                var existing = normalized[index];
+                if (existing.EndTime + DuplicateLookBackSeconds < segment.StartTime) continue;
+
+                var overlaps = existing.StartTime < segment.EndTime &&
+                               segment.StartTime < existing.EndTime;
+                if (!overlaps) continue;
+
+                if (string.Equals(existing.Text, segment.Text, StringComparison.OrdinalIgnoreCase) ||
+                    SameLine(tokens[index], segmentTokens))
+                {
+                    duplicateOf = index;
+                    break;
+                }
             }
 
-            // The whole group is scanned rather than stopping early. Segments arrive in start
-            // order but not in end order, so a long earlier copy can still overlap this one
-            // after a shorter later copy has ended. A group only ever holds the few segments
-            // sharing this exact text, so there is nothing to gain from being clever here.
-            var duplicate = sameText.Any(existing =>
-                existing.StartTime < segment.EndTime && segment.StartTime < existing.EndTime);
+            if (duplicateOf < 0)
+            {
+                normalized.Add(segment);
+                tokens.Add(segmentTokens);
+                continue;
+            }
 
-            if (duplicate) continue;
-            sameText.Add(segment);
-            normalized.Add(segment);
+            // Keep whichever copy carries more of the line, so the seam cannot lose a word.
+            if (segmentTokens.Length > tokens[duplicateOf].Length)
+            {
+                normalized[duplicateOf] = segment;
+                tokens[duplicateOf] = segmentTokens;
+            }
         }
 
         return normalized;
+    }
+
+    /// <summary>
+    /// Whether two overlapping segments are the same spoken line, allowing for the
+    /// re-punctuation and boundary word bleed that chunk overlap produces.
+    /// </summary>
+    private static bool SameLine(string[] left, string[] right)
+    {
+        if (left.Length == 0 || right.Length == 0) return false;
+
+        var (shorter, longer) = left.Length <= right.Length ? (left, right) : (right, left);
+
+        // A word or two of bleed-in from before the seam leaves the rest of the line intact and
+        // contiguous, which is the common shape of these duplicates.
+        if (ContainsRun(longer, shorter)) return true;
+
+        // Otherwise fall back to how much of the shorter copy the longer one accounts for.
+        // Deliberately high: two different lines that merely share common words must not merge.
+        var remaining = new Dictionary<string, int>(StringComparer.Ordinal);
+        foreach (var word in longer)
+            remaining[word] = remaining.GetValueOrDefault(word) + 1;
+
+        var matched = 0;
+        foreach (var word in shorter)
+        {
+            if (remaining.GetValueOrDefault(word) <= 0) continue;
+            remaining[word]--;
+            matched++;
+        }
+
+        return matched >= (int)Math.Ceiling(shorter.Length * .8);
+    }
+
+    private static bool ContainsRun(string[] longer, string[] shorter)
+    {
+        for (var start = 0; start + shorter.Length <= longer.Length; start++)
+        {
+            var found = true;
+            for (var offset = 0; offset < shorter.Length; offset++)
+            {
+                if (string.Equals(longer[start + offset], shorter[offset], StringComparison.Ordinal))
+                    continue;
+                found = false;
+                break;
+            }
+            if (found) return true;
+        }
+        return false;
+    }
+
+    private static string[] Tokenize(string text)
+    {
+        if (string.IsNullOrWhiteSpace(text)) return [];
+
+        var builder = new System.Text.StringBuilder(text.Length);
+        foreach (var character in text)
+        {
+            if (char.IsLetterOrDigit(character)) builder.Append(char.ToLowerInvariant(character));
+            else if (builder.Length > 0 && builder[^1] != ' ') builder.Append(' ');
+        }
+
+        return builder.ToString()
+            .Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
     }
 }
