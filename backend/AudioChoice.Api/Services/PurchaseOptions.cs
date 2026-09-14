@@ -38,14 +38,25 @@ public sealed class PurchaseOptions
     public IReadOnlyList<string> AppleProductIDList => Split(AppleProductIDs);
 
     /// <summary>
-    /// The App Store Server API key ID, issuer ID, and private key (.p8 contents), used to call
-    /// Apple's API for transaction history and to verify the notification signing chain against
-    /// Apple's root certificate.
+    /// The App Store Server API key ID, issuer ID, and private key (.p8 contents), for calling
+    /// Apple's App Store Server API.
     /// </summary>
     /// <remarks>
-    /// Created under App Store Connect &gt; Users and Access &gt; Integrations &gt; In-App Purchase.
-    /// The private key is a PEM-format .p8 file's contents, not a file path -- read once at startup
-    /// from configuration/secrets, never written to disk by this server.
+    /// Nothing reads these today, and in particular <b>none of them are required to verify a
+    /// purchase</b>. A StoreKit2 transaction is a JWS carrying its own certificate chain in the
+    /// <c>x5c</c> header, and <see cref="AppleJWS.VerifyAndDecode"/> establishes trust by chaining
+    /// that up to the Apple Root CA G3 it pins -- no account key participates.
+    ///
+    /// Stated plainly because assuming otherwise had a real cost: the deployment template gated
+    /// <see cref="AppleEnabled"/> on a signing key being present, so Apple verification was off in
+    /// production while the subscription was live, and every purchase was charged by Apple and then
+    /// refused here as "not yet configured".
+    ///
+    /// They stay declared for the App Store Server API -- looking up transaction history, or
+    /// checking a subscription's status without waiting for a client to submit it -- which is worth
+    /// having and does need a key. Created under App Store Connect &gt; Users and Access &gt;
+    /// Integrations &gt; In-App Purchase. The private key is a PEM-format .p8 file's contents, not a
+    /// path, and is never written to disk by this server.
     /// </remarks>
     public string AppleKeyID { get; init; } = string.Empty;
     public string AppleIssuerID { get; init; } = string.Empty;

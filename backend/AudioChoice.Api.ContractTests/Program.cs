@@ -3782,6 +3782,40 @@ Assert(
         "defines, so a normalised report could not be written.");
 }
 
+// Apple purchase verification must be on, and must not be gated on a credential nothing reads.
+//
+// This is asserted against the deployment template because that is where it went wrong and where a
+// unit test cannot reach. api.bicep gated AudioChoice__Purchases__AppleEnabled on
+// appleSigningKeyPresent, which defaults false and which the deploy workflow never passes -- so
+// verification was off in production while the subscription was live on the App Store. Apple charged
+// every subscriber and this server then refused the transaction as "not yet configured", writing no
+// entitlement and leaving them behind the paywall having paid.
+//
+// The gate was wrong on the facts: AppleJWS.VerifyAndDecode trusts a transaction by chaining its own
+// x5c certificate to the pinned Apple Root CA G3. AppleKeyID, AppleIssuerID and AppleSigningKeyPem
+// are read by nothing in this codebase.
+{
+    var bicepPath = Path.Combine(FindDeployDirectory(), "azure", "api.bicep");
+    Assert(File.Exists(bicepPath), "deploy/azure/api.bicep is missing.");
+    var bicep = File.ReadAllText(bicepPath);
+
+    Assert(
+        bicep.Contains("param applePurchasesEnabled bool = true", StringComparison.Ordinal),
+        "Apple purchase verification is no longer enabled by default, so a live subscriber would be " +
+        "charged by Apple and then refused by this server.");
+
+    Assert(
+        !bicep.Contains("applePurchasesEnabled && appleSigningKeyPresent", StringComparison.Ordinal),
+        "AudioChoice__Purchases__AppleEnabled is gated on appleSigningKeyPresent again. Nothing reads " +
+        "AppleSigningKeyPem; a StoreKit2 transaction is verified against the pinned Apple Root CA G3 " +
+        "in AppleJWS. This gate silently disabled all purchasing once already.");
+
+    Assert(
+        bicep.Contains("param applePurchasesProductIDs string = 'Monthly'", StringComparison.Ordinal),
+        "The accepted Apple product id no longer names the live subscription, so either every " +
+        "product in the bundle is accepted or the real one is refused.");
+}
+
 // A new subscription is announced once, and a renewal is not.
 //
 // This is the whole subscription-alert feature. Clients resubmit the same transaction after a
@@ -4028,6 +4062,18 @@ static string FindMigrationsDirectory()
         directory = directory.Parent;
     }
     throw new DirectoryNotFoundException("Could not locate Database/Migrations.");
+}
+
+static string FindDeployDirectory()
+{
+    var directory = new DirectoryInfo(AppContext.BaseDirectory);
+    while (directory is not null)
+    {
+        var candidate = Path.Combine(directory.FullName, "deploy");
+        if (Directory.Exists(candidate)) return candidate;
+        directory = directory.Parent;
+    }
+    throw new DirectoryNotFoundException("Could not locate deploy/.");
 }
 
 static string FindApiSourceDirectory()
