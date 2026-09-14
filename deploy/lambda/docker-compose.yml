@@ -52,22 +52,28 @@ services:
     # Doubled here with real margin instead of tuned to the exact observed failure, since a
     # longer chapter or a denser batch could need more still.
     #
-    # --max-num-seqs 12: raised from 8 after this session's own first real concurrent-batch
-    # stress test (10 books rescanning at once, real user traffic mixed in) measured actual
-    # headroom directly rather than estimating it. vLLM's own startup log reported "GPU KV
-    # cache size: 541,764 tokens, Maximum concurrency for 65,536 tokens per request: 8.27x"
-    # -- already above the prior 8 -- and live KV cache usage under that 8-way load peaked
-    # around only 31-33%, meaning most real requests use far less than the full 65,536-token
-    # budget that 8.27x figure is computed against. That same stress test surfaced a genuine
-    # cost of running at capacity: vLLM's own "input tokens counted" in a context-overflow
-    # error was observed drifting upward on identical retries under this load (see
-    # VllmModelClient.MaximumContextOverflowRetries' own remarks), and individual model calls
-    # were creeping toward AnalysisRequestTimeoutSeconds because of how deep the "Waiting"
-    # queue got behind only 8 running slots. This app's own concurrency settings below
-    # (ContentAnalysisConcurrency, SceneVerificationConcurrency, SceneEscalationConcurrency)
-    # are raised to 12 to match. Re-measure real KV cache usage and the drift/timeout
-    # symptoms above after this change before raising further -- this is a measured step,
-    # not a ceiling assumed to hold at any multiple.
+    # --max-num-seqs 12: the app's own concurrency settings below were raised to 12 to match
+    # this, on the theory that the "input tokens counted" drift observed under that load was
+    # the retry logic itself being unreliable, not evidence of a real saturation problem.
+    # That theory was wrong. Directly reproduced twice more, on two unrelated books (Fourth
+    # Wing, Red Rising), each run completely alone with no other scan job in flight: vLLM's
+    # own request log showed "Running: 12" with "Waiting: 1, Deferred: 1" recurring
+    # throughout a single solo book's own content analysis. One book's own three concurrent
+    # stages (ContentAnalysisConcurrency, SceneVerificationConcurrency,
+    # SceneEscalationConcurrency, each independently allowed up to 12 at once) was alone
+    # enough to saturate this 12-request ceiling with zero headroom for anything else,
+    # including that same job's own context-overflow retries -- which then queued behind,
+    # and were preempted by, its own sibling requests. Every preempted/deferred request's
+    # reported input-token count then climbed by a fixed +257 per retry, impossible for a
+    # real prompt token count since the retried request body is byte-for-byte identical
+    # except for max_tokens. Qwen3.6 is a hybrid Mamba/attention architecture (see this
+    # server's own startup log padding mamba page size against attention block size);
+    # changing max_tokens changes how many KV-cache blocks a request reserves, and
+    # preemption under queue pressure on a hybrid architecture is a known trigger for this
+    # exact kind of token-accounting drift. --max-num-seqs is left at 12 here -- the real
+    # fix is giving each of this app's own three concurrent stages real headroom under it,
+    # not lowering the server's own ceiling; see OpenAIProcessingOptions' own remarks on
+    # ContentAnalysisConcurrency for that half of the fix.
     #
     # Served model name matches RoutingAnalysisModelClient.IsVllmModel's check (contains
     # "qwen") and the three AudioChoice__OpenAI__*Model values below -- all three must agree
@@ -203,24 +209,20 @@ services:
       # Bounded parallel model work: independent transcript windows can run together,
       # while Terra remains the gate before any Sol escalation.
       #
-      # Raised from 2/2/2 to 8/8/8, matching vLLM's own --max-num-seqs 8 above. Real
-      # measured KV cache usage during a live scan peaked around 23% and "Running"
-      # requests never exceeded 2 at once -- these three explicit overrides were the
-      # actual reason: they silently took precedence over OpenAIProcessingOptions' own
-      # code defaults (already raised to 8/8/8) every time this container started,
-      # so raising the C# default alone never took effect until this file changed too.
-      #
-      # Raised again from 8/8/8 to 12/12/12, matching the qwen service's own --max-num-seqs
-      # raise to 12 above -- see that setting's own remarks for the real measured headroom
-      # (8.27x concurrency at vLLM's reported KV cache size, 31-33% peak usage at the old
-      # 8-way load) this is based on. Kept in lockstep with vLLM's own ceiling on purpose:
-      # raising this past what vLLM can actually run concurrently would only deepen its own
-      # internal "Waiting" queue without adding real throughput, the same failure mode that
-      # made ScanWorkerConcurrency=10 mostly queue depth rather than parallelism once vLLM's
-      # true 8-way ceiling was the real constraint underneath it.
-      AudioChoice__OpenAI__ContentAnalysisConcurrency: "12"
-      AudioChoice__OpenAI__SceneVerificationConcurrency: "12"
-      AudioChoice__OpenAI__SceneEscalationConcurrency: "12"
+      # Lowered from 12/12/12 back to 6/6/6 -- see OpenAIProcessingOptions.cs's own remarks
+      # on ContentAnalysisConcurrency for the full account. In short: 12/12/12 matched
+      # vLLM's own --max-num-seqs 12 exactly, which meant one book's three concurrent stages
+      # could alone saturate vLLM's entire request ceiling with zero headroom for anything
+      # else, including that same job's own context-overflow retries. Those retries then
+      # queued behind and were preempted by their own sibling requests, and every preempted
+      # request's reported input-token count climbed by a fixed +257 per retry -- directly
+      # reproduced on two unrelated books (Fourth Wing, Red Rising), each run completely
+      # alone. These three explicit overrides silently take precedence over
+      # OpenAIProcessingOptions' own code defaults every time this container starts, so
+      # lowering the C# default alone would not take effect until this file changed too.
+      AudioChoice__OpenAI__ContentAnalysisConcurrency: "6"
+      AudioChoice__OpenAI__SceneVerificationConcurrency: "6"
+      AudioChoice__OpenAI__SceneEscalationConcurrency: "6"
       # Review every transcript window so euphemistic sexual cues are not
       # excluded before Terra/Sol receive them.
       # Keep Whisper local, then send only high-recall candidate windows to OpenAI.

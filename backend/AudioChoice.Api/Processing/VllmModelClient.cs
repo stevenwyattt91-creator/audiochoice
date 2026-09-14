@@ -346,7 +346,27 @@ public sealed class VllmModelClient(
     /// itself adds (role markers, special tokens), so retrying at the exact reported boundary
     /// risks a second, needless overflow on the same candidate.
     /// </summary>
-    private const int TokenSafetyMargin = 256;
+    /// <remarks>
+    /// Raised from 256 after directly reproducing a real production failure twice, on two
+    /// unrelated books (Fourth Wing, Red Rising), each on a freshly restarted vLLM instance
+    /// with zero concurrent load: the exact same request body -- same input text, only
+    /// max_tokens differs between attempts -- had its reported "input tokens" figure climb by
+    /// a fixed +257 on every single retry (49537 -> 49794 -> 50051 -> ...), exhausting all of
+    /// MaximumContextOverflowRetries without ever converging. The input text cannot itself
+    /// grow between retries, so that number is not a real measurement drifting upward; it is
+    /// this server's own token accounting for one unchanged prompt disagreeing with itself.
+    /// This server's own startup log names the likely cause: Qwen3.6 is a hybrid
+    /// Mamba/attention architecture, and vLLM logs it padding the mamba page size against the
+    /// attention block size at load time. Changing max_tokens changes how many KV-cache blocks
+    /// a request reserves, and for a hybrid architecture that can shift how many tokens get
+    /// counted against this model specifically -- so the previous 256-token margin's own
+    /// correction (shrink max_tokens, retry) was the trigger re-triggering the same drift,
+    /// never a fix converging on one. A margin comfortably larger than the worst drift actually
+    /// observed (2570 tokens, accumulated over all 10 retries in both real failures) is meant to
+    /// let the very first correction absorb that drift outright, rather than needing the
+    /// iterative shrink to find a moving target.
+    /// </remarks>
+    private const int TokenSafetyMargin = 4096;
 
     /// <summary>
     /// Hard ceiling on the context-overflow branch's own retries, independent of

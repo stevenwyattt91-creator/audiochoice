@@ -14,24 +14,36 @@ public sealed class OpenAIProcessingOptions
     public int TranscriptionConcurrencyPerWorker { get; init; } = 2;
     public int TranscriptionMaximumRetries { get; init; } = 3;
     public int ScanWorkerConcurrency { get; init; } = 1;
-    // Raised from 3/3/2 to 8/8/8, matching vLLM's own --max-num-seqs 8 on the H100 box --
-    // real measured KV cache usage during a live scan peaked around 23% and "Running"
-    // requests never exceeded 2 at once, so the GPU had five to six times the concurrent
-    // capacity vLLM had already reserved sitting idle while these three stages each
-    // serialized their own work far below what the server could actually take at once.
-    // Purely a throughput change: the content, prompts, and model each request carries are
-    // identical to a request sent at the old, lower concurrency, so this does not change
-    // what is asked or how an answer is judged -- only how many independent candidates are
-    // asked about at the same time. No checkpoint version bump needed for the same reason.
+    // Lowered from 12/12/12 back to 6/6/6 after directly reproducing a real production
+    // failure on two separate, unrelated books (Fourth Wing, Red Rising), each run entirely
+    // alone with no other scan job in flight: vLLM's own request log showed "Running: 12"
+    // with "Waiting: 1, Deferred: 1" recurring throughout a single solo book's own content
+    // analysis, meaning one book's own three concurrent stages (this content-analysis pass,
+    // plus scene verification and escalation, each independently allowed up to 12 at once)
+    // was alone enough to saturate vLLM's own --max-num-seqs 12 ceiling with zero headroom
+    // left for anything else -- including this same job's own context-overflow retries,
+    // which then had to queue behind, and be preempted by, its own sibling requests. Every
+    // preempted/deferred request's reported "input tokens" count then climbed by a fixed
+    // +257 on every subsequent retry (49537 -> 49794 -> 50051 -> ...) until exhausting all
+    // 10 context-overflow retries -- impossible for a real prompt token count, since the
+    // request body sent on every retry is byte-for-byte identical except for max_tokens
+    // itself. Qwen3.6 is a hybrid Mamba/attention architecture (see this server's own
+    // startup log padding mamba page size against attention block size); changing
+    // max_tokens changes how many KV-cache blocks a request reserves, and preemption under
+    // queue pressure on a hybrid architecture is a known trigger for exactly this kind of
+    // token-accounting drift. The prior 12/12/12 value was raised against KV cache usage
+    // measured with none of Luna's second sexual-content vote, Terra, or Sol actually
+    // overlapping in time the way they do once a whole book's batches are in flight
+    // together -- that measurement no longer describes what this pipeline actually asks of
+    // vLLM at once. 6 leaves each of these three stages, even if all three overlap on the
+    // same book at once, room to stay under vLLM's own 12-request ceiling with margin for
+    // this job's own retries, rather than exactly matching it with none.
     // Kept in step with deploy/lambda/docker-compose.yml's own explicit overrides for the
-    // Lambda scanner container, which currently set these to 12 to match vLLM's own
-    // --max-num-seqs 12 there -- see that file's own remarks for the real measured GPU
-    // headroom this was raised against. Raising only this default without also raising the
-    // compose file's override (or vice versa) silently does nothing on that container: the
-    // compose environment values always take precedence over these when both are present.
-    public int ContentAnalysisConcurrency { get; init; } = 12;
-    public int SceneVerificationConcurrency { get; init; } = 12;
-    public int SceneEscalationConcurrency { get; init; } = 12;
+    // Lambda scanner container -- the compose environment values always take precedence
+    // over these when both are present, so both must move together.
+    public int ContentAnalysisConcurrency { get; init; } = 6;
+    public int SceneVerificationConcurrency { get; init; } = 6;
+    public int SceneEscalationConcurrency { get; init; } = 6;
     public string FasterWhisperModel { get; init; } = "large-v3-turbo";
     public string FasterWhisperFallbackModel { get; init; } = "large-v3";
     /// <summary>
