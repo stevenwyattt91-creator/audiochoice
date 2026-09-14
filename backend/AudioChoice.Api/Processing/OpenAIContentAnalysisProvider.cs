@@ -2040,12 +2040,18 @@ Candidates:
             var payload = await LoadSceneVerificationCheckpoint(checkpointPath, cancellationToken);
             if (payload is null)
             {
-                // Temporary diagnostic: a real production candidate overflowed the model's
-                // context window at every max_tokens down to the configured floor even after
-                // MaximumCoalescedSceneSpanSeconds was added, meaning the real cause of that
-                // candidate's own size is still unconfirmed. Logged unconditionally (not only
-                // on failure) so the next occurrence names the actual candidate rather than
-                // requiring another blind retry.
+                // Diagnostic left in place, not just for the incident that prompted it: a
+                // real production candidate (ACOTAR Part 2) reported the exact same
+                // context-length overflow, with the exact same claimed input-token count,
+                // on every retry against three different things that should have mattered --
+                // a smaller max_tokens, a longer wait, and a fully restarted vLLM process --
+                // while its own real content was an ordinary 13,512-character passage with
+                // no unusual characters, nowhere close to large enough to explain the
+                // claimed figure. That rules out a genuinely oversized prompt, a transient
+                // queue, and a stale/corrupted server-side cache as the cause; what remains
+                // is a real vLLM bug tied to this exact request's content that this
+                // pipeline cannot diagnose or fix from the client side tonight. Logged
+                // unconditionally so a repeat is identifiable without another blind retry.
                 var totalSegments = batch.Sum(item => item.Segments.Count);
                 var approximateCharacters = batch.Sum(item =>
                     item.Segments.Sum(segment => segment.Text.Length));
@@ -2056,7 +2062,30 @@ Candidates:
                     index + 1, batch.Count, totalSegments, approximateCharacters,
                     batch.Min(item => item.ProposedStartTime),
                     batch.Max(item => item.ProposedEndTime));
-                payload = await VerifySceneBatch(batch, model, cancellationToken);
+                try
+                {
+                    payload = await VerifySceneBatch(batch, model, cancellationToken);
+                }
+                catch (HttpRequestException error) when (
+                    error.Message.Contains("context-overflow retries") ||
+                    error.Message.Contains("minimum viable max_tokens"))
+                {
+                    // A real, reproducible vLLM-side failure (see the remarks above) must
+                    // not fail the entire scan job over one candidate this pipeline has
+                    // already given every reasonable chance to succeed. An unverified
+                    // candidate is dropped rather than reported: Terra's confirmation is
+                    // what lets a proposed scene reach a listener as a filter event at all
+                    // (see VerifyCompleteSexualScenes' own remarks), so a candidate that
+                    // never got a real verification answer must be treated the same as one
+                    // Terra rejected, not smuggled through as accepted.
+                    logger.LogError(
+                        error,
+                        "Scene verification batch {BatchNumber} could not be completed " +
+                        "after exhausting every retry; this candidate is dropped rather " +
+                        "than failing the whole scan job.",
+                        index + 1);
+                    payload = new SceneVerificationPayload([]);
+                }
                 await SaveSceneVerificationCheckpoint(checkpointPath, payload, cancellationToken);
             }
             else
