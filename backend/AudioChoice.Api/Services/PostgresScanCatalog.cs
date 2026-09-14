@@ -198,15 +198,34 @@ public sealed class PostgresScanCatalog(
 
         if (ownerUserID == Guid.Empty)
         {
-            using var owner = new NpgsqlCommand("""
+            using (var owner = new NpgsqlCommand("""
                 select s.user_id
                 from scan_jobs j
                 join scan_job_subscribers s on s.scan_job_id = j.id
                 where j.edition_id = $1
                 order by j.updated_at desc limit 1;
-                """, connection, transaction);
-            owner.Parameters.AddWithValue(editionID.Value);
-            ownerUserID = owner.ExecuteScalar() as Guid? ?? Guid.Empty;
+                """, connection, transaction))
+            {
+                owner.Parameters.AddWithValue(editionID.Value);
+                ownerUserID = owner.ExecuteScalar() as Guid? ?? Guid.Empty;
+            }
+
+            // An edition that was uploaded but never scanned has no job to inherit an owner
+            // from. That is exactly a book pre-seeded for the Explore catalogue: its audio
+            // arrived and a transcript was stored, but no listener ever queued a scan, so
+            // scan_jobs is empty while scan_uploads is not. The upload names a real account,
+            // so use it rather than refusing to scan a book nobody has imported yet.
+            if (ownerUserID == Guid.Empty)
+            {
+                using var uploadOwner = new NpgsqlCommand("""
+                    select owner_user_id from scan_uploads
+                    where edition_id = $1
+                    order by created_at desc limit 1;
+                    """, connection, transaction);
+                uploadOwner.Parameters.AddWithValue(editionID.Value);
+                ownerUserID = uploadOwner.ExecuteScalar() as Guid? ?? Guid.Empty;
+            }
+
             if (ownerUserID == Guid.Empty) return null;
         }
 
@@ -231,6 +250,22 @@ public sealed class PostgresScanCatalog(
             source.Parameters.AddWithValue(ownerUserID);
             uploadID = source.ExecuteScalar() as Guid?;
         }
+
+        // The pre-seeded case again: scan_jobs.upload_id is not null, and with no earlier job
+        // to borrow one from the edition's own upload row is the only real value available.
+        // Reusing it keeps the foreign key honest instead of inventing an upload.
+        if (uploadID is null)
+        {
+            using var sourceUpload = new NpgsqlCommand("""
+                select id from scan_uploads
+                where edition_id = $1 and owner_user_id = $2
+                order by created_at desc limit 1;
+                """, connection, transaction);
+            sourceUpload.Parameters.AddWithValue(editionID.Value);
+            sourceUpload.Parameters.AddWithValue(ownerUserID);
+            uploadID = sourceUpload.ExecuteScalar() as Guid?;
+        }
+
         if (uploadID is null) return null;
 
         var id = Guid.NewGuid();

@@ -253,6 +253,19 @@ public sealed class InMemoryScanCatalog : IScanCatalog
                 .OrderByDescending(job => job.ID)
                 .Select(job => job.OwnerUserID)
                 .FirstOrDefault();
+
+            // Matches PostgresScanCatalog: an edition pre-seeded for the Explore catalogue has
+            // an upload and a stored transcript but no job, so its upload names the only real
+            // owner there is.
+            if (ownerUserID == Guid.Empty)
+            {
+                ownerUserID = _uploads.Values
+                    .Where(upload => FingerprintKey(upload.Fingerprint) == key)
+                    .OrderByDescending(upload => upload.ID)
+                    .Select(upload => upload.OwnerUserID)
+                    .FirstOrDefault();
+            }
+
             if (ownerUserID == Guid.Empty) return null;
         }
 
@@ -268,10 +281,19 @@ public sealed class InMemoryScanCatalog : IScanCatalog
                 CanAccessJob(job.ID, ownerUserID))
             .OrderByDescending(job => job.ID)
             .FirstOrDefault();
-        if (source is null) return null;
+
+        // With no earlier job to borrow an upload from, the edition's own upload is the real
+        // one to reuse, so a pre-seeded book can be scanned before anyone has imported it.
+        var uploadID = source?.UploadID ?? _uploads.Values
+            .Where(upload => FingerprintKey(upload.Fingerprint) == key &&
+                upload.OwnerUserID == ownerUserID)
+            .OrderByDescending(upload => upload.ID)
+            .Select(upload => (Guid?)upload.ID)
+            .FirstOrDefault();
+        if (uploadID is null) return null;
 
         var job = new ScanJobRecord(
-            Guid.NewGuid(), ownerUserID, source.UploadID,
+            Guid.NewGuid(), ownerUserID, uploadID.Value,
             fingerprint, CloudScanStatus.Queued, ProcessingLane: processingLane);
         _jobs[job.ID] = job;
         AddSubscriber(job.ID, ownerUserID);
