@@ -23,9 +23,15 @@ public sealed class OpenAIProcessingOptions
     // identical to a request sent at the old, lower concurrency, so this does not change
     // what is asked or how an answer is judged -- only how many independent candidates are
     // asked about at the same time. No checkpoint version bump needed for the same reason.
-    public int ContentAnalysisConcurrency { get; init; } = 8;
-    public int SceneVerificationConcurrency { get; init; } = 8;
-    public int SceneEscalationConcurrency { get; init; } = 8;
+    // Kept in step with deploy/lambda/docker-compose.yml's own explicit overrides for the
+    // Lambda scanner container, which currently set these to 12 to match vLLM's own
+    // --max-num-seqs 12 there -- see that file's own remarks for the real measured GPU
+    // headroom this was raised against. Raising only this default without also raising the
+    // compose file's override (or vice versa) silently does nothing on that container: the
+    // compose environment values always take precedence over these when both are present.
+    public int ContentAnalysisConcurrency { get; init; } = 12;
+    public int SceneVerificationConcurrency { get; init; } = 12;
+    public int SceneEscalationConcurrency { get; init; } = 12;
     public string FasterWhisperModel { get; init; } = "large-v3-turbo";
     public string FasterWhisperFallbackModel { get; init; } = "large-v3";
     /// <summary>

@@ -52,15 +52,22 @@ services:
     # Doubled here with real margin instead of tuned to the exact observed failure, since a
     # longer chapter or a denser batch could need more still.
     #
-    # --max-num-seqs 8: lowered back from AWQ's 16 -- FP8's larger weight footprint leaves
-    # meaningfully less KV cache room for concurrent Mamba cache blocks (see the GPU budget
-    # remarks above). This app's own concurrency settings below (ContentAnalysisConcurrency,
-    # SceneVerificationConcurrency, SceneEscalationConcurrency) are now each raised to 8 to
-    # match this ceiling directly, after measuring real production KV cache usage peak
-    # around only 23% while "Running" requests never exceeded 2 at the old 2/2/2 setting --
-    # the GPU had far more concurrent capacity reserved than the app was ever asking for.
-    # Raise this value further only after confirming the real available-block count logged
-    # at startup.
+    # --max-num-seqs 12: raised from 8 after this session's own first real concurrent-batch
+    # stress test (10 books rescanning at once, real user traffic mixed in) measured actual
+    # headroom directly rather than estimating it. vLLM's own startup log reported "GPU KV
+    # cache size: 541,764 tokens, Maximum concurrency for 65,536 tokens per request: 8.27x"
+    # -- already above the prior 8 -- and live KV cache usage under that 8-way load peaked
+    # around only 31-33%, meaning most real requests use far less than the full 65,536-token
+    # budget that 8.27x figure is computed against. That same stress test surfaced a genuine
+    # cost of running at capacity: vLLM's own "input tokens counted" in a context-overflow
+    # error was observed drifting upward on identical retries under this load (see
+    # VllmModelClient.MaximumContextOverflowRetries' own remarks), and individual model calls
+    # were creeping toward AnalysisRequestTimeoutSeconds because of how deep the "Waiting"
+    # queue got behind only 8 running slots. This app's own concurrency settings below
+    # (ContentAnalysisConcurrency, SceneVerificationConcurrency, SceneEscalationConcurrency)
+    # are raised to 12 to match. Re-measure real KV cache usage and the drift/timeout
+    # symptoms above after this change before raising further -- this is a measured step,
+    # not a ceiling assumed to hold at any multiple.
     #
     # Served model name matches RoutingAnalysisModelClient.IsVllmModel's check (contains
     # "qwen") and the three AudioChoice__OpenAI__*Model values below -- all three must agree
@@ -70,7 +77,7 @@ services:
       --port 8002
       --max-model-len 65536
       --gpu-memory-utilization 0.85
-      --max-num-seqs 8
+      --max-num-seqs 12
       --served-model-name qwen3.6-27b
     deploy:
       resources:
@@ -202,9 +209,18 @@ services:
       # actual reason: they silently took precedence over OpenAIProcessingOptions' own
       # code defaults (already raised to 8/8/8) every time this container started,
       # so raising the C# default alone never took effect until this file changed too.
-      AudioChoice__OpenAI__ContentAnalysisConcurrency: "8"
-      AudioChoice__OpenAI__SceneVerificationConcurrency: "8"
-      AudioChoice__OpenAI__SceneEscalationConcurrency: "8"
+      #
+      # Raised again from 8/8/8 to 12/12/12, matching the qwen service's own --max-num-seqs
+      # raise to 12 above -- see that setting's own remarks for the real measured headroom
+      # (8.27x concurrency at vLLM's reported KV cache size, 31-33% peak usage at the old
+      # 8-way load) this is based on. Kept in lockstep with vLLM's own ceiling on purpose:
+      # raising this past what vLLM can actually run concurrently would only deepen its own
+      # internal "Waiting" queue without adding real throughput, the same failure mode that
+      # made ScanWorkerConcurrency=10 mostly queue depth rather than parallelism once vLLM's
+      # true 8-way ceiling was the real constraint underneath it.
+      AudioChoice__OpenAI__ContentAnalysisConcurrency: "12"
+      AudioChoice__OpenAI__SceneVerificationConcurrency: "12"
+      AudioChoice__OpenAI__SceneEscalationConcurrency: "12"
       # Review every transcript window so euphemistic sexual cues are not
       # excluded before Terra/Sol receive them.
       # Keep Whisper local, then send only high-recall candidate windows to OpenAI.
