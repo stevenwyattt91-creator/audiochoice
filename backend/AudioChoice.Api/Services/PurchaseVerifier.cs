@@ -78,7 +78,14 @@ public sealed class PurchaseVerifier(
             Source: "apple",
             ExpiresAt: expiresAt,
             ExternalReference: transaction.OriginalTransactionID ?? transaction.TransactionID));
-        return Task.FromResult(new PurchaseVerificationResult(true, access, null));
+        return Task.FromResult(new PurchaseVerificationResult(true, access, null,
+            new VerifiedPurchaseDetail(
+                Store: "Apple App Store",
+                ProductID: transaction.ProductID,
+                OfferIdentifier: transaction.OfferIdentifier,
+                OfferDescription: transaction.OfferDescription,
+                Storefront: transaction.Storefront,
+                ExpiresAt: expiresAt)));
     }
 
     public async Task<PurchaseVerificationResult> VerifyGoogle(
@@ -131,7 +138,18 @@ public sealed class PurchaseVerifier(
             Source: "google",
             ExpiresAt: subscription.ExpiresAt,
             ExternalReference: subscription.OrderID ?? request.PurchaseToken));
-        return new PurchaseVerificationResult(true, access, null);
+        // No offer or storefront reported: the Play Developer API carries an offer id on the
+        // subscription's line items, which GooglePlayClient does not read today. Left null rather
+        // than guessed, so an alert never implies a full-price purchase was discounted or the
+        // reverse.
+        return new PurchaseVerificationResult(true, access, null,
+            new VerifiedPurchaseDetail(
+                Store: "Google Play",
+                ProductID: subscription.ProductID,
+                OfferIdentifier: null,
+                OfferDescription: null,
+                Storefront: null,
+                ExpiresAt: subscription.ExpiresAt));
     }
 
     private sealed record AppleTransactionPayload(
@@ -140,11 +158,33 @@ public sealed class PurchaseVerifier(
         [property: JsonPropertyName("bundleId")] string? BundleID,
         [property: JsonPropertyName("productId")] string? ProductID,
         [property: JsonPropertyName("expiresDate")] long? ExpiresDateMillis,
-        [property: JsonPropertyName("revocationDate")] long? RevocationDateMillis)
+        [property: JsonPropertyName("revocationDate")] long? RevocationDateMillis,
+        /// <summary>
+        /// The offer this purchase was made under, when there was one -- for an offer code, the code
+        /// itself. Absent on a purchase at the standard price.
+        /// </summary>
+        [property: JsonPropertyName("offerIdentifier")] string? OfferIdentifier = null,
+        [property: JsonPropertyName("offerType")] int? OfferType = null,
+        [property: JsonPropertyName("storefront")] string? Storefront = null)
     {
         public DateTimeOffset? ExpiresDate => ExpiresDateMillis is { } millis
             ? DateTimeOffset.FromUnixTimeMilliseconds(millis) : null;
         public DateTimeOffset? RevocationDate => RevocationDateMillis is { } millis
             ? DateTimeOffset.FromUnixTimeMilliseconds(millis) : null;
+
+        /// <summary>
+        /// Apple's numeric offer type, named. Reported rather than interpreted: an unrecognised
+        /// value is passed through as itself instead of being flattened into "none", because the
+        /// point of this field is telling a discounted purchase apart from a full-price one.
+        /// </summary>
+        public string? OfferDescription => OfferType switch
+        {
+            null => null,
+            1 => "introductory offer",
+            2 => "promotional offer",
+            3 => "offer code",
+            4 => "win-back offer",
+            var other => $"offer type {other}"
+        };
     }
 }

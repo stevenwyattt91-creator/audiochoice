@@ -40,6 +40,66 @@ public sealed class TransactionalEmailOptions
     /// since every other alert (a new catalog scan completing) has no reason to move with it.
     /// </remarks>
     public string FilterReportAddress { get; init; } = "steven.wyatt@audiochoiceapp.com";
+
+    /// <summary>
+    /// Where a new paid subscription is announced, separately from <see cref="AlertAddress"/>.
+    /// </summary>
+    /// <remarks>
+    /// Its own setting for the same reason <see cref="FilterReportAddress"/> is: this one wants a
+    /// person, not an operational inbox, and it is the alert most likely to want repointing later
+    /// without dragging scan alerts along with it.
+    /// </remarks>
+    public string SubscriptionAlertAddress { get; init; } = "steven.wyatt@audiochoiceapp.com";
+}
+
+/// <summary>
+/// What a newly verified subscription is worth telling someone about.
+/// </summary>
+/// <remarks>
+/// Assembled at the endpoint rather than inside the email sender, because the pieces come from three
+/// places: the signed-in account, the store's own signed payload, and the entitlement that was just
+/// written. Passing a record keeps the sender free of all three.
+/// </remarks>
+public sealed record SubscriptionAlert(
+    string Store,
+    string AccountEmail,
+    string AccountDisplayName,
+    Guid AccountID,
+    string? ProductID,
+    /// <summary>
+    /// The offer code or promotional offer the purchase was made under, when there was one. This is
+    /// the field that answers whether an influencer's code is actually being redeemed.
+    /// </summary>
+    string? OfferIdentifier,
+    string? OfferDescription,
+    string? Storefront,
+    DateTimeOffset? ExpiresAt);
+
+/// <summary>
+/// Decides whether a verified purchase is worth announcing.
+/// </summary>
+/// <remarks>
+/// Its own type purely so this is testable. The rule is the entire feature: clients submit a
+/// transaction after a purchase, on every Restore Purchases, and on every
+/// <c>Transaction.updates</c> delivery -- which includes each renewal and any relaunch carrying an
+/// unfinished transaction. Announcing per submission would mean an email every month per subscriber
+/// and several the first day, which is indistinguishable from broken.
+/// </remarks>
+public static class SubscriptionAnnouncements
+{
+    /// <param name="accessBeforeVerifying">
+    /// The account's access read <em>before</em> the purchase was verified. Reading it afterwards
+    /// would always show an active paid plan and the answer would always be no.
+    /// </param>
+    public static bool ShouldAnnounce(AccountAccessResponse accessBeforeVerifying, bool verified)
+    {
+        if (!verified) return false;
+        // Only the paid plan counts as "already subscribed". A founder is active on a complimentary
+        // plan, and a founder who pays anyway is precisely the case worth hearing about. An expired
+        // premium row is not active, so a lapsed subscriber coming back announces again.
+        return !(accessBeforeVerifying.IsActive &&
+            string.Equals(accessBeforeVerifying.Plan, AccountPlans.Premium, StringComparison.OrdinalIgnoreCase));
+    }
 }
 
 public interface ITransactionalEmailSender
@@ -67,6 +127,13 @@ public interface ITransactionalEmailSender
     /// </summary>
     Task SendFilterReportAlert(
         FilterReport report,
+        CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Announces a new paid subscription, once, at the moment access is first granted.
+    /// </summary>
+    Task SendSubscriptionAlert(
+        SubscriptionAlert alert,
         CancellationToken cancellationToken);
 
     Task SendNewCatalogScanAlert(
@@ -99,6 +166,10 @@ public sealed class DisabledTransactionalEmailSender : ITransactionalEmailSender
 
     public Task SendFilterReportAlert(
         FilterReport report,
+        CancellationToken cancellationToken) => Task.CompletedTask;
+
+    public Task SendSubscriptionAlert(
+        SubscriptionAlert alert,
         CancellationToken cancellationToken) => Task.CompletedTask;
 
     public Task SendNewCatalogScanAlert(
@@ -223,6 +294,41 @@ public sealed class ResendTransactionalEmailSender(
         return Send(
             options.FilterReportAddress,
             $"Filter report · {report.Fingerprint.WorkTitle ?? report.Fingerprint.Sha256[..12]}",
+            text,
+            options.ReplyToAddress,
+            cancellationToken);
+    }
+
+    public Task SendSubscriptionAlert(
+        SubscriptionAlert alert,
+        CancellationToken cancellationToken)
+    {
+        var offer = alert.OfferIdentifier is { Length: > 0 } identifier
+            ? $"{identifier}{(alert.OfferDescription is { Length: > 0 } kind ? $" ({kind})" : "")}"
+            : "None -- paid the standard price";
+
+        var text = $"""
+            Someone just subscribed to AudioChoice.
+
+            Store: {alert.Store}
+            Product: {alert.ProductID ?? "Not reported"}
+            Offer used: {offer}
+            Storefront: {alert.Storefront ?? "Not reported"}
+            Renews/expires: {(alert.ExpiresAt is { } expiry ? expiry.ToString("u") : "Not reported")}
+
+            Account: {alert.AccountDisplayName} <{alert.AccountEmail}>
+            Account ID: {alert.AccountID}
+
+            Sent once, when access is first granted to this account. A renewal does not send
+            another, and neither does the same subscription being re-submitted from a second
+            device or after a reinstall.
+            """;
+
+        return Send(
+            options.SubscriptionAlertAddress,
+            alert.OfferIdentifier is { Length: > 0 } code
+                ? $"New AudioChoice subscriber · {code}"
+                : "New AudioChoice subscriber",
             text,
             options.ReplyToAddress,
             cancellationToken);
