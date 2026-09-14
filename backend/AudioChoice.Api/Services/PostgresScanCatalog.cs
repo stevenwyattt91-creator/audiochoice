@@ -9,9 +9,17 @@ namespace AudioChoice.Api.Services;
 /// entry link to an exact Audible listing rather than a search. Signatures are reported by
 /// clients and held outside the database, so they cannot be joined in SQL.
 /// </param>
+/// <param name="editionAliases">
+/// Lets <see cref="UpsertEdition"/> resolve a converted or re-tagged copy of an already
+/// catalogued recording to that recording's existing edition row, and remember the link,
+/// instead of always creating a second edition for bytes that happen to differ from the
+/// first upload's. See that method's own remarks for why this check has to live here and
+/// not only in <see cref="EditionResolver"/>.
+/// </param>
 public sealed class PostgresScanCatalog(
     NpgsqlDataSource dataSource,
-    IEditionSignatureStore editionSignatures) : IScanCatalog
+    IEditionSignatureStore editionSignatures,
+    IEditionAliasStore editionAliases) : IScanCatalog
 {
     private const string FingerprintSelect = """
         e.fingerprint_version, e.sha256, e.file_size, e.duration_seconds,
@@ -829,6 +837,39 @@ public sealed class PostgresScanCatalog(
         NpgsqlConnection connection, NpgsqlTransaction transaction, BookFingerprint value)
     {
         value = EditionTitleFormatter.Canonicalize(value);
+
+        // Resolved against every other fingerprint this catalog already knows about,
+        // before ever inserting a new row -- not just an exact sha256+size match, which
+        // is all the `on conflict` below can ever catch. EditionResolver.FindResult
+        // already does exactly this same evidence check (retail identifier, or >= 8
+        // matching chapter marks within 2 seconds -- both robust to an AAX-to-M4B
+        // conversion, a re-encode, or a re-tag, none of which move a chapter mark or
+        // change a retail identifier even though every one of them changes sha256 and
+        // file size outright) to reuse an existing *filter result* for a converted copy
+        // of an already-scanned book. That check ran only after a new edition, upload,
+        // and transcript already existed for the new bytes -- by the time it could help,
+        // the duplicate it exists to prevent had already been created. Real production
+        // duplicates were confirmed this way: the same ACOTAR/ACOMAF audiobooks, uploaded
+        // more than once from different sources (Audible vs. GraphicAudio, or an
+        // AAX-derived conversion vs. a native M4B), each produced a second, third, or
+        // fourth audiobook_editions row -- a second transcript paid for and a second scan
+        // run, for audio this pipeline had already processed once. Running the same
+        // evidence check here, before the insert, means a converted or re-tagged copy
+        // reuses the first upload's own edition id outright: one transcript, one scan
+        // result, and one Explore listing no matter how many different sources or formats
+        // a listener's copy came from.
+        //
+        // Deliberately reuses EditionMatch's own conservative bar rather than a looser
+        // one: title-and-author similarity alone is exactly as good at describing two
+        // different straight-vs-dramatized editions, or two different translations, as it
+        // is at describing the same recording twice, and merging two different recordings
+        // under one edition id would misattribute one recording's transcript and filter
+        // timings to the other's audio outright -- the same failure FindResult's own
+        // remarks already warn against, just one step earlier in the pipeline.
+        var resolvedEditionID = ResolveExistingEdition(
+            connection, transaction, value, editionSignatures, editionAliases);
+        if (resolvedEditionID is { } existingEditionID) return existingEditionID;
+
         // Checked here, rather than only in the read path, so the title stored for a brand
         // new edition already reads correctly the first time an administrator lists it --
         // a signature reported after the file was first seen (or one this exact recording
@@ -859,6 +900,63 @@ public sealed class PostgresScanCatalog(
         AddNullable(command, value.PartNumber);
         AddNullable(command, value.TotalParts);
         return (Guid)(command.ExecuteScalar() ?? throw new InvalidOperationException());
+    }
+
+    /// <summary>
+    /// Finds an existing edition that the same conservative evidence
+    /// <see cref="EditionResolver.FindResult"/> already trusts would treat as this same
+    /// recording, so a converted or re-tagged upload reuses that edition's row instead of
+    /// creating a new one. Returns null on any exact match too, letting the caller's own
+    /// <c>on conflict</c> upsert handle that ordinary case exactly as before.
+    /// </summary>
+    internal static Guid? ResolveExistingEdition(
+        NpgsqlConnection connection, NpgsqlTransaction transaction, BookFingerprint value,
+        IEditionSignatureStore editionSignatures, IEditionAliasStore editionAliases)
+    {
+        if (FindEditionID(connection, transaction, value) is { } exactEditionID)
+        {
+            return exactEditionID;
+        }
+
+        var signature = editionSignatures.Find(value);
+        var hasIdentifier = !string.IsNullOrWhiteSpace(signature?.ProductIdentifier);
+        var hasStructure = signature?.ChapterOffsetSeconds is { Count: >= 8 };
+        // Same bar FindResult itself requires: metadata similarity alone (a shared title
+        // and author) is never enough on its own to merge two edition rows, only a retail
+        // identifier or a chapter structure specific enough to identify one recording.
+        if (!hasIdentifier && !hasStructure) return null;
+
+        using var command = new NpgsqlCommand($"""
+            select id, {FingerprintSelect} from audiobook_editions e;
+            """, connection, transaction);
+        using var reader = command.ExecuteReader();
+        var candidates = new List<(Guid ID, BookFingerprint Fingerprint)>();
+        while (reader.Read())
+        {
+            candidates.Add((reader.GetGuid(0), ReadFingerprint(reader, 1)));
+        }
+        reader.Close();
+
+        foreach (var (candidateID, candidateFingerprint) in candidates)
+        {
+            var candidateSignature = editionSignatures.Find(candidateFingerprint);
+            var identifiersAgree = hasIdentifier &&
+                !string.IsNullOrWhiteSpace(candidateSignature?.ProductIdentifier) &&
+                EditionMatch.SameRecording(value, candidateFingerprint, signature, candidateSignature);
+            var structureAgrees =
+                EditionMatch.ChapterStructureIdentifies(signature, candidateSignature) &&
+                EditionMatch.SameRuntime(value, candidateFingerprint) &&
+                EditionMatch.SameFileKind(value, candidateFingerprint);
+            if (!identifiersAgree && !structureAgrees) continue;
+
+            // Remembered the same way EditionResolver.FindResult already remembers a
+            // match it found -- so a repeat upload of these exact bytes takes the fast
+            // exact-key path above next time, rather than re-running this scan again.
+            editionAliases.Link(value, candidateFingerprint);
+            return candidateID;
+        }
+
+        return null;
     }
 
     private static Guid? FindEditionID(

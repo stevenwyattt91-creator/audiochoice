@@ -44,16 +44,23 @@ def ffprobe_duration(path: str) -> float:
 
 
 def ffprobe_tags(path: str) -> dict[str, str]:
-    """Reads embedded title/artist/album_artist tags, so a properly-tagged drop-folder
-    file gets a real work title and author rather than a bare filename with no author --
-    the latter is exactly what Explore's own publishability check treats as "probably
-    guessed from a filename" and silently withholds from listeners. Every file checked
-    from a real drop-folder batch carried at least an artist tag even when title was
-    missing, so this is worth reading before falling back to the filename."""
+    """Reads embedded title/artist/album_artist/ASIN-style tags, so a properly-tagged
+    drop-folder file gets a real work title and author rather than a bare filename with
+    no author -- the latter is exactly what Explore's own publishability check treats as
+    "probably guessed from a filename" and silently withholds from listeners. Every file
+    checked from a real drop-folder batch carried at least an artist tag even when title
+    was missing, so this is worth reading before falling back to the filename.
+
+    Also reads whatever retail-product-identifier tag the source actually carries. Audible
+    downloads (and AAX-derived conversions) commonly carry it as a bare "asin" tag; some
+    other pipelines write it into a free-text "comment" field instead. Both are read here
+    so downstream code has one place to look, regardless of which container produced the
+    file -- see EditionMatch.SameRecording's own remarks on why a retail identifier is the
+    strongest same-recording evidence available."""
     try:
         out = subprocess.check_output([
             "ffprobe", "-v", "error", "-show_entries",
-            "format_tags=title,artist,album_artist",
+            "format_tags=title,artist,album_artist,asin,comment",
             "-of", "default=noprint_wrappers=1", path,
         ], stderr=subprocess.DEVNULL).decode("utf-8", errors="replace")
     except subprocess.CalledProcessError:
@@ -64,6 +71,66 @@ def ffprobe_tags(path: str) -> dict[str, str]:
             key, _, value = line[4:].partition("=")
             tags[key.strip()] = value.strip()
     return tags
+
+
+def ffprobe_chapters(path: str) -> list[int]:
+    """Reads chapter start offsets, rounded to whole seconds.
+
+    This is the one identity signal that survives an AAX-to-M4B conversion, a re-encode,
+    or a re-tag intact: rewrapping a container does not move chapter marks, while it
+    always changes the file's sha256 and almost always its file size. Reported to the
+    server as EditionSignature.ChapterOffsetSeconds, which EditionMatch.ChapterStructureIdentifies
+    already treats as decisive (>= 8 marks, matching count, each agreeing within 2 seconds)
+    -- that matching logic already existed and was already used to resolve a *transcript* or
+    *filter result* for a re-encoded file the server had already scanned once before under a
+    different fingerprint. What this file was missing was ever reading chapters here, at
+    ingest, before that upload -- so a converted copy of a book this pipeline had already
+    scanned always created a second edition, a second transcript, and a second (potentially
+    worse) scan rather than being recognized as the same recording up front.
+    """
+    try:
+        out = subprocess.check_output([
+            "ffprobe", "-v", "error", "-show_chapters",
+            "-of", "json", path,
+        ], stderr=subprocess.DEVNULL).decode("utf-8", errors="replace")
+    except subprocess.CalledProcessError:
+        return []
+    try:
+        data = json.loads(out)
+    except json.JSONDecodeError:
+        return []
+    offsets: list[int] = []
+    for chapter in data.get("chapters", []):
+        start = chapter.get("start_time")
+        if start is None:
+            continue
+        try:
+            offsets.append(round(float(start)))
+        except (TypeError, ValueError):
+            continue
+    return offsets
+
+
+def extract_product_identifier(tags: dict[str, str]) -> str | None:
+    """Pulls a retail product identifier (ASIN/ISBN) out of whatever tag actually
+    carries it. Reduced to letters and digits to match EditionSignature's own contract
+    (see EditionIdentityContracts.cs) -- taggers vary punctuation and case, and none of
+    that carries identity."""
+    asin = tags.get("asin", "").strip()
+    if asin:
+        candidate = asin
+    else:
+        # Some non-Audible sources put it in a free-text comment field instead, often
+        # alongside other text -- pull the first ASIN-shaped (10 alphanumeric, starting
+        # with a digit or "B") or ISBN-shaped (10 or 13 digit) token out of it.
+        import re
+        comment = tags.get("comment", "")
+        match = re.search(r"\b([0-9B][0-9A-Z]{9}|\d{10}|\d{13})\b", comment.upper())
+        candidate = match.group(1) if match else None
+    if not candidate:
+        return None
+    normalized = "".join(ch for ch in candidate if ch.isalnum()).upper()
+    return normalized or None
 
 
 def sha256_file(path: str) -> str:
@@ -143,6 +210,39 @@ def process_file(path: str, api_base: str, token: str, done_dir: str, failed_dir
             "partNumber": None,
             "totalParts": None,
         }
+
+        chapters = ffprobe_chapters(path)
+        product_identifier = extract_product_identifier(tags)
+        signature = None
+        if chapters or product_identifier:
+            signature = {
+                "productIdentifier": product_identifier,
+                "narrator": None,
+                "chapterOffsetSeconds": chapters or None,
+            }
+            log(f"  signature: identifier={product_identifier or 'none'} "
+                f"chapters={len(chapters)}")
+
+        # Checked before ever authorizing an upload, not after: this same
+        # fingerprint+signature match is exactly what EditionResolver.FindResult already
+        # uses to reuse an existing filter result for a converted or re-tagged copy of a
+        # book this pipeline has already scanned -- the only thing missing was ever
+        # checking here, at ingest, before paying to upload and re-scan audio that is
+        # already on file under a different fingerprint. A miss here (CloudScanStatus
+        # other than "available") falls through to the normal upload path below exactly
+        # as it always did; only a genuine match short-circuits it.
+        existing = call("POST", f"{api_base}/v1/scans/requests", token=token, body={
+            "fingerprint": fingerprint,
+            "currentScannerVersion": None,
+            "signature": signature,
+        })
+        if existing and existing.get("status") == "available" and existing.get("result") is not None:
+            log(f"  matched an existing scanned edition by fingerprint/signature evidence "
+                f"(scanner version {existing['result'].get('scannerVersion')}); skipping "
+                f"upload and re-scan entirely.")
+            shutil.move(path, os.path.join(done_dir, filename))
+            log(f"  moved to done/: {filename}")
+            return
 
         authorization = call("POST", f"{api_base}/v1/uploads/authorizations", token=token, body={
             "fingerprint": fingerprint,

@@ -4,7 +4,17 @@ using Npgsql;
 
 namespace AudioChoice.Api.Services;
 
-public sealed class PostgresUserLibraryStore(NpgsqlDataSource dataSource) : IUserLibraryStore
+/// <param name="editionSignatures">
+/// Lets <see cref="UpsertEdition"/> resolve a converted or re-tagged copy of an already
+/// catalogued recording to that recording's existing edition row -- see
+/// <see cref="PostgresScanCatalog.ResolveExistingEdition"/>'s own remarks for why this
+/// check has to run before the insert, in every place an edition can be created, not
+/// only on the scan-upload path.
+/// </param>
+public sealed class PostgresUserLibraryStore(
+    NpgsqlDataSource dataSource,
+    IEditionSignatureStore editionSignatures,
+    IEditionAliasStore editionAliases) : IUserLibraryStore
 {
     private const string BookSelect = """
         select lb.id,
@@ -182,10 +192,25 @@ public sealed class PostgresUserLibraryStore(NpgsqlDataSource dataSource) : IUse
         return command.ExecuteNonQuery() > 0;
     }
 
-    private static Guid UpsertEdition(
+    private Guid UpsertEdition(
         NpgsqlConnection connection, NpgsqlTransaction transaction, BookFingerprint value,
         byte[]? coverBytes = null, string? coverContentType = null)
     {
+        // Same evidence check as PostgresScanCatalog.ResolveExistingEdition, and for the
+        // same reason: a client adds a converted or re-tagged copy of a book already in
+        // its library under a fingerprint that will never match the original upload's
+        // sha256+file_size, and without this check the `on conflict` below always creates
+        // a second edition row for it. See that method's own remarks for the full account
+        // of why metadata similarity alone is never sufficient and only a retail
+        // identifier or a chapter structure specific enough to identify one recording
+        // qualifies.
+        if (PostgresScanCatalog.ResolveExistingEdition(
+                connection, transaction, value, editionSignatures, editionAliases) is
+            { } existingEditionID)
+        {
+            return existingEditionID;
+        }
+
         using var command = new NpgsqlCommand("""
             insert into audiobook_editions(
                 id, fingerprint_version, sha256, file_size, duration_seconds, file_type,
