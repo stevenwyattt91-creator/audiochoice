@@ -3704,6 +3704,37 @@ Assert(
         "defines, so a normalised report could not be written.");
 }
 
+// A new subscription is announced once, and a renewal is not.
+//
+// This is the whole subscription-alert feature. Clients resubmit the same transaction after a
+// purchase, on every Restore Purchases, and on every Transaction.updates delivery -- so a rule that
+// fired per submission would email once a month per subscriber, plus several on day one.
+{
+    AccountAccessResponse access(string plan, bool isActive) =>
+        new(isActive, plan, "test", null, isActive, isActive);
+
+    Assert(
+        SubscriptionAnnouncements.ShouldAnnounce(access(AccountPlans.Free, false), verified: true),
+        "A free account that just subscribed was not announced.");
+
+    Assert(
+        !SubscriptionAnnouncements.ShouldAnnounce(access(AccountPlans.Premium, true), verified: true),
+        "An account already on the paid plan was announced again -- this is the renewal, restore " +
+        "and second-device case, and it would email every subscriber every month.");
+
+    Assert(
+        SubscriptionAnnouncements.ShouldAnnounce(access(AccountPlans.Premium, false), verified: true),
+        "A lapsed subscriber resubscribing was not announced.");
+
+    Assert(
+        SubscriptionAnnouncements.ShouldAnnounce(access(AccountPlans.Founder, true), verified: true),
+        "A founder who paid anyway was not announced, which is the case most worth knowing about.");
+
+    Assert(
+        !SubscriptionAnnouncements.ShouldAnnounce(access(AccountPlans.Free, false), verified: false),
+        "A purchase that failed verification was announced as a subscription.");
+}
+
 // Every report carries a position unit, so the not-null column can always be satisfied.
 {
     var recorded = FilterReports.Validate(
