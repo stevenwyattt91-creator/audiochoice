@@ -1248,10 +1248,46 @@ Assert(abbreviationBetween.Count == 1,
         $"seconds apart, were merged into one Terra review window (got {coalesced.Count} " +
         "windows instead of 2) -- Luna already treats the two as mutually exclusive claims " +
         "and they must not be reviewed together.");
+}
+
+// The real production regression this covers: a real scan job (ACOTAR Part 2) had Luna
+// propose sexual-content candidates spaced roughly every 30-40 seconds -- each well under
+// the 45-second merge gap -- across a stretch of the book spanning well over 20 minutes,
+// so CoalesceSceneCandidates merged all of them into one ever-growing candidate with no
+// ceiling at all. That candidate's own serialized transcript segments were then large
+// enough that the model's context window could not hold them at any output budget, even
+// after shrinking all the way to the smallest one this pipeline configures.
+{
+    var denseSameLaneCandidates = Enumerable.Range(0, 60)
+        .Select(index =>
+        {
+            var start = index * 35.0; // 35s apart: well under the 45s merge gap.
+            var segment = new TranscriptSegment(start, start + 5, $"segment {index}");
+            return new OpenAIContentAnalysisProvider.SceneVerificationCandidate(
+                $"dense-{index}", start, start + 5, [segment], "sexual_complete_scene");
+        })
+        .ToArray();
+    // 60 candidates * 35s apart spans roughly 34 minutes -- comfortably past the cap.
+    var coalescedDense = OpenAIContentAnalysisProvider.CoalesceSceneCandidates(denseSameLaneCandidates);
     Assert(
-        coalesced.All(item => item.FirstPassLane is "sexual_violence" or "sexual_complete_scene") &&
-            coalesced.Select(item => item.FirstPassLane).Distinct().Count() == 2,
-        "Coalescing did not preserve each candidate's own first-pass lane.");
+        coalescedDense.Count > 1,
+        "A long, densely-packed run of same-lane candidates (spanning roughly 34 minutes, " +
+        "each well under the merge gap) was coalesced into a single unbounded candidate " +
+        "instead of being split once it exceeded the maximum coalesced span.");
+    foreach (var candidate in coalescedDense)
+    {
+        var span = candidate.ProposedEndTime - candidate.ProposedStartTime;
+        Assert(
+            span <= 1200 + 35,
+            $"A coalesced scene-verification candidate spanned {span:F0} seconds, well past " +
+            "the maximum coalesced span this cap exists to enforce.");
+    }
+    var totalSegmentsAfterSplit = coalescedDense.Sum(item => item.Segments.Count);
+    Assert(
+        totalSegmentsAfterSplit == denseSameLaneCandidates.Length,
+        "Splitting a long run of candidates into multiple smaller coalesced windows lost " +
+        "or duplicated a candidate's own transcript segments -- every underlying segment " +
+        "must still reach some verification window, just not all in the same one.");
 }
 
 // Lane separation, keyword safety net: a real Luna-proposed sexual_complete_scene candidate

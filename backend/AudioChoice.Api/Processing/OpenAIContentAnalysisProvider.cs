@@ -1958,8 +1958,29 @@ Candidates:
 
             foreach (var candidate in ordered)
             {
-                if (group.Count > 0 && candidate.ProposedStartTime > groupEnd + mergeGapSeconds)
+                // Flushed on a real gap, exactly as before, but also flushed once the
+                // group's own runtime span alone -- before this candidate is even added --
+                // already reaches MaximumCoalescedSceneSpanSeconds. Nothing previously
+                // bounded how many candidates within mergeGapSeconds of each other could
+                // keep joining one group: a long stretch of a real book with sexual-content
+                // candidates scattered every 30-40 seconds (well under the 45-second gap)
+                // merged into a single ever-growing window with no ceiling at all. A real
+                // production job (ACOTAR Part 2) hit exactly this: a scene-verification
+                // candidate whose serialized transcript segments alone were large enough
+                // that the model's context window could not hold them at any max_tokens
+                // this pipeline configures, confirmed directly -- shrinking max_tokens all
+                // the way to its own floor still failed with the same overflow. Splitting a
+                // long stretch into multiple smaller, still-contiguous verification windows
+                // costs one or two extra model calls for an unusually dense passage; letting
+                // one grow unbounded costs the whole candidate outright once it exceeds what
+                // the model can ever answer, no matter how the retry logic is tuned.
+                if (group.Count > 0 &&
+                    (candidate.ProposedStartTime > groupEnd + mergeGapSeconds ||
+                     candidate.ProposedEndTime - group[0].ProposedStartTime >
+                         MaximumCoalescedSceneSpanSeconds))
+                {
                     Flush();
+                }
                 group.Add(candidate);
                 groupEnd = Math.Max(groupEnd, candidate.ProposedEndTime);
             }
@@ -1967,6 +1988,19 @@ Candidates:
         }
         return result;
     }
+
+    /// <summary>
+    /// The longest runtime span one coalesced scene-verification candidate may cover before
+    /// it is split into a new group instead of continuing to grow. See
+    /// <see cref="CoalesceSceneCandidates"/>'s own remarks for the real production failure
+    /// this exists to prevent: a candidate with no ceiling at all can accumulate enough
+    /// transcript segments that its serialized size alone exceeds what the model's context
+    /// window can hold at any output budget. 20 minutes is comfortably longer than any
+    /// single real scene this pipeline's own examples describe, while still bounding how
+    /// large one request's transcript payload can grow regardless of how densely Luna's
+    /// first pass proposes candidates through a given stretch of a book.
+    /// </summary>
+    private const double MaximumCoalescedSceneSpanSeconds = 1200;
 
     private async Task<IReadOnlyList<SceneBatchResult>> RunSceneVerifications(
         IReadOnlyList<SceneVerificationCandidate[]> batches,
