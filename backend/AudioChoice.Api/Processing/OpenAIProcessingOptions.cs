@@ -258,7 +258,7 @@ public sealed class OpenAIProcessingOptions
     // candidate whose natural description ran past 80 characters. A result written under
     // the prior version may be missing a candidate this bug caused to fail outright, or may
     // reflect a checkpoint saved after a lucky retry rather than the model's real answer.
-    public string ScannerVersion { get; init; } = "6.7-luna-temperature";
+    public string ScannerVersion { get; init; } = "6.8-smaller-batches";
     /// <summary>Only jobs in this lane may be claimed by this worker instance.</summary>
     public string ProcessingLane { get; init; } = ScanProcessingLanes.AzureOpenAI;
     /// <summary>
@@ -276,7 +276,21 @@ public sealed class OpenAIProcessingOptions
     public double MinimumEventConfidence { get; init; } = .55;
     public int MaximumRetries { get; init; } = 3;
     public int MaximumJobAttempts { get; init; } = 3;
-    public int MaximumSegmentsPerAnalysisRequest { get; init; } = 100;
+    // Lowered from 100 after a real production batch of exactly 100 segments measured over
+    // 49,500 input tokens against a self-hosted model's 65,536-token context window --
+    // this pipeline was originally sized against OpenAI's own 1M-token context (see
+    // ComputeAnalysisBatchRanges' remarks), where 100 dense segments was never close to a
+    // real constraint. That specific batch never converged: its reported input-token count
+    // climbed on every retry (a real, reproducible vLLM/xgrammar accounting behavior under
+    // this pipeline's own request shape, confirmed by direct production investigation, not
+    // a transient fluke), so no amount of shrinking max_tokens alone could recover it, and
+    // it kept failing the whole job outright rather than silently skipping content -- the
+    // one failure mode this pipeline's own design (see MaximumSceneEscalationRequestsPerJob's
+    // remarks on "the job was stopped rather than scanning part of the audiobook") treats as
+    // unacceptable. 60 keeps even an unusually dense, long-dialogue passage comfortably under
+    // half the context window, so a real overflow becomes rare rather than a recurring risk
+    // for exactly the passages most worth scanning carefully.
+    public int MaximumSegmentsPerAnalysisRequest { get; init; } = 60;
     public int MaximumSceneVerificationRequestsPerJob { get; init; } = 50;
     // The strict sexual-content lane escalates every plausible scene candidate.
     // Keep the overall job ceiling bounded by the existing 50-candidate safety cap.

@@ -79,7 +79,14 @@ public sealed class OpenAIContentAnalysisProvider(
     // remarks for the real production evidence). A cached checkpoint from before this
     // change was generated at temperature 0 and must not be silently trusted as though it
     // came from the same sampling this version now uses.
-    private const string BaseAnalysisPromptVersion = "5.7-luna-temperature";
+    //
+    // Bumped again: MaximumSegmentsPerAnalysisRequest lowered from 100 to 60 (see that
+    // field's own remarks) after a real 100-segment batch never converged against this
+    // self-hosted model's context window regardless of retries. A checkpoint cached under
+    // the prior version was built from a 100-segment batch boundary that no longer exists;
+    // reusing it here would silently keep serving results sliced along boundaries this
+    // version was specifically changed to avoid.
+    private const string BaseAnalysisPromptVersion = "5.8-smaller-batches";
     // Bumped for the keyword safety net's lane isolation fix: a candidate whose window
     // happens to match a checkpoint cached under the prior version may have been built
     // before a safety-net seed's own lane existed, when it could still get coalesced into a
