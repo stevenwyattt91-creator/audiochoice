@@ -2040,6 +2040,22 @@ Candidates:
             var payload = await LoadSceneVerificationCheckpoint(checkpointPath, cancellationToken);
             if (payload is null)
             {
+                // Temporary diagnostic: a real production candidate overflowed the model's
+                // context window at every max_tokens down to the configured floor even after
+                // MaximumCoalescedSceneSpanSeconds was added, meaning the real cause of that
+                // candidate's own size is still unconfirmed. Logged unconditionally (not only
+                // on failure) so the next occurrence names the actual candidate rather than
+                // requiring another blind retry.
+                var totalSegments = batch.Sum(item => item.Segments.Count);
+                var approximateCharacters = batch.Sum(item =>
+                    item.Segments.Sum(segment => segment.Text.Length));
+                logger.LogInformation(
+                    "Scene verification batch {BatchNumber}: {CandidateCount} candidate(s), " +
+                    "{TotalSegments} total transcript segments, ~{ApproximateCharacters} " +
+                    "characters, span {SpanStart:F0}s-{SpanEnd:F0}s.",
+                    index + 1, batch.Count, totalSegments, approximateCharacters,
+                    batch.Min(item => item.ProposedStartTime),
+                    batch.Max(item => item.ProposedEndTime));
                 payload = await VerifySceneBatch(batch, model, cancellationToken);
                 await SaveSceneVerificationCheckpoint(checkpointPath, payload, cancellationToken);
             }
