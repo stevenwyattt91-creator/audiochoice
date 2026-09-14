@@ -27,8 +27,23 @@ public sealed class ScanPipeline(
             cancellationToken);
         IReadOnlyList<TranscriptSegment> normalizedSegments;
 
+        // A real production regression this guards against: a saved transcript from before
+        // this pipeline requested word-level timing (see TranscriptWord's own remarks) has
+        // every segment's Words null. AnchorToTranscript requires word timing to confirm a
+        // model-proposed event's quote actually exists in the transcript before admitting
+        // it -- with none available, that check can never succeed, so every non-deterministic
+        // category (sexual, violence, substance, blasphemy, self-harm) was silently discarded
+        // one event at a time while deterministic profanity (which never anchors against
+        // words) sailed through untouched. A real rescan produced a "successful" result
+        // containing only profanity for exactly this reason. Treating a word-less saved
+        // transcript the same as a missing one -- forcing a real re-transcription rather than
+        // reusing it -- is what actually closes this, since no amount of analysis-side
+        // leniency can recover quote-level confirmation for words that were never recorded.
+        var hasWordTiming = existingTranscript?.Segments.Any(
+            segment => segment.Words is { Count: > 0 }) ?? false;
+
         if (existingTranscript is not null && existingTranscript.IsComplete is not false &&
-            existingTranscript.Segments.Count > 0)
+            existingTranscript.Segments.Count > 0 && hasWordTiming)
         {
             normalizedSegments = existingTranscript.Segments;
             reportProgress?.Invoke(75, "transcription_complete");
@@ -37,18 +52,38 @@ public sealed class ScanPipeline(
         {
             if (!upload.IsUploaded || string.IsNullOrWhiteSpace(upload.StoredPath))
             {
+                // Distinguished from the ordinary "nothing at all" case: a transcript this old
+                // (word-less, see hasWordTiming's own remarks) usually also predates this
+                // pipeline's own temporary-audio retention, so its original upload is already
+                // gone by the time this gap gets noticed. A rescan cannot silently recover
+                // word timing it never recorded -- there is no shortcut here -- so this must
+                // fail loudly enough that whoever queued the rescan knows the original audio
+                // file needs to be re-uploaded, not just retried.
                 throw new InvalidOperationException(
-                    "The scan job has neither a saved transcript nor a completed private audio upload.");
+                    existingTranscript is not null
+                        ? "This audiobook's saved transcript has no word-level timing and its " +
+                          "original audio upload is no longer available, so it cannot be " +
+                          "re-transcribed automatically. Re-upload the original audio file to " +
+                          "get word-anchored filter results for it."
+                        : "The scan job has neither a saved transcript nor a completed private " +
+                          "audio upload.");
             }
+
+            // A word-less existing transcript is never used as a resume base: mixing its
+            // old, unanchorable segments with newly re-transcribed ones would leave the same
+            // gap this whole branch exists to close for whatever range the old transcript
+            // already covered. Restarting fully is the only way every segment ends up with
+            // real word timing.
+            var resumeFrom = hasWordTiming ? existingTranscript : null;
 
             if (chunker is IPreMaterializedAudioChunker preChunker)
             {
                 normalizedSegments = await ProcessMaterialized(
-                    preChunker, upload, existingTranscript, reportChunkProgress, cancellationToken, scanID);
+                    preChunker, upload, resumeFrom, reportChunkProgress, cancellationToken, scanID);
             }
             else
             {
-            var transcriptSegments = existingTranscript?.Segments.ToList() ?? [];
+            var transcriptSegments = resumeFrom?.Segments.ToList() ?? [];
             var completedThrough = transcriptSegments.Count == 0
                 ? 0
                 : transcriptSegments.Max(segment => segment.EndTime);

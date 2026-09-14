@@ -467,6 +467,84 @@ Assert(
     "Materialized pipeline did not offset the second chunk's word timings to absolute time; " +
     "they were left relative to the chunk, which is where they resolve to the wrong audio position.");
 
+// A real production regression this covers: a saved transcript written before this
+// pipeline requested word-level timing has every segment's Words null.
+// OpenAIContentAnalysisProvider.AnchorToTranscript requires word timing to confirm a
+// model-proposed event's quote actually exists in the transcript before admitting it --
+// with none available, that check can never succeed, so a real rescan of a word-less
+// transcript silently discarded every sexual/violence/substance/blasphemy/self-harm event
+// one at a time while deterministic profanity (which never anchors against words) sailed
+// through untouched, producing a "successful" scan containing only profanity. The fix
+// under test: a saved transcript with no word timing at all must be treated the same as a
+// missing one -- forced through a real re-transcription rather than reused as-is.
+{
+    var wordlessTranscript = new PrivateTranscript(
+        "1.0", "en", "old-transcriber-before-word-timing", DateTimeOffset.UtcNow,
+        [new TranscriptSegment(0, 5, "some narration with no word timing at all", Words: null)],
+        IsComplete: true);
+    var wordlessStore = new CapturingTranscriptStore(wordlessTranscript);
+    var reTranscribingPipeline = new ScanPipeline(
+        new FakeAudioChunker(),
+        new FakeTranscriptionProvider(),
+        new FakeAnalysisProvider(),
+        wordlessStore,
+        new OpenAIProcessingOptions());
+
+    await reTranscribingPipeline.Process(
+        upload with { IsUploaded = true, StoredPath = "/private/wordless-test.audio" },
+        null,
+        CancellationToken.None);
+
+    Assert(
+        wordlessStore.Transcript?.TranscriptionModel == "fake-transcriber",
+        "A saved transcript with no word-level timing was reused as-is instead of being " +
+        "re-transcribed -- this is the exact gap that let a real rescan silently discard " +
+        "every non-profanity event and report a misleadingly successful, profanity-only " +
+        "result.");
+    Assert(
+        wordlessStore.Transcript?.Segments.Count > 0 &&
+        wordlessStore.Transcript.Segments.All(segment => segment.Words?.Count > 0),
+        "Re-transcribing a word-less saved transcript did not produce word-level timing.");
+}
+
+// The companion failure mode: a word-less saved transcript whose original audio upload has
+// already been cleaned up (see TemporaryAudioCleanupService) cannot be silently recovered by
+// a rescan at all. This must fail loudly with an actionable message telling whoever queued
+// the rescan to re-upload the original file -- not the generic "neither a transcript nor an
+// upload" message a genuinely first-time scan gets, and not a silent fallback to the
+// word-less data that caused the original bug.
+{
+    var wordlessTranscript = new PrivateTranscript(
+        "1.0", "en", "old-transcriber-before-word-timing", DateTimeOffset.UtcNow,
+        [new TranscriptSegment(0, 5, "some narration with no word timing at all", Words: null)],
+        IsComplete: true);
+    var noAudioPipeline = new ScanPipeline(
+        new FakeAudioChunker(),
+        new FakeTranscriptionProvider(),
+        new FakeAnalysisProvider(),
+        new CapturingTranscriptStore(wordlessTranscript),
+        new OpenAIProcessingOptions());
+
+    var threw = false;
+    try
+    {
+        await noAudioPipeline.Process(
+            upload with { IsUploaded = false, StoredPath = null },
+            null,
+            CancellationToken.None);
+    }
+    catch (InvalidOperationException error)
+    {
+        threw = true;
+        Assert(
+            error.Message.Contains("Re-upload the original audio file"),
+            "A word-less transcript with no recoverable audio did not explain that the " +
+            "original file needs to be re-uploaded. Message: " + error.Message);
+    }
+    Assert(threw, "A word-less saved transcript with no audio to re-transcribe from did not " +
+        "fail loudly.");
+}
+
 var temporaryAudio = Path.GetTempFileName();
 var chunkPaths = new List<string>();
 var chunks = new List<AudioChunk>();
