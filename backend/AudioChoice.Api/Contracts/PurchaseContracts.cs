@@ -22,4 +22,27 @@ public sealed record AppleTransactionRequest(string SignedTransactionInfo);
 /// </remarks>
 public sealed record GooglePurchaseRequest(string ProductID, string PurchaseToken);
 
-public sealed record PurchaseVerificationResult(bool Verified, AccountAccessResponse? Access, string? Error);
+public sealed record PurchaseVerificationResult(
+    bool Verified,
+    AccountAccessResponse? Access,
+    string? Error,
+    /// <summary>
+    /// What was actually bought, read back out of the store's own signed payload. Null on failure.
+    /// </summary>
+    /// <remarks>
+    /// Defaulted last so every existing positional construction keeps compiling. Exists so the
+    /// endpoint can describe a purchase without decoding the JWS a second time -- the verifier has
+    /// already done that, and it is the only party that legitimately can.
+    /// </remarks>
+    VerifiedPurchaseDetail? Detail = null);
+
+/// <summary>
+/// The parts of a verified purchase worth reporting: which product, under which offer, from where.
+/// </summary>
+public sealed record VerifiedPurchaseDetail(
+    string Store,
+    string? ProductID,
+    string? OfferIdentifier,
+    string? OfferDescription,
+    string? Storefront,
+    DateTimeOffset? ExpiresAt);

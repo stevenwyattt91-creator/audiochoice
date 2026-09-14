@@ -940,15 +940,70 @@ app.MapPut("/v1/internal/admin/affiliates/{affiliateID:guid}/active", (Guid affi
     return affiliates.SetActive(affiliateID, request.Active) ? Results.NoContent() : Results.NotFound();
 });
 
+// Announces a new subscription exactly once, from the one place that knows both who subscribed and
+// what they bought.
+//
+// Apple's own server notification cannot do this: it carries an originalTransactionId and no mapping
+// to an AudioChoice account, so it can say a subscription happened but not whose. This endpoint has
+// the signed-in user and the store's signed payload together, and it is also the only path that
+// grants Premium, so nothing can subscribe without passing through here.
+//
+// "Once" is the whole difficulty. Clients submit a transaction far more often than they buy one:
+// after a purchase, on every Restore Purchases, and on every Transaction.updates delivery, which
+// includes each renewal and any relaunch carrying an unfinished transaction. So the account's access
+// is read *before* verifying and an alert is sent only when this call is what turned a
+// non-subscriber into one. A renewal, a reinstall, a second device and a repeated restore all find
+// the account already subscribed and stay silent.
+async Task AnnounceIfNewlySubscribed(
+    AuthUser user,
+    AccountAccessResponse before,
+    PurchaseVerificationResult result,
+    ITransactionalEmailSender emailSender,
+    ILogger logger,
+    CancellationToken cancellationToken)
+{
+    if (!SubscriptionAnnouncements.ShouldAnnounce(before, result.Verified)) return;
+
+    var detail = result.Detail;
+    try
+    {
+        await emailSender.SendSubscriptionAlert(
+            new SubscriptionAlert(
+                Store: detail?.Store ?? "Unknown store",
+                AccountEmail: user.Email,
+                AccountDisplayName: user.DisplayName,
+                AccountID: user.ID,
+                ProductID: detail?.ProductID,
+                OfferIdentifier: detail?.OfferIdentifier,
+                OfferDescription: detail?.OfferDescription,
+                Storefront: detail?.Storefront,
+                ExpiresAt: detail?.ExpiresAt ?? result.Access?.ExpiresAt),
+            cancellationToken);
+    }
+    catch (Exception error)
+    {
+        // The subscription is already granted and the listener is already through the paywall. An
+        // alert that could not be sent must never turn that into a failed purchase.
+        logger.LogError(
+            error,
+            "A subscription was granted but the alert could not be emailed. Account {AccountID}.",
+            user.ID);
+    }
+}
+
 app.MapPost("/v1/purchases/apple", async (
     AppleTransactionRequest request,
     HttpContext context,
     PurchaseVerifier verifier,
+    IEntitlementStore entitlements,
+    ITransactionalEmailSender emailSender,
     CancellationToken cancellationToken) =>
 {
     var user = CurrentUser(context);
     if (user is null) return Results.Unauthorized();
+    var before = entitlements.Access(user.ID);
     var result = await verifier.VerifyApple(user.ID, request, cancellationToken);
+    await AnnounceIfNewlySubscribed(user, before, result, emailSender, app.Logger, cancellationToken);
     return result.Verified ? Results.Ok(result.Access) : Results.BadRequest(new { error = result.Error });
 });
 
@@ -956,11 +1011,15 @@ app.MapPost("/v1/purchases/google", async (
     GooglePurchaseRequest request,
     HttpContext context,
     PurchaseVerifier verifier,
+    IEntitlementStore entitlements,
+    ITransactionalEmailSender emailSender,
     CancellationToken cancellationToken) =>
 {
     var user = CurrentUser(context);
     if (user is null) return Results.Unauthorized();
+    var before = entitlements.Access(user.ID);
     var result = await verifier.VerifyGoogle(user.ID, request, cancellationToken);
+    await AnnounceIfNewlySubscribed(user, before, result, emailSender, app.Logger, cancellationToken);
     return result.Verified ? Results.Ok(result.Access) : Results.BadRequest(new { error = result.Error });
 });
 
