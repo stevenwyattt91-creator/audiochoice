@@ -4001,8 +4001,12 @@ Assert(
 // exact same unchanged request (75 times in 5 minutes, one candidate, no convergence) while
 // max_tokens shrank by the same amount to compensate -- the two chased each other forever,
 // with no cap on this retry path (see CompleteJson's own remarks on why it deliberately
-// does not share MaximumRetries' budget). Must fail loudly and quickly, not hang the whole
-// job's GPU concurrency slot indefinitely.
+// does not share MaximumRetries' budget). Must eventually give up rather than hang the
+// whole job's GPU concurrency slot forever -- but must not give up early on a retry whose
+// input-token count did not shrink, since that turned out to be a false-positive signal in
+// production (see the next test's own remarks) rather than reliable proof of an unwinnable
+// loop. MaximumContextOverflowRetries is the sole bound now: unconditional, regardless of
+// which direction any individual attempt's reported count moved.
 {
     var schema = new System.Text.Json.Nodes.JsonObject { ["type"] = "object" };
     var reportedInputTokens = 49537;
@@ -4015,8 +4019,9 @@ Assert(
             "tokens. However, you requested 8000 output tokens and your prompt contains " +
             $"at least {reportedInputTokens} input tokens, for a total of at least " +
             "73500 tokens.\",\"type\":\"BadRequestError\"}}";
-        // Climbs on every attempt, exactly like the real drifting count under load -- never
-        // once shrinks, so no fixed max_tokens reduction can ever converge.
+        // Climbs on every attempt and never once shrinks -- a real, if now understood to
+        // be rarer than first assumed, pattern this pipeline must still not retry forever
+        // against.
         reportedInputTokens += 257;
         return new HttpResponseMessage(System.Net.HttpStatusCode.BadRequest)
         {
@@ -4037,33 +4042,30 @@ Assert(
     {
         threw = true;
         Assert(
-            error.Message.Contains("did not shrink"),
-            "A context-overflow retry whose reported input size never shrinks did not " +
-            "explain that as the reason it gave up. Message: " + error.Message);
+            error.Message.Contains("context-overflow retries"),
+            "A context-overflow retry loop that never converges did not explain that as " +
+            "the reason it gave up. Message: " + error.Message);
     }
     Assert(threw, "A context-overflow retry loop whose reported input size climbs on every " +
-        "attempt did not fail loudly -- this is the real production infinite-retry bug.");
-    Assert(
-        attemptsMade <= 5,
-        "A drifting context-overflow count was retried far more than needed to detect it " +
-        $"is not converging ({attemptsMade} attempts) -- the drift check should catch " +
-        "this within a small, bounded number of consecutive non-shrinking attempts, not " +
-        "let it run for many more.");
+        "attempt forever did not eventually fail loudly -- this is the real production " +
+        "infinite-retry bug MaximumContextOverflowRetries exists to bound.");
 }
 
-// The real production false positive this guards against: a single non-shrinking
-// context-overflow attempt, on its own, must not be treated as proof of runaway drift --
-// directly observed happening to a genuinely convergent candidate under real concurrent
-// load (five different concurrent batches happened to report nearly the same input-token
-// count on their first overflow, purely from being similarly sized, and one of them
-// measured a slightly higher count on its very next real attempt before converging
-// normally on the attempt after that). Must not fail the whole job over one isolated blip.
+// The real production false positive this guards against: a real rescan, run in complete
+// isolation with no other job in flight, was directly observed retrying a single call for
+// several consecutive attempts with its reported input-token count climbing every time
+// (49537 -> 49794 -> 50051...), then genuinely converging afterward -- proof that vLLM's
+// own token accounting under concurrency does not always move in the direction a fixed
+// max_tokens reduction expects, even for byte-identical input, and that treating "did not
+// shrink this one time" (or even several times in a row) as unrecoverable drift fails real,
+// eventually-convergent candidates. Only the hard attempt cap may end this loop early now.
 {
     var schema = new System.Text.Json.Nodes.JsonObject { ["type"] = "object" };
     var attempt = 0;
-    // Non-shrinking once (49537 -> 49600), then genuinely converges (49600 -> 40000, well
-    // under the window), exactly the shape a one-off blip under concurrency produces.
-    var reportedInputTokens = new[] { 49537, 49600, 40000 };
+    // Climbs for several consecutive attempts -- more than a single-attempt-tolerant check
+    // would have allowed -- then genuinely converges, matching the real production shape
+    // this test is named for.
+    var reportedInputTokens = new[] { 49537, 49794, 50051, 50308, 40000 };
     var handler = new FakeRoutedHttpMessageHandler(_ =>
     {
         var tokens = reportedInputTokens[Math.Min(attempt, reportedInputTokens.Length - 1)];
@@ -4094,10 +4096,10 @@ Assert(
         "qwen3.6-27b", "some prompt", "test_schema", schema, CancellationToken.None);
     Assert(
         response.Json == "{\"events\":[]}",
-        "A single isolated non-shrinking context-overflow attempt, followed by real " +
-        "convergence, was treated as unrecoverable drift instead of being allowed to " +
+        "Several consecutive non-shrinking context-overflow attempts, followed by real " +
+        "convergence, were treated as unrecoverable drift instead of being allowed to " +
         "converge normally -- this is the real production false positive a genuinely " +
-        "convergent candidate hit under concurrent load.");
+        "convergent candidate hit, in complete isolation with no concurrent load at all.");
 }
 
 // VllmModelClient.CompleteJson's per-call base temperature -- a real production fix: the
