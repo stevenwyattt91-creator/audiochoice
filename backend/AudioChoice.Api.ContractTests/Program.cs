@@ -3965,16 +3965,58 @@ Assert(
         "The retried request's successful response was not returned to the caller.");
 }
 
-// A real production regression this covers: under heavy concurrent GPU load, vLLM's own
-// reported "input tokens counted" was observed climbing on every successive retry of the
-// exact same unchanged request (75 times in 5 minutes, one candidate, no convergence) while
-// max_tokens shrank by the same amount to compensate -- the two chased each other forever,
-// with no cap on this retry path (see CompleteJson's own remarks on why it deliberately
-// does not share MaximumRetries' budget). Must eventually give up rather than hang the
-// whole job's GPU concurrency slot forever if a server keeps reporting an overflow no
-// matter what -- MaximumContextOverflowRetries is the only thing that can stop this loop
-// now that max_tokens is never adjusted in response to the reported figure (see
-// CompleteJson's own remarks on why doing arithmetic on that figure was itself the bug).
+// A real production regression this covers: Fourth Wing and Red Rising each failed here
+// under genuine 12-way concurrency, with vLLM's own request log showing "Waiting"/
+// "Deferred" requests throughout -- a transient queue, not a genuinely oversized prompt.
+// The retry must not shrink max_tokens at all during this phase: a prior version that
+// halved max_tokens on every attempt burned through the entire retry budget faster than
+// that same real episode's queue pressure actually took to clear. This exercises that the
+// first MaximumUnchangedContextOverflowRetries attempts leave max_tokens completely
+// unchanged, converging correctly once the server stops reporting an overflow (simulating
+// the queue clearing) with no dependence on what number appears in the error body.
+{
+    var schema = new System.Text.Json.Nodes.JsonObject { ["type"] = "object" };
+    var attempt = 0;
+    var handler = new FakeRoutedHttpMessageHandler(_ =>
+    {
+        attempt += 1;
+        if (attempt > 3)
+        {
+            return new HttpResponseMessage(System.Net.HttpStatusCode.OK)
+            {
+                Content = new StringContent(
+                    """{"choices":[{"message":{"content":"{\"events\":[]}"}}],"usage":{"prompt_tokens":40000,"completion_tokens":10}}""")
+            };
+        }
+        var body =
+            "{\"error\":{\"message\":\"This model's maximum context length is 65536 " +
+            "tokens. However, you requested 8000 output tokens and your prompt contains " +
+            "at least 49537 input tokens, for a total of at least 73500 tokens.\"," +
+            "\"type\":\"BadRequestError\"}}";
+        return new HttpResponseMessage(System.Net.HttpStatusCode.BadRequest)
+        {
+            Content = new StringContent(body)
+        };
+    });
+    var httpClient = new HttpClient(handler) { BaseAddress = new Uri("http://127.0.0.1:8002/v1/") };
+    var vllmOptions = new OpenAIProcessingOptions { VllmMaxTokens = 16000 };
+    var vllmClient = new VllmModelClient(httpClient, vllmOptions, NullLogger<VllmModelClient>.Instance);
+
+    var response = await vllmClient.CompleteJson(
+        "qwen3.6-27b", "some prompt", "test_schema", schema, CancellationToken.None);
+    Assert(
+        response.Json == "{\"events\":[]}",
+        "A context-overflow retry did not converge once a simulated transient queue " +
+        "cleared, within the phase that must leave max_tokens completely unchanged.");
+}
+
+// A separate real production regression: a later ACOTAR Part 2 rescan failed here too, but
+// under provably different conditions -- vLLM's own request log showed zero load at all
+// (Running: 0, Waiting: 0) for the entire retry window, and every attempt reported the
+// identical figure without ever varying. Waiting alone cannot fix that; this exercises that
+// once MaximumUnchangedContextOverflowRetries' own unchanged attempts have all still
+// failed, the retry starts shrinking max_tokens, and eventually fails loudly (rather than
+// looping forever) once shrinking no longer helps either.
 {
     var schema = new System.Text.Json.Nodes.JsonObject { ["type"] = "object" };
     var handler = new FakeRoutedHttpMessageHandler(_ => new HttpResponseMessage(
@@ -3997,12 +4039,13 @@ Assert(
     {
         threw = true;
         Assert(
+            error.Message.Contains("minimum viable max_tokens") ||
             error.Message.Contains("context-overflow retries"),
-            "A context-overflow retry loop that never converges did not explain that as " +
-            "the reason it gave up. Message: " + error.Message);
+            "An unrecoverable context overflow that never clears did not explain why it " +
+            "gave up. Message: " + error.Message);
     }
-    Assert(threw, "A context-overflow retry loop that never converges did not eventually " +
-        "fail loudly once MaximumContextOverflowRetries was exceeded.");
+    Assert(threw, "A context-overflow retry loop that never converges, under either the " +
+        "unchanged or the shrinking phase, did not eventually fail loudly.");
 }
 
 // A real production regression this covers: vLLM's own reported "input tokens counted" in
