@@ -190,14 +190,17 @@ services:
       # A single GPU chunk may take several minutes under load. The scanner now
       # applies this explicitly and no longer uses HttpClient's 100-second default.
       AudioChoice__OpenAI__FasterWhisperTimeoutSeconds: "900"
-      # Raised from 2 to 10 for a real batch stress test: many real books queued at once
-      # to exercise the lane/queue behavior and the shared GPU pools' contention under
-      # real concurrent load, not just two jobs at a time. This does not add GPU
-      # capacity -- ContentAnalysisConcurrency/SceneVerificationConcurrency/
-      # SceneEscalationConcurrency (8 each) and whisper's own 4-way pool below are the
-      # actual shared ceilings every concurrently-running job's work competes for; this
-      # setting only controls how many jobs may be claimed and in flight at once.
-      AudioChoice__OpenAI__ScanWorkerConcurrency: "10"
+      # Lowered from 10 back to 2. Raising this does not add GPU capacity -- it only lets
+      # more books split the same fixed ceiling
+      # (ContentAnalysisConcurrency/SceneVerificationConcurrency/SceneEscalationConcurrency,
+      # 6 each, against vLLM's own --max-num-seqs 12) more ways at once. At 10 books in
+      # flight, each book's own 6-wide stages were constantly queuing behind each other
+      # inside vLLM rather than actually running in parallel, which slows every book down
+      # without changing how much real work the GPU gets done per minute. 2 books x 6 each
+      # matches vLLM's 12-request ceiling with no contention, so each in-flight book gets
+      # close to a real, uncontended slice of the GPU and clears faster in wall-clock time,
+      # even though fewer books are nominally "in progress" at once.
+      AudioChoice__OpenAI__ScanWorkerConcurrency: "2"
       # Must match whisper's own WHISPER_WORKERS * WHISPER_CONCURRENCY_PER_WORKER
       # above. This used to be 1x1, which serialized every transcription request
       # behind a single semaphore slot even though the GPU server itself already
