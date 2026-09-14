@@ -3965,53 +3965,16 @@ Assert(
         "The retried request's successful response was not returned to the caller.");
 }
 
-// The same overflow, but reported repeatedly all the way down to the minimum viable
-// max_tokens -- must fail loudly with a clear message rather than retry forever or return
-// an unusably small budget. VllmMaxTokens starts low enough here that halving reaches
-// MinimumViableMaxTokens (512) in a small, deterministic number of attempts.
-{
-    var schema = new System.Text.Json.Nodes.JsonObject { ["type"] = "object" };
-    var handler = new FakeRoutedHttpMessageHandler(_ => new HttpResponseMessage(
-        System.Net.HttpStatusCode.BadRequest)
-    {
-        Content = new StringContent(
-            """{"error":{"message":"This model's maximum context length is 65536 tokens. However, you requested 800 output tokens and your prompt contains at least 65500 input tokens, for a total of at least 66300 tokens.","type":"BadRequestError"}}""")
-    });
-    var httpClient = new HttpClient(handler) { BaseAddress = new Uri("http://127.0.0.1:8002/v1/") };
-    var vllmOptions = new OpenAIProcessingOptions { VllmMaxTokens = 800 };
-    var vllmClient = new VllmModelClient(httpClient, vllmOptions, NullLogger<VllmModelClient>.Instance);
-
-    var threw = false;
-    try
-    {
-        await vllmClient.CompleteJson(
-            "qwen3.6-27b", "some prompt", "test_schema", schema, CancellationToken.None);
-    }
-    catch (HttpRequestException error)
-    {
-        threw = true;
-        Assert(
-            error.Message.Contains("minimum viable max_tokens"),
-            "An unrecoverable context overflow's error message did not explain why. " +
-            "Message: " + error.Message);
-    }
-    Assert(threw, "An unrecoverable context overflow (still failing at the minimum viable " +
-        "max_tokens) did not fail loudly.");
-}
-
 // A real production regression this covers: under heavy concurrent GPU load, vLLM's own
 // reported "input tokens counted" was observed climbing on every successive retry of the
 // exact same unchanged request (75 times in 5 minutes, one candidate, no convergence) while
 // max_tokens shrank by the same amount to compensate -- the two chased each other forever,
 // with no cap on this retry path (see CompleteJson's own remarks on why it deliberately
 // does not share MaximumRetries' budget). Must eventually give up rather than hang the
-// whole job's GPU concurrency slot forever, even if the halving retry (see CompleteJson's
-// own remarks on why it no longer does arithmetic on vLLM's reported input-token count)
-// has not yet reached MinimumViableMaxTokens. Started from a deliberately oversized
-// VllmMaxTokens (far above anything this pipeline really configures) purely so the halving
-// sequence takes more than MaximumContextOverflowRetries steps to reach that floor -- proof
-// the attempt cap itself, not just the floor check, is what eventually stops a server that
-// keeps reporting an overflow no matter what max_tokens is sent.
+// whole job's GPU concurrency slot forever if a server keeps reporting an overflow no
+// matter what -- MaximumContextOverflowRetries is the only thing that can stop this loop
+// now that max_tokens is never adjusted in response to the reported figure (see
+// CompleteJson's own remarks on why doing arithmetic on that figure was itself the bug).
 {
     var schema = new System.Text.Json.Nodes.JsonObject { ["type"] = "object" };
     var handler = new FakeRoutedHttpMessageHandler(_ => new HttpResponseMessage(
@@ -4021,7 +3984,7 @@ Assert(
             """{"error":{"message":"This model's maximum context length is 65536 tokens. However, you requested 8000 output tokens and your prompt contains at least 65500 input tokens, for a total of at least 73500 tokens.","type":"BadRequestError"}}""")
     });
     var httpClient = new HttpClient(handler) { BaseAddress = new Uri("http://127.0.0.1:8002/v1/") };
-    var vllmOptions = new OpenAIProcessingOptions { VllmMaxTokens = 1_000_000 };
+    var vllmOptions = new OpenAIProcessingOptions { VllmMaxTokens = 16000 };
     var vllmClient = new VllmModelClient(httpClient, vllmOptions, NullLogger<VllmModelClient>.Instance);
 
     var threw = false;

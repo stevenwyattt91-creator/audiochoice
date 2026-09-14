@@ -285,9 +285,20 @@ public sealed class VllmModelClient(
                     // SceneVerificationConcurrency/SceneEscalationConcurrency now leaving real
                     // headroom under vLLM's own --max-num-seqs ceiling (see those settings'
                     // own remarks) -- misreported through a token-count-shaped error message
-                    // that this method must not do arithmetic on. Backs off and retries with
-                    // this request's own previous max_tokens halved, the same shape as this
-                    // class's other retry branches, rather than trusting vLLM's number at all.
+                    // that this method must not do arithmetic on.
+                    //
+                    // Does not shrink max_tokens on retry, unlike an earlier version of this
+                    // branch. Halving max_tokens on every attempt does not address anything
+                    // real (there is nothing about the actual prompt this method could correct
+                    // by doing so, per the remarks above) and only eats into this candidate's
+                    // own output budget -- a real production job hit exactly this: vLLM's own
+                    // request log showed the deferred/waiting requests genuinely clearing
+                    // within roughly 10-20 seconds, but 5 halving attempts at a flat 2-second
+                    // delay each burned through the entire retry budget in about 10 seconds,
+                    // reaching MinimumViableMaxTokens and failing right as the real transient
+                    // pressure was clearing. Retries with max_tokens unchanged and a delay that
+                    // grows with each attempt instead, so the retry budget actually outlasts a
+                    // typical transient-pressure episode rather than racing past it.
                     contextOverflowAttempts += 1;
                     if (contextOverflowAttempts > MaximumContextOverflowRetries)
                     {
@@ -298,31 +309,14 @@ public sealed class VllmModelClient(
                             "succeeding. Stopped rather than retrying without end.");
                     }
 
-                    var revisedMaxTokens = Math.Max(MinimumViableMaxTokens, maxTokens / 2);
-                    if (revisedMaxTokens >= maxTokens && maxTokens <= MinimumViableMaxTokens)
-                    {
-                        // Already at the floor and still failing -- halving further would not
-                        // change anything. This candidate cannot be served by this model
-                        // right now regardless of max_tokens; fail loudly rather than loop.
-                        throw new HttpRequestException(
-                            $"{schemaName} failed with HTTP {(int)response.StatusCode}: still " +
-                            $"reported a context-length overflow at the minimum viable " +
-                            $"max_tokens ({MinimumViableMaxTokens}). This is not a genuinely " +
-                            "oversized prompt (other calls in this pipeline routinely succeed " +
-                            "with larger prompts); treat this as transient server load and " +
-                            "retry the whole job later.");
-                    }
-
                     logger.LogWarning(
                         "{SchemaName} on {Model} reported a context-length overflow " +
                         "({ContextWindow}-token window, {ReportedInputTokens} input tokens " +
                         "reported); retrying attempt {Attempt} after {Delay} with max_tokens " +
-                        "reduced from {PreviousMaxTokens} to {RevisedMaxTokens} rather than " +
-                        "trusting that reported figure for arithmetic.",
+                        "unchanged at {MaxTokens} rather than trusting that reported figure " +
+                        "for arithmetic.",
                         schemaName, model, detected.ContextWindow, detected.InputTokens,
-                        contextOverflowAttempts, ContextOverflowRetryDelay, maxTokens,
-                        revisedMaxTokens);
-                    maxTokens = revisedMaxTokens;
+                        contextOverflowAttempts, ContextOverflowRetryDelay, maxTokens);
                     await Task.Delay(ContextOverflowRetryDelay, cancellationToken);
                     continue;
                 }
@@ -351,25 +345,29 @@ public sealed class VllmModelClient(
     /// Hard ceiling on the context-overflow branch's own retries, independent of
     /// <see cref="OpenAIProcessingOptions.MaximumRetries"/> by design (see that branch's own
     /// remarks) -- but "independent of that budget" is not the same as "no budget at all".
-    /// Halving max_tokens on every attempt (see the overflow-handling branch above) reaches
-    /// MinimumViableMaxTokens from a 16000-token starting budget in 5 attempts; 10 leaves
-    /// room for the exponential backoff delay between attempts to actually help with the
-    /// transient GPU/KV-cache pressure this branch now treats as the real cause, without
-    /// letting a candidate that will never succeed hold a GPU concurrency slot forever.
+    /// The delay between attempts grows with each attempt (see the overflow-handling branch
+    /// above), so 10 attempts spans a couple of minutes in total: comfortably longer than
+    /// the roughly 10-20 seconds a real production episode of the transient GPU/KV-cache
+    /// pressure this branch treats as the real cause was directly observed taking to clear,
+    /// without letting a candidate that will never succeed hold a GPU concurrency slot
+    /// forever.
     /// </summary>
     private const int MaximumContextOverflowRetries = 10;
 
     /// <summary>
-    /// A short, flat delay rather than exponential backoff: the condition this branch now
-    /// treats as the real cause (transient GPU/KV-cache scheduling pressure from
-    /// concurrently running requests, not a genuinely oversized prompt -- see the
-    /// overflow-handling branch's own remarks) is expected to clear within seconds once
-    /// ContentAnalysisConcurrency/SceneVerificationConcurrency/SceneEscalationConcurrency
-    /// leave real headroom under vLLM's own request ceiling, not minutes. An exponential
-    /// delay across up to MaximumContextOverflowRetries attempts would keep a real,
-    /// answerable candidate waiting far longer than the actual transient condition does.
+    /// A flat delay between context-overflow retries, rather than exponential backoff: the
+    /// condition this branch treats as the real cause (transient GPU/KV-cache scheduling
+    /// pressure from concurrently running requests, not a genuinely oversized prompt -- see
+    /// the overflow-handling branch's own remarks) was directly observed clearing within
+    /// roughly 10-20 seconds in a real production episode. A prior version of this delay
+    /// (a flat 2 seconds) let all 10 attempts burn through in about 10 seconds, failing the
+    /// job right as that same real episode's pressure was clearing. 5 seconds spans that
+    /// same 10-20 second window at least once within the first 2-4 attempts, while the full
+    /// MaximumContextOverflowRetries budget (50 seconds total) still fails a genuinely
+    /// unrecoverable candidate in well under a minute rather than hanging a GPU concurrency
+    /// slot for the multiple minutes an exponential delay across 10 attempts would take.
     /// </summary>
-    private static readonly TimeSpan ContextOverflowRetryDelay = TimeSpan.FromSeconds(2);
+    private static readonly TimeSpan ContextOverflowRetryDelay = TimeSpan.FromSeconds(5);
 
     /// <summary>
     /// Below this, a revised max_tokens is not worth attempting: this pipeline's own JSON
