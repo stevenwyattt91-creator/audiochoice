@@ -3965,18 +3965,20 @@ Assert(
         "The retried request's successful response was not returned to the caller.");
 }
 
-// The same overflow, but with no viable max_tokens left even at the minimum -- must fail
-// loudly with a clear message rather than retry forever or return an unusably small budget.
+// The same overflow, but reported repeatedly all the way down to the minimum viable
+// max_tokens -- must fail loudly with a clear message rather than retry forever or return
+// an unusably small budget. VllmMaxTokens starts low enough here that halving reaches
+// MinimumViableMaxTokens (512) in a small, deterministic number of attempts.
 {
     var schema = new System.Text.Json.Nodes.JsonObject { ["type"] = "object" };
     var handler = new FakeRoutedHttpMessageHandler(_ => new HttpResponseMessage(
         System.Net.HttpStatusCode.BadRequest)
     {
         Content = new StringContent(
-            """{"error":{"message":"This model's maximum context length is 65536 tokens. However, you requested 8000 output tokens and your prompt contains at least 65500 input tokens, for a total of at least 73500 tokens.","type":"BadRequestError"}}""")
+            """{"error":{"message":"This model's maximum context length is 65536 tokens. However, you requested 800 output tokens and your prompt contains at least 65500 input tokens, for a total of at least 66300 tokens.","type":"BadRequestError"}}""")
     });
     var httpClient = new HttpClient(handler) { BaseAddress = new Uri("http://127.0.0.1:8002/v1/") };
-    var vllmOptions = new OpenAIProcessingOptions { VllmMaxTokens = 8000 };
+    var vllmOptions = new OpenAIProcessingOptions { VllmMaxTokens = 800 };
     var vllmClient = new VllmModelClient(httpClient, vllmOptions, NullLogger<VllmModelClient>.Instance);
 
     var threw = false;
@@ -3989,11 +3991,12 @@ Assert(
     {
         threw = true;
         Assert(
-            error.Message.Contains("too large for the local model's context window"),
-            "An unrecoverable context overflow's error message did not explain why.");
+            error.Message.Contains("minimum viable max_tokens"),
+            "An unrecoverable context overflow's error message did not explain why. " +
+            "Message: " + error.Message);
     }
-    Assert(threw, "An unrecoverable context overflow (no viable max_tokens remaining) did " +
-        "not fail loudly.");
+    Assert(threw, "An unrecoverable context overflow (still failing at the minimum viable " +
+        "max_tokens) did not fail loudly.");
 }
 
 // A real production regression this covers: under heavy concurrent GPU load, vLLM's own
@@ -4002,34 +4005,23 @@ Assert(
 // max_tokens shrank by the same amount to compensate -- the two chased each other forever,
 // with no cap on this retry path (see CompleteJson's own remarks on why it deliberately
 // does not share MaximumRetries' budget). Must eventually give up rather than hang the
-// whole job's GPU concurrency slot forever -- but must not give up early on a retry whose
-// input-token count did not shrink, since that turned out to be a false-positive signal in
-// production (see the next test's own remarks) rather than reliable proof of an unwinnable
-// loop. MaximumContextOverflowRetries is the sole bound now: unconditional, regardless of
-// which direction any individual attempt's reported count moved.
+// whole job's GPU concurrency slot forever, even if the halving retry (see CompleteJson's
+// own remarks on why it no longer does arithmetic on vLLM's reported input-token count)
+// has not yet reached MinimumViableMaxTokens. Started from a deliberately oversized
+// VllmMaxTokens (far above anything this pipeline really configures) purely so the halving
+// sequence takes more than MaximumContextOverflowRetries steps to reach that floor -- proof
+// the attempt cap itself, not just the floor check, is what eventually stops a server that
+// keeps reporting an overflow no matter what max_tokens is sent.
 {
     var schema = new System.Text.Json.Nodes.JsonObject { ["type"] = "object" };
-    var reportedInputTokens = 49537;
-    var attemptsMade = 0;
-    var handler = new FakeRoutedHttpMessageHandler(_ =>
+    var handler = new FakeRoutedHttpMessageHandler(_ => new HttpResponseMessage(
+        System.Net.HttpStatusCode.BadRequest)
     {
-        attemptsMade += 1;
-        var body =
-            "{\"error\":{\"message\":\"This model's maximum context length is 65536 " +
-            "tokens. However, you requested 8000 output tokens and your prompt contains " +
-            $"at least {reportedInputTokens} input tokens, for a total of at least " +
-            "73500 tokens.\",\"type\":\"BadRequestError\"}}";
-        // Climbs on every attempt and never once shrinks -- a real, if now understood to
-        // be rarer than first assumed, pattern this pipeline must still not retry forever
-        // against.
-        reportedInputTokens += 257;
-        return new HttpResponseMessage(System.Net.HttpStatusCode.BadRequest)
-        {
-            Content = new StringContent(body)
-        };
+        Content = new StringContent(
+            """{"error":{"message":"This model's maximum context length is 65536 tokens. However, you requested 8000 output tokens and your prompt contains at least 65500 input tokens, for a total of at least 73500 tokens.","type":"BadRequestError"}}""")
     });
     var httpClient = new HttpClient(handler) { BaseAddress = new Uri("http://127.0.0.1:8002/v1/") };
-    var vllmOptions = new OpenAIProcessingOptions { VllmMaxTokens = 16000 };
+    var vllmOptions = new OpenAIProcessingOptions { VllmMaxTokens = 1_000_000 };
     var vllmClient = new VllmModelClient(httpClient, vllmOptions, NullLogger<VllmModelClient>.Instance);
 
     var threw = false;
@@ -4046,31 +4038,30 @@ Assert(
             "A context-overflow retry loop that never converges did not explain that as " +
             "the reason it gave up. Message: " + error.Message);
     }
-    Assert(threw, "A context-overflow retry loop whose reported input size climbs on every " +
-        "attempt forever did not eventually fail loudly -- this is the real production " +
-        "infinite-retry bug MaximumContextOverflowRetries exists to bound.");
+    Assert(threw, "A context-overflow retry loop that never converges did not eventually " +
+        "fail loudly once MaximumContextOverflowRetries was exceeded.");
 }
 
-// The real production false positive this guards against: a real rescan, run in complete
-// isolation with no other job in flight, was directly observed retrying a single call for
-// several consecutive attempts with its reported input-token count climbing every time
-// (49537 -> 49794 -> 50051...), then genuinely converging afterward -- proof that vLLM's
-// own token accounting under concurrency does not always move in the direction a fixed
-// max_tokens reduction expects, even for byte-identical input, and that treating "did not
-// shrink this one time" (or even several times in a row) as unrecoverable drift fails real,
-// eventually-convergent candidates. Only the hard attempt cap may end this loop early now.
+// A real production regression this covers: vLLM's own reported "input tokens counted" in
+// this error is not an independent measurement of the real prompt -- confirmed directly by
+// reproducing the identical failure on two unrelated books (Fourth Wing, Red Rising), each
+// run completely alone with no concurrent load, both reporting the exact same figure on
+// their first overflow at the same starting max_tokens, and every later attempt's figure
+// moving in exact lockstep with whatever max_tokens had just been changed to. An earlier
+// version of this retry computed a revised max_tokens from that reported figure, which
+// (given the relationship above) reduced to nothing more than "previous max_tokens minus a
+// constant" regardless of the real prompt -- it was never actually reacting to the model's
+// real state. This exercises that the retry now halves its own previous max_tokens instead
+// and ignores the reported figure for arithmetic, converging correctly once the server
+// stops reporting an overflow (simulating the transient GPU/KV-cache pressure this is now
+// understood to actually be), regardless of what number appears in that error body.
 {
     var schema = new System.Text.Json.Nodes.JsonObject { ["type"] = "object" };
     var attempt = 0;
-    // Climbs for several consecutive attempts -- more than a single-attempt-tolerant check
-    // would have allowed -- then genuinely converges, matching the real production shape
-    // this test is named for.
-    var reportedInputTokens = new[] { 49537, 49794, 50051, 50308, 40000 };
     var handler = new FakeRoutedHttpMessageHandler(_ =>
     {
-        var tokens = reportedInputTokens[Math.Min(attempt, reportedInputTokens.Length - 1)];
         attempt += 1;
-        if (attempt >= reportedInputTokens.Length)
+        if (attempt > 3)
         {
             return new HttpResponseMessage(System.Net.HttpStatusCode.OK)
             {
@@ -4078,10 +4069,13 @@ Assert(
                     """{"choices":[{"message":{"content":"{\"events\":[]}"}}],"usage":{"prompt_tokens":40000,"completion_tokens":10}}""")
             };
         }
+        // Reports the same climbing figure every time regardless of what max_tokens this
+        // exact request just sent -- the retry must not use this number for arithmetic at
+        // all, only as a signal to halve its own previous max_tokens and try again.
         var body =
             "{\"error\":{\"message\":\"This model's maximum context length is 65536 " +
             "tokens. However, you requested 8000 output tokens and your prompt contains " +
-            $"at least {tokens} input tokens, for a total of at least 73500 tokens.\"," +
+            "at least 49537 input tokens, for a total of at least 73500 tokens.\"," +
             "\"type\":\"BadRequestError\"}}";
         return new HttpResponseMessage(System.Net.HttpStatusCode.BadRequest)
         {
@@ -4096,10 +4090,10 @@ Assert(
         "qwen3.6-27b", "some prompt", "test_schema", schema, CancellationToken.None);
     Assert(
         response.Json == "{\"events\":[]}",
-        "Several consecutive non-shrinking context-overflow attempts, followed by real " +
-        "convergence, were treated as unrecoverable drift instead of being allowed to " +
-        "converge normally -- this is the real production false positive a genuinely " +
-        "convergent candidate hit, in complete isolation with no concurrent load at all.");
+        "A context-overflow retry did not converge once the server stopped reporting an " +
+        "overflow, even though vLLM's own reported input-token count never changed across " +
+        "attempts -- the retry must halve its own previous max_tokens rather than trusting " +
+        "that reported figure for arithmetic.");
 }
 
 // VllmModelClient.CompleteJson's per-call base temperature -- a real production fix: the
