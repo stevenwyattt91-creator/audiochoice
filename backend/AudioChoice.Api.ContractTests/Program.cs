@@ -4044,10 +4044,60 @@ Assert(
     Assert(threw, "A context-overflow retry loop whose reported input size climbs on every " +
         "attempt did not fail loudly -- this is the real production infinite-retry bug.");
     Assert(
-        attemptsMade <= 3,
+        attemptsMade <= 5,
         "A drifting context-overflow count was retried far more than needed to detect it " +
         $"is not converging ({attemptsMade} attempts) -- the drift check should catch " +
-        "this within a couple of attempts, not let it run for many more.");
+        "this within a small, bounded number of consecutive non-shrinking attempts, not " +
+        "let it run for many more.");
+}
+
+// The real production false positive this guards against: a single non-shrinking
+// context-overflow attempt, on its own, must not be treated as proof of runaway drift --
+// directly observed happening to a genuinely convergent candidate under real concurrent
+// load (five different concurrent batches happened to report nearly the same input-token
+// count on their first overflow, purely from being similarly sized, and one of them
+// measured a slightly higher count on its very next real attempt before converging
+// normally on the attempt after that). Must not fail the whole job over one isolated blip.
+{
+    var schema = new System.Text.Json.Nodes.JsonObject { ["type"] = "object" };
+    var attempt = 0;
+    // Non-shrinking once (49537 -> 49600), then genuinely converges (49600 -> 40000, well
+    // under the window), exactly the shape a one-off blip under concurrency produces.
+    var reportedInputTokens = new[] { 49537, 49600, 40000 };
+    var handler = new FakeRoutedHttpMessageHandler(_ =>
+    {
+        var tokens = reportedInputTokens[Math.Min(attempt, reportedInputTokens.Length - 1)];
+        attempt += 1;
+        if (attempt >= reportedInputTokens.Length)
+        {
+            return new HttpResponseMessage(System.Net.HttpStatusCode.OK)
+            {
+                Content = new StringContent(
+                    """{"choices":[{"message":{"content":"{\"events\":[]}"}}],"usage":{"prompt_tokens":40000,"completion_tokens":10}}""")
+            };
+        }
+        var body =
+            "{\"error\":{\"message\":\"This model's maximum context length is 65536 " +
+            "tokens. However, you requested 8000 output tokens and your prompt contains " +
+            $"at least {tokens} input tokens, for a total of at least 73500 tokens.\"," +
+            "\"type\":\"BadRequestError\"}}";
+        return new HttpResponseMessage(System.Net.HttpStatusCode.BadRequest)
+        {
+            Content = new StringContent(body)
+        };
+    });
+    var httpClient = new HttpClient(handler) { BaseAddress = new Uri("http://127.0.0.1:8002/v1/") };
+    var vllmOptions = new OpenAIProcessingOptions { VllmMaxTokens = 16000 };
+    var vllmClient = new VllmModelClient(httpClient, vllmOptions, NullLogger<VllmModelClient>.Instance);
+
+    var response = await vllmClient.CompleteJson(
+        "qwen3.6-27b", "some prompt", "test_schema", schema, CancellationToken.None);
+    Assert(
+        response.Json == "{\"events\":[]}",
+        "A single isolated non-shrinking context-overflow attempt, followed by real " +
+        "convergence, was treated as unrecoverable drift instead of being allowed to " +
+        "converge normally -- this is the real production false positive a genuinely " +
+        "convergent candidate hit under concurrent load.");
 }
 
 // VllmModelClient.CompleteJson's per-call base temperature -- a real production fix: the

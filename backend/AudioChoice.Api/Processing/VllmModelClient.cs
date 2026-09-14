@@ -92,6 +92,7 @@ public sealed class VllmModelClient(
         // against.
         var contextOverflowAttempts = 0;
         int? previousOverflowInputTokens = null;
+        var consecutiveNonShrinkingAttempts = 0;
 
         for (var attempt = 0; ; attempt += 1)
         {
@@ -276,19 +277,44 @@ public sealed class VllmModelClient(
                     // count drifts under load (heavier concurrent KV cache and prefix-cache
                     // churn is the likely cause, but this fix does not depend on that being
                     // right).
-                    if (previousOverflowInputTokens is { } previousInputTokens &&
-                        detected.InputTokens >= previousInputTokens)
+                    // A real production false-positive this guards against: a single
+                    // non-shrinking attempt is not reliable proof of the drift this check
+                    // exists to catch. Confirmed by direct observation running this exact
+                    // fix under real concurrent load: five different, genuinely distinct
+                    // batches (five different HTTP calls, five different response
+                    // latencies) coincidentally reported nearly the same input-token count
+                    // on their very first overflow, purely because their underlying text
+                    // windows happened to be similarly sized -- not because any one of
+                    // them was drifting. One of those five, on its very next real
+                    // regeneration at a smaller max_tokens, measured a token count vLLM's
+                    // own chat-templating/prefix-cache state pushed slightly higher than
+                    // its first attempt, which is not the same failure as the original
+                    // 75-times-in-5-minutes climb this branch was built to catch. Requiring
+                    // several consecutive non-shrinking attempts (not just one) before
+                    // concluding this cannot converge tells the two apart: genuine runaway
+                    // drift keeps climbing every attempt in a row, while an isolated,
+                    // one-off non-shrink still converges on a later attempt.
+                    if (detected.InputTokens >= (previousOverflowInputTokens ?? int.MinValue))
                     {
-                        throw new HttpRequestException(
-                            $"{schemaName} failed with HTTP {(int)response.StatusCode}: the " +
-                            "model's own reported input-token count did not shrink between " +
-                            $"context-overflow retries ({previousInputTokens} then " +
-                            $"{detected.InputTokens} of {detected.ContextWindow}) -- this cannot " +
-                            "converge by reducing max_tokens alone, most likely because heavy " +
-                            "concurrent load is making the server's own count drift rather than " +
-                            "the prompt itself growing. Stopped after " +
-                            $"{contextOverflowAttempts + 1} attempt(s) rather than retrying " +
-                            "without end.");
+                        consecutiveNonShrinkingAttempts += 1;
+                        if (consecutiveNonShrinkingAttempts >= MaximumConsecutiveNonShrinkingAttempts)
+                        {
+                            throw new HttpRequestException(
+                                $"{schemaName} failed with HTTP {(int)response.StatusCode}: the " +
+                                "model's own reported input-token count did not shrink across " +
+                                $"{consecutiveNonShrinkingAttempts} consecutive context-overflow " +
+                                $"retries (most recently {previousOverflowInputTokens} then " +
+                                $"{detected.InputTokens} of {detected.ContextWindow}) -- this " +
+                                "cannot converge by reducing max_tokens alone, most likely " +
+                                "because heavy concurrent load is making the server's own count " +
+                                "drift rather than the prompt itself growing. Stopped after " +
+                                $"{contextOverflowAttempts + 1} attempt(s) rather than retrying " +
+                                "without end.");
+                        }
+                    }
+                    else
+                    {
+                        consecutiveNonShrinkingAttempts = 0;
                     }
                     previousOverflowInputTokens = detected.InputTokens;
 
@@ -366,6 +392,22 @@ public sealed class VllmModelClient(
     /// stop drifting from consuming a GPU concurrency slot forever.
     /// </summary>
     private const int MaximumContextOverflowRetries = 10;
+
+    /// <summary>
+    /// How many consecutive context-overflow attempts must fail to shrink the reported
+    /// input-token count before concluding this candidate cannot converge at all.
+    /// </summary>
+    /// <remarks>
+    /// One, on its own, is not reliable proof of runaway drift: a single non-shrinking
+    /// attempt was directly observed happening to a genuinely isolated, one-off batch under
+    /// real concurrent load, purely from ordinary variance in vLLM's own token accounting
+    /// under concurrency -- not the same failure as a count climbing on every attempt in a
+    /// row. Kept well below MaximumContextOverflowRetries: this is meant to catch the
+    /// runaway-drift shape specifically (many attempts, monotonically climbing, never once
+    /// going down) well before that much larger overall budget is exhausted, not to replace
+    /// it.
+    /// </remarks>
+    private const int MaximumConsecutiveNonShrinkingAttempts = 3;
 
     /// <summary>
     /// Below this, a revised max_tokens is not worth attempting: this pipeline's own JSON
