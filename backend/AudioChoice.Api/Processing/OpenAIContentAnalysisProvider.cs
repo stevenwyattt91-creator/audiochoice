@@ -925,12 +925,71 @@ public sealed class OpenAIContentAnalysisProvider(
         CancellationToken cancellationToken)
     {
         var input = BuildInput(segments);
-        var response = await modelClient.CompleteJson(
-            options.AnalysisModel,
-            input,
-            "audiochoice_scan_events",
-            AnalysisResponseSchema(),
-            cancellationToken);
+        AnalysisModelResponse response;
+        try
+        {
+            response = await modelClient.CompleteJson(
+                options.AnalysisModel,
+                input,
+                "audiochoice_scan_events",
+                AnalysisResponseSchema(),
+                cancellationToken);
+        }
+        catch (HttpRequestException error) when (
+            segments.Count > 1 &&
+            (error.Message.Contains("context-overflow retries") ||
+             error.Message.Contains("minimum viable max_tokens")))
+        {
+            // Split rather than drop, and rather than fail the job. This is the detection
+            // pass itself: abandoning the batch would leave every segment in it with no
+            // events at all -- a silent unfiltered stretch of a real book, which is the one
+            // outcome worse than a slow scan. Scene verification can afford to drop an
+            // unverified candidate (see VerifySceneBatch's caller) because a dropped
+            // candidate is merely not reported; here the batch *is* the reporting.
+            //
+            // Halves are independent: every event's timing comes from the segments it was
+            // found in, so concatenating the two answers loses nothing except an event that
+            // straddled the split point -- and the surrounding merge/scene passes already
+            // stitch adjacent findings back together. Also worth noting that the observed
+            // overflow is a vLLM-side misreport (the remarks on VerifySceneBatch's caller
+            // document a 13,512-character passage claiming an impossible token count), so
+            // re-asking with different content usually succeeds outright.
+            var middle = segments.Count / 2;
+            logger.LogWarning(
+                error,
+                "Content analysis batch of {SegmentCount} segments " +
+                "({SpanStart:F0}s-{SpanEnd:F0}s) reported a context-length overflow; " +
+                "splitting into {FirstCount} + {SecondCount} and retrying rather than " +
+                "losing the batch's events.",
+                segments.Count, segments[0].StartTime, segments[^1].EndTime,
+                middle, segments.Count - middle);
+
+            var firstHalf = await AnalyzeBatch(
+                segments.Take(middle).ToArray(), cancellationToken);
+            var secondHalf = await AnalyzeBatch(
+                segments.Skip(middle).ToArray(), cancellationToken);
+            return new AnalysisPayload([.. firstHalf.Events, .. secondHalf.Events]);
+        }
+        catch (HttpRequestException error) when (
+            segments.Count == 1 &&
+            (error.Message.Contains("context-overflow retries") ||
+             error.Message.Contains("minimum viable max_tokens")))
+        {
+            // Floor of the split above: one segment that still cannot be answered. Failing
+            // the whole job here would throw away a complete, otherwise-good scan of an
+            // entire audiobook over a single transcript segment, so this yields no events
+            // for that one segment and lets the scan finish. Logged as an error, not a
+            // warning: it is a real blind spot, it names the exact seconds affected so it
+            // can be re-checked by hand, and it must never pass unnoticed.
+            logger.LogError(
+                error,
+                "Content analysis could not classify the single segment at " +
+                "{SpanStart:F0}s-{SpanEnd:F0}s after exhausting every retry; it yields no " +
+                "events and the scan continues. This span is unfiltered and needs review.",
+                segments[0].StartTime, segments[0].EndTime);
+            return new AnalysisPayload([]);
+        }
+
         RecordUsage(options.AnalysisModel, response);
 
         return ReadPayload<AnalysisPayload>(response.Json, "Content analysis")
