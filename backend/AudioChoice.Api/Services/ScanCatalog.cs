@@ -70,6 +70,28 @@ public interface IScanCatalog
     void SaveResult(
         BookFingerprint fingerprint,
         ScanResult result);
+
+    /// <summary>
+    /// Adds one event to an edition's newest stored scan result. Returns false when the
+    /// edition has no result to add to.
+    /// </summary>
+    /// <remarks>
+    /// The repair path for a real miss. Until this existed a scan could be read but never
+    /// corrected: a passage the model failed to flag stayed unfiltered with no way to fix it
+    /// short of editing the database by hand, and a listener heard it.
+    ///
+    /// Deliberately an insert of a single row rather than <see cref="SaveResult"/> with an
+    /// extra event appended. SaveResult clears the result's events and rewrites them, and
+    /// both <c>audit_decisions</c> and <c>approved_scan_events</c> reference
+    /// <c>scan_events(id)</c> with no cascade -- so on an edition an auditor has already
+    /// worked, rewriting the set would fail on a foreign key rather than add one event.
+    ///
+    /// Not durable across a rescan at the same scanner version: that path replaces the
+    /// result's events wholesale, so a repair applied here has to be reapplied afterwards.
+    /// </remarks>
+    bool AddResultEvent(
+        BookFingerprint fingerprint,
+        ScanEvent scanEvent);
     IReadOnlyList<ScanJobRecord> RecoverableJobs();
     IReadOnlyList<UploadRecord> ExpiredUploads(DateTimeOffset now);
     bool MarkUploadDeleted(Guid uploadID);
@@ -405,6 +427,22 @@ public sealed class InMemoryScanCatalog : IScanCatalog
     {
         _results[FingerprintKey(fingerprint)] = result;
         Persist();
+    }
+
+    public bool AddResultEvent(BookFingerprint fingerprint, ScanEvent scanEvent)
+    {
+        var key = FingerprintKey(fingerprint);
+        if (!_results.TryGetValue(key, out var result)) return false;
+
+        // Kept in start order to match what the Postgres reader returns, so a caller cannot
+        // tell the two catalogues apart by the order a repaired result comes back in.
+        var events = result.Events
+            .Append(scanEvent)
+            .OrderBy(item => item.StartTime)
+            .ToArray();
+        _results[key] = result with { Events = events };
+        Persist();
+        return true;
     }
 
     public IReadOnlyList<ScanJobRecord> RecoverableJobs() =>

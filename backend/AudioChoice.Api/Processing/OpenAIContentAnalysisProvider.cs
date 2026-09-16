@@ -866,33 +866,10 @@ public sealed class OpenAIContentAnalysisProvider(
             return SafeDescription(supplied);
         }
 
-        return label switch
-        {
-            "sexual_suggestive_dialogue" => "Suggestive dialogue or innuendo occurs",
-            "sexual_kissing" => "Characters kiss",
-            "sexual_references" => "A sexual reference is made",
-            "sexual_nudity" => "A character removes clothing or is described without clothing",
-            "sexual_implied_activity" => "An intimate encounter is implied",
-            "sexual_explicit_activity" => "Characters are described in an intimate encounter",
-            "sexual_complete_scene" => "Characters are described in a sustained intimate encounter",
-            "sexual_violence" => "Sexual violence is described",
-            "violence_graphic" => "Graphic violence described",
-            "violence_torture" => "Torture described",
-            "violence_children" => "Violence involving children described",
-            "violence_animals" => "Violence involving animals described",
-            "substance_alcohol_use" => "Alcohol use described",
-            "substance_intoxication" => "Intoxication described",
-            "substance_drug_reference" => "Drug reference detected",
-            "substance_drug_use" => "Drug use described",
-            "substance_abuse_overdose" => "Substance abuse or overdose described",
-            "blasphemy_religious_profanity" => "Religious profanity detected",
-            "blasphemy_statement" => "Blasphemous statement detected",
-            "self_harm_reference" => "Self-harm reference detected",
-            "self_harm_suicidal_thoughts" => "Suicidal thoughts described",
-            "self_harm_suicide_attempt" => "Suicide attempt described",
-            "self_harm_depiction" => "Self-harm depicted",
-            _ => "Content event detected"
-        };
+        // Moved to ContentTaxonomy so the admin repair endpoint resolves the same string for
+        // the same label; a hand-added event fixing a miss must be indistinguishable to a
+        // listener from the scanned events on either side of it.
+        return ContentTaxonomy.CanonicalDescription(label);
     }
 
     private static bool ContainsUncleanDetail(string value)

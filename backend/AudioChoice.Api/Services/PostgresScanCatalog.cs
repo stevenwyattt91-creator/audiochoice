@@ -829,6 +829,56 @@ public sealed class PostgresScanCatalog(
         }
     }
 
+    public bool AddResultEvent(BookFingerprint fingerprint, ScanEvent scanEvent)
+    {
+        using var connection = dataSource.OpenConnection();
+        using var transaction = connection.BeginTransaction();
+
+        var editionID = FindEditionID(connection, transaction, fingerprint);
+        if (editionID is null) return false;
+
+        // The newest result by scanned_at, which is the one FindLatestResult serves to
+        // listeners; repairing anything older would write into a result nothing reads.
+        Guid resultID;
+        using (var command = new NpgsqlCommand("""
+            select id from scan_results
+            where edition_id = $1 order by scanned_at desc limit 1;
+            """, connection, transaction))
+        {
+            command.Parameters.AddWithValue(editionID.Value);
+            if (command.ExecuteScalar() is not Guid found) return false;
+            resultID = found;
+        }
+
+        using (var insert = new NpgsqlCommand("""
+            insert into scan_events(
+                id, scan_result_id, start_seconds, end_seconds,
+                category_id, group_id, event_id, confidence, stable_key,
+                safe_description, aggregate_key, aggregate_display)
+            values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12);
+            """, connection, transaction))
+        {
+            insert.Parameters.AddWithValue(scanEvent.Id);
+            insert.Parameters.AddWithValue(resultID);
+            insert.Parameters.AddWithValue(scanEvent.StartTime);
+            insert.Parameters.AddWithValue(scanEvent.EndTime);
+            insert.Parameters.AddWithValue(scanEvent.CategoryID);
+            insert.Parameters.AddWithValue(scanEvent.GroupID);
+            insert.Parameters.AddWithValue(scanEvent.EventID);
+            insert.Parameters.AddWithValue(scanEvent.Confidence);
+            insert.Parameters.AddWithValue(string.IsNullOrWhiteSpace(scanEvent.StableKey)
+                ? new string('0', 64)
+                : scanEvent.StableKey);
+            insert.Parameters.AddWithValue(scanEvent.SafeDescription);
+            AddNullable(insert, scanEvent.AggregateKey);
+            AddNullable(insert, scanEvent.AggregateDisplay);
+            insert.ExecuteNonQuery();
+        }
+
+        transaction.Commit();
+        return true;
+    }
+
     private static ScanResult? FindLatestResult(
         NpgsqlConnection connection, NpgsqlTransaction? transaction, Guid editionID)
     {

@@ -170,6 +170,30 @@ public sealed record AdminEditionDeleteRequest(
     bool ConfirmIrreversible,
     bool DiscardActiveAuditWork = false);
 
+/// <summary>
+/// Adds one filter event to an edition's newest scan result, to repair a real miss.
+/// </summary>
+/// <remarks>
+/// Takes a taxonomy <see cref="Label"/> rather than the three raw GUIDs an event carries, so
+/// a hand-made repair cannot invent a category/group/event combination the app has no switch
+/// for -- ContentTaxonomy already owns that translation and is the only thing allowed to do it.
+///
+/// The times are proposals: they are snapped to the transcript's own nearest word boundaries
+/// before being stored, the same as every scanner-produced event, so a repair does not become
+/// the one event in a book that cuts mid-word.
+///
+/// There is deliberately no description field. What a listener sees comes from
+/// <see cref="ContentTaxonomy.CanonicalDescription"/> for the label, which keeps a repair
+/// worded exactly like the scanned events around it and makes it impossible for one to
+/// describe the content it exists to hide.
+/// </remarks>
+public sealed record AdminAddEventRequest(
+    BookFingerprint Fingerprint,
+    string Label,
+    double StartTime,
+    double EndTime,
+    double Confidence = 1.0);
+
 public sealed record AdminEditionMetadataRequest(
     BookFingerprint Fingerprint,
     string WorkTitle,

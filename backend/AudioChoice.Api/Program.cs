@@ -2031,6 +2031,110 @@ app.MapGet("/v1/admin/transcripts", async (
     return Results.Ok(transcripts);
 });
 
+// Adds one filter event to an edition's newest scan result, to repair a passage the scan
+// missed. Until this existed a result could be read but never corrected: a real miss stayed
+// unfiltered and a listener heard it, with no remedy short of editing the database by hand.
+//
+// Additive only, and deliberately so. Removing or rewriting an event is a different and far
+// less safe operation -- audit decisions and approved events both reference scan_events(id) --
+// while over-filtering a few seconds costs a listener nothing they did not ask for. The
+// asymmetry is the whole reason this is worth having: a missed passage is the failure this
+// product cannot afford, and an extra event is not.
+app.MapPost("/v1/admin/editions/events", async (
+    AdminAddEventRequest request,
+    HttpContext context,
+    IScanCatalog catalog,
+    IPrivateTranscriptStore transcriptStore,
+    ILogger<Program> logger,
+    CancellationToken cancellationToken) =>
+{
+    if (!IsConfiguredApiToken(context, app.Configuration)) return Results.Unauthorized();
+
+    var label = (request.Label ?? string.Empty).Trim();
+    if (!ContentTaxonomy.EnforcedLabels.Contains(label) ||
+        !ContentTaxonomy.Mappings.TryGetValue(label, out var mapping))
+    {
+        return Results.BadRequest(new
+        {
+            error = "Unknown or unsupported content label.",
+            supported = ContentTaxonomy.EnforcedLabels
+        });
+    }
+
+    if (request.StartTime < 0 || request.EndTime <= request.StartTime)
+    {
+        return Results.BadRequest(new
+        {
+            error = "startTime must be zero or greater and endTime must be after it."
+        });
+    }
+
+    if (request.Confidence is < 0 or > 1)
+    {
+        return Results.BadRequest(new { error = "confidence must be between 0 and 1." });
+    }
+
+    if (catalog.FindResult(request.Fingerprint) is null)
+    {
+        return Results.NotFound(new
+        {
+            error = "That exact fingerprint has no stored scan result to add an event to."
+        });
+    }
+
+    // Snapped against the edition's own saved transcript, so a repaired edge lands where a
+    // word actually starts or ends. Without this the repair would be the single event in the
+    // book capable of cutting a listener off mid-syllable -- the exact defect the word-timing
+    // work exists to prevent. A transcript with no word timing snaps nothing and the proposed
+    // times stand, which mirrors TranscriptWordLocator's own documented fallback.
+    var start = request.StartTime;
+    var end = request.EndTime;
+    var transcript = await transcriptStore.Load(request.Fingerprint, cancellationToken);
+    var snapped = transcript is null
+        ? null
+        : TranscriptWordLocator.SnapToNearestWord(transcript.Segments, start, end);
+    if (snapped is not null)
+    {
+        (start, end) = (snapped.Value.Start, snapped.Value.End);
+    }
+
+    // Same construction SceneEventPostProcessor uses for its own synthesised events: a
+    // SHA256 over the event's identity and rounded span. The key is what a listener's saved
+    // per-event preference attaches to, so it has to be derived rather than random.
+    var material = $"repair|{mapping.EventID:N}|{start:F1}|{end:F1}";
+    var stableKey = Convert.ToHexString(
+        SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(material))).ToLowerInvariant();
+
+    var added = catalog.AddResultEvent(request.Fingerprint, new ScanEvent(
+        Guid.NewGuid(), start, end, mapping.CategoryID, mapping.GroupID, mapping.EventID,
+        request.Confidence, stableKey, ContentTaxonomy.CanonicalDescription(label)));
+    if (!added)
+    {
+        return Results.NotFound(new
+        {
+            error = "That exact fingerprint has no stored scan result to add an event to."
+        });
+    }
+
+    logger.LogInformation(
+        "Added a {Label} repair event to {Title} ({Sha}) covering {Start:F2}s-{End:F2}s " +
+        "(requested {RequestedStart:F2}s-{RequestedEnd:F2}s, snapped to word boundaries: {Snapped}).",
+        label, request.Fingerprint.WorkTitle, request.Fingerprint.Sha256[..12],
+        start, end, request.StartTime, request.EndTime, snapped is not null);
+
+    return Results.Ok(new
+    {
+        label,
+        startTime = start,
+        endTime = end,
+        requestedStartTime = request.StartTime,
+        requestedEndTime = request.EndTime,
+        snappedToWordBoundaries = snapped is not null,
+        safeDescription = ContentTaxonomy.CanonicalDescription(label),
+        stableKey
+    });
+});
+
 app.MapPut("/v1/admin/editions/metadata", (
     AdminEditionMetadataRequest request,
     HttpContext context,
