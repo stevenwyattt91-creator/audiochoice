@@ -226,12 +226,24 @@ struct AccountScreen: View {
             }
             .padding(.horizontal, 24)
             .padding(.vertical, 20)
+            // Tapping the background puts the keyboard away, which a form gave for free and a
+            // ScrollView does not.
+            //
+            // It has to sit *behind* the column, not on the ScrollView. Attached to the scroll view
+            // with a contentShape, the same gesture covered the whole screen and took every tap on
+            // Sign in with Apple: that button is a UIKit control (ASAuthorizationAppleIDButton)
+            // hosted in SwiftUI, and it does not win against an ancestor SwiftUI tap recognizer the
+            // way a SwiftUI Button does. So Apple sign-in silently dismissed the keyboard and did
+            // nothing else, while Google -- a plain SwiftUI Button -- kept working. As a background
+            // layer the gesture is below the controls, so a tap only reaches it in the empty space
+            // around them.
+            .background(
+                Color.clear
+                    .contentShape(Rectangle())
+                    .onTapGesture { focusedField = nil }
+            )
         }
-        // Tapping the background puts the keyboard away, which a form gave for free and a
-        // ScrollView does not.
         .scrollDismissesKeyboard(.interactively)
-        .contentShape(Rectangle())
-        .onTapGesture { focusedField = nil }
     }
 
     private var brandMark: some View {
