@@ -38,6 +38,9 @@ var databaseOptions = builder.Configuration
 var temporaryAudioOptions = builder.Configuration
     .GetSection("AudioChoice:TemporaryAudioStorage")
     .Get<TemporaryAudioStorageOptions>() ?? new TemporaryAudioStorageOptions();
+var dataVolumeSeedOptions = builder.Configuration
+    .GetSection("AudioChoice:DataVolumeSeed")
+    .Get<DataVolumeSeedOptions>() ?? new DataVolumeSeedOptions();
 
 builder.WebHost.ConfigureKestrel(options =>
 {
@@ -108,6 +111,11 @@ if (temporaryAudioOptions.S3Enabled)
     builder.Services.AddSingleton<ITemporaryAudioStorage, S3TemporaryAudioStorage>();
     builder.Services.AddSingleton<ICompanionTransferStorage, S3CompanionTransferStorage>();
     builder.Services.AddSingleton<IAuditReviewMediaStorage, S3AuditReviewMediaStorage>();
+    // Restores edition-signatures.json onto a new data volume. Registered inside the S3 branch
+    // because it needs that client, and ahead of anything that reads the volume so the file is in
+    // place before FileEditionSignatureStore loads it.
+    builder.Services.AddSingleton(dataVolumeSeedOptions);
+    builder.Services.AddSingleton<DataVolumeSeeder>();
 }
 else if (temporaryAudioOptions.BlobEnabled)
 {
@@ -548,6 +556,14 @@ if (openAIOptions.WorkerEnabled)
 }
 
 var app = builder.Build();
+
+// Before the host runs, so the data volume is complete before anything reads it. Only registered
+// when S3 storage is selected, and a no-op unless AudioChoice:DataVolumeSeed:Enabled is set.
+if (app.Services.GetService<DataVolumeSeeder>() is { } dataVolumeSeeder)
+{
+    await dataVolumeSeeder.RestoreAsync(CancellationToken.None);
+}
+
 app.Logger.LogInformation(
     "Transcription provider {Provider}; faster-whisper endpoint {Endpoint}; chunk timeout {TimeoutSeconds}s; lane {Lane}",
     openAIOptions.TranscriptionProvider,
