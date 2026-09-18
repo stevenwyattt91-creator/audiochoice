@@ -15,8 +15,20 @@ val privateProperties = Properties().apply {
     if (privateFile.exists()) privateFile.inputStream().use { load(it) }
 }
 
-fun privateValue(name: String): String =
-    (privateProperties.getProperty(name) ?: "").replace("\\", "\\\\").replace("\"", "\\\"")
+fun privateValue(name: String, default: String = ""): String =
+    (privateProperties.getProperty(name)?.takeIf(String::isNotBlank) ?: default)
+        .replace("\\", "\\\\").replace("\"", "\\\"")
+
+// The production API. Kept here as the default rather than only in local.properties, which is
+// untracked: without it a fresh clone or a CI build compiled API_BASE_URL as an empty string, and
+// AudioChoiceApi's own `check(baseUrl.startsWith("https://"))` then failed at the first request
+// with "AudioChoice staging has not been connected to this build yet" -- a build that looked fine
+// until someone tried to sign in.
+//
+// A domain we control, deliberately. The previous host was an azurecontainerapps.io name, which no
+// DNS record could repoint, so every installed APK had that provider's hostname compiled in and
+// moving hosts meant shipping a new build to every tester.
+val defaultApiBaseUrl = "https://api.audiochoiceapp.com"
 
 android {
     namespace = "com.audiochoice.mobile"
@@ -35,7 +47,7 @@ android {
             abiFilters += listOf("arm64-v8a", "x86_64")
         }
 
-        buildConfigField("String", "API_BASE_URL", "\"${privateValue("audiochoice.apiBaseUrl")}\"")
+        buildConfigField("String", "API_BASE_URL", "\"${privateValue("audiochoice.apiBaseUrl", defaultApiBaseUrl)}\"")
         buildConfigField("String", "GOOGLE_SERVER_CLIENT_ID", "\"${privateValue("audiochoice.googleServerClientId")}\"")
         buildConfigField("boolean", "BETA_BUILD", "false")
         buildConfigField("String", "BETA_VERSION", "\"\"")

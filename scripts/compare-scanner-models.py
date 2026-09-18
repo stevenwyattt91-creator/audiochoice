@@ -36,7 +36,7 @@ import time
 import urllib.error
 import urllib.request
 
-DEFAULT_API = "https://audiochoice-stg-api.grayocean-b35d4bf9.eastus.azurecontainerapps.io"
+DEFAULT_API = "https://api.audiochoiceapp.com"
 # Two events are treated as the same finding when they overlap at all and share an event type.
 # Exact stable keys are far too strict: a model that finds the same scene two seconds later has
 # agreed, not disagreed, and comparing keys would report every scene as both missed and added.

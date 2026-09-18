@@ -11,7 +11,7 @@ const steps = [
   ["04", "Transfer to phone", "Scan the QR code in AudioChoice to begin import."],
 ];
 
-const API_URL = (process.env.NEXT_PUBLIC_AUDIOCHOICE_API_URL ?? "https://audiochoice-stg-api.grayocean-b35d4bf9.eastus.azurecontainerapps.io").replace(/\/$/, "");
+const API_URL = (process.env.NEXT_PUBLIC_AUDIOCHOICE_API_URL ?? "https://api.audiochoiceapp.com").replace(/\/$/, "");
 const GOOGLE_CLIENT_ID = process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID || "105248861745-34kh2v9g9825kb1drs3jrgmijjum2p3o.apps.googleusercontent.com";
 // The Services ID is public configuration. Keep the fallback so Apple sign-in
 // remains enabled when the hosting platform has not injected build-time envs.

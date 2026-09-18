@@ -1,0 +1,279 @@
+name: Deploy AudioChoice backend (AWS)
+
+# Replaces deploy-backend.yml. Kept as a separate file rather than an edit, so the Azure pipeline
+# stays runnable until the AWS deployment has served real traffic. Delete the Azure one after.
+#
+# Authentication is OIDC rather than a stored key pair: the job assumes a role with a trust policy
+# scoped to this repository, and no long-lived AWS credential exists as a repository secret. That is
+# the one thing here that is strictly better than what it replaces -- AZURE_CREDENTIALS is a service
+# principal secret sitting in the repository indefinitely.
+
+on:
+  workflow_dispatch:
+    inputs:
+      deployFoundation:
+        description: >-
+          Also deploy the foundation stack. Off by default: it holds the database, the bucket
+          and the filesystem, and it does not need to run on an ordinary code deploy.
+        type: boolean
+        default: false
+  push:
+    branches: [main]
+    paths:
+      - 'backend/**'
+      - 'deploy/aws/**'
+      - '.github/workflows/deploy-backend-aws.yml'
+
+permissions:
+  contents: read
+  id-token: write   # Required for OIDC role assumption.
+
+env:
+  AWS_REGION: us-east-1
+  NAME_PREFIX: audiochoice
+  FOUNDATION_STACK: audiochoice-foundation
+  API_STACK: audiochoice-api
+  DOMAIN_NAME: api.audiochoiceapp.com
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Assume the deploy role
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      # ---------------------------------------------------------------------
+      # Foundation, only on request
+      # ---------------------------------------------------------------------
+
+      - name: Deploy the foundation stack
+        if: inputs.deployFoundation
+        env:
+          DB_PASSWORD: ${{ secrets.AWS_DATABASE_PASSWORD }}
+        run: |
+          if [ -z "$DB_PASSWORD" ]; then
+            echo "::error::AWS_DATABASE_PASSWORD must be set before the foundation stack can be deployed."
+            exit 1
+          fi
+          aws cloudformation deploy \
+            --stack-name "$FOUNDATION_STACK" \
+            --template-file deploy/aws/foundation.yaml \
+            --capabilities CAPABILITY_NAMED_IAM \
+            --no-fail-on-empty-changeset \
+            --parameter-overrides \
+              NamePrefix="$NAME_PREFIX" \
+              DatabasePassword="$DB_PASSWORD"
+
+      - name: Read the foundation outputs
+        id: foundation
+        run: |
+          read_output() {
+            aws cloudformation describe-stacks \
+              --stack-name "$FOUNDATION_STACK" \
+              --query "Stacks[0].Outputs[?OutputKey=='$1'].OutputValue" \
+              --output text
+          }
+          registry=$(read_output RepositoryUri)
+          bucket=$(read_output BucketName)
+          database=$(read_output DatabaseAddress)
+          if [ -z "$registry" ] || [ "$registry" = "None" ]; then
+            echo "::error::The foundation stack has no RepositoryUri output. Run this workflow once with deployFoundation enabled."
+            exit 1
+          fi
+          echo "registry=$registry" >> "$GITHUB_OUTPUT"
+          echo "bucket=$bucket"     >> "$GITHUB_OUTPUT"
+          echo "database=$database" >> "$GITHUB_OUTPUT"
+
+      # ---------------------------------------------------------------------
+      # Image
+      #
+      # Built on the runner and pushed, where the Azure pipeline used `az acr build` to build
+      # server-side. There is no ECR equivalent of that, so the build moves here. Same Dockerfile,
+      # same EnablePostgres=true inside it.
+      # ---------------------------------------------------------------------
+
+      - name: Log in to ECR
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build and push the backend image
+        run: |
+          docker build --file backend/Dockerfile \
+            --tag "${{ steps.foundation.outputs.registry }}:${GITHUB_SHA}" \
+            --tag "${{ steps.foundation.outputs.registry }}:latest" \
+            .
+          docker push "${{ steps.foundation.outputs.registry }}:${GITHUB_SHA}"
+          docker push "${{ steps.foundation.outputs.registry }}:latest"
+
+      # ---------------------------------------------------------------------
+      # Runtime secrets
+      #
+      # Parameter Store rather than Key Vault, but the logic is carried over unchanged, including
+      # the reason for it: ECS fails to start a task that references a parameter which does not
+      # exist, exactly as a Container Apps revision failed on an absent Key Vault secret. So each
+      # optional secret's presence is established here and passed to the stack, rather than assumed.
+      #
+      # Two secrets the Azure pipeline had are gone. AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY
+      # were only ever there so the API could call Polly; the task role does that now.
+      # ---------------------------------------------------------------------
+
+      - name: Write the runtime secrets
+        id: secrets
+        env:
+          DB_PASSWORD: ${{ secrets.AWS_DATABASE_PASSWORD }}
+          APPLE_CLIENT_SECRET: ${{ secrets.APPLE_CLIENT_SECRET }}
+          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+          APNS_AUTH_KEY: ${{ secrets.APNS_AUTH_KEY }}
+          APNS_KEY_ID: ${{ secrets.APNS_KEY_ID }}
+          GOOGLE_SERVICE_ACCOUNT: ${{ secrets.GOOGLE_PURCHASES_SERVICE_ACCOUNT }}
+        run: |
+          prefix="/$NAME_PREFIX"
+
+          exists() {
+            aws ssm get-parameter --name "$prefix/$1" --with-decryption >/dev/null 2>&1
+          }
+
+          put() {
+            aws ssm put-parameter \
+              --name "$prefix/$1" \
+              --value "$2" \
+              --type SecureString \
+              --overwrite >/dev/null
+          }
+
+          # Generated once and then left alone, matching the Azure pipeline. An admin token handed
+          # out for one investigation would otherwise go stale on the next push.
+          if ! exists api-token; then
+            put api-token "$(openssl rand -hex 32)"
+            echo "Generated the admin API token."
+          fi
+
+          # Assembled here and stored complete, so the running task never sees the password on its
+          # own and nothing has to reassemble it. Trust Server Certificate is set because RDS
+          # presents an Amazon RDS CA certificate that the container's trust store does not carry;
+          # the connection is still encrypted by SSL Mode=Require.
+          put postgres-connection-string \
+            "Host=${{ steps.foundation.outputs.database }};Port=5432;Database=audiochoice;Username=audiochoice_admin;Password=${DB_PASSWORD};SSL Mode=Require;Trust Server Certificate=true"
+
+          if [ -n "$APPLE_CLIENT_SECRET" ]; then
+            put apple-client-secret "$APPLE_CLIENT_SECRET"
+          elif ! exists apple-client-secret; then
+            # Not optional. Sign in with Apple is a required alternative wherever Google sign-in is
+            # offered, so the task must not start without the secret that makes it work.
+            echo "::error::APPLE_CLIENT_SECRET is not set and no stored value exists. Apple sign-in would be broken."
+            exit 1
+          fi
+
+          # Rotatable: written whenever the repository secret is present, so changing the key is one
+          # edit here rather than a manual console visit.
+          if [ -n "$RESEND_API_KEY" ]; then put resend-api-key "$RESEND_API_KEY"; fi
+          if exists resend-api-key; then
+            echo "resend=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "resend=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::resend-api-key is absent, so transactional email stays off and password reset cannot send."
+          fi
+
+          if [ -n "$APNS_AUTH_KEY" ]; then put apns-auth-key "$APNS_AUTH_KEY"; fi
+          # Push needs both halves: the key to sign with and the id naming which key signed. Either
+          # alone cannot produce a valid provider token.
+          if [ -n "$APNS_KEY_ID" ] && exists apns-auth-key; then
+            echo "apns=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "apns=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::APNs is not fully configured, so a finished scan will not notify. Listeners must reopen the app."
+          fi
+
+          # This server's own value; nothing outside it needs to know it. Generated once and then
+          # left alone, because rotating it silently drops every notification Apple sends until the
+          # URL in App Store Connect is updated to match.
+          if ! exists apple-purchases-notification-token; then
+            put apple-purchases-notification-token "$(openssl rand -hex 32)"
+            echo "Generated the App Store Server Notifications shared secret."
+          fi
+          echo "appleNotifications=true" >> "$GITHUB_OUTPUT"
+
+          if [ -n "$GOOGLE_SERVICE_ACCOUNT" ]; then put google-purchases-service-account "$GOOGLE_SERVICE_ACCOUNT"; fi
+          if exists google-purchases-service-account; then
+            echo "googleServiceAccount=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "googleServiceAccount=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      # ---------------------------------------------------------------------
+      # Service
+      # ---------------------------------------------------------------------
+
+      - name: Deploy the API stack
+        run: |
+          if [ -z "${{ secrets.AWS_CERTIFICATE_ARN }}" ]; then
+            echo "::error::AWS_CERTIFICATE_ARN is not set. Issue and validate an ACM certificate for $DOMAIN_NAME first; the clients require HTTPS and no certificate can be issued for an amazonaws.com name."
+            exit 1
+          fi
+          aws cloudformation deploy \
+            --stack-name "$API_STACK" \
+            --template-file deploy/aws/api.yaml \
+            --capabilities CAPABILITY_NAMED_IAM \
+            --no-fail-on-empty-changeset \
+            --parameter-overrides \
+              NamePrefix="$NAME_PREFIX" \
+              ImageTag="$GITHUB_SHA" \
+              CertificateArn="${{ secrets.AWS_CERTIFICATE_ARN }}" \
+              DomainName="$DOMAIN_NAME" \
+              ApnsKeyID="${{ secrets.APNS_KEY_ID }}" \
+              ResendApiKeyPresent="${{ steps.secrets.outputs.resend }}" \
+              ApnsAuthKeyPresent="${{ steps.secrets.outputs.apns }}" \
+              AppleNotificationTokenPresent="${{ steps.secrets.outputs.appleNotifications }}" \
+              GoogleServiceAccountPresent="${{ steps.secrets.outputs.googleServiceAccount }}"
+
+      - name: Wait for the service to reach a steady state
+        run: |
+          aws ecs wait services-stable \
+            --cluster "$NAME_PREFIX-cluster" \
+            --services "$NAME_PREFIX-api"
+
+      # A green deployment is not a working API, which this project has already paid to learn once.
+      # The Azure pipeline checked a real route rather than /health for a specific reason: endpoint
+      # construction in minimal APIs is lazy and happens on the first matched request, so only a
+      # real route proves the routing table was built. A revision that started and then threw while
+      # building its routes passed a /health check and served nothing.
+      #
+      # ECS makes that failure mode less likely than Container Apps did -- the circuit breaker rolls
+      # back a task that never becomes healthy -- but /health is still answered by a process whose
+      # routes may not exist, so the check stays.
+      - name: Verify the new task serves a real route
+        run: |
+          host=$(aws cloudformation describe-stacks \
+            --stack-name "$API_STACK" \
+            --query "Stacks[0].Outputs[?OutputKey=='LoadBalancerHostname'].OutputValue" \
+            --output text)
+          echo "Load balancer: $host"
+
+          # Checked through the custom domain, because that is what the apps actually resolve, and a
+          # DNS record that was never pointed here is itself a deployment failure worth catching.
+          for attempt in $(seq 1 30); do
+            code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 10 "https://$DOMAIN_NAME/v1/faq" || echo 000)
+            if [ "$code" = "200" ]; then
+              echo "The new task is serving traffic (/v1/faq answered 200 on attempt $attempt)."
+              exit 0
+            fi
+            echo "attempt $attempt: $code"
+            sleep 10
+          done
+
+          echo "::error::$DOMAIN_NAME never served /v1/faq. Check that the DNS record points at $host, that the certificate covers the name, and the task logs in /aws/ecs/$NAME_PREFIX-api for a startup or routing failure."
+          exit 1
+
+      - name: Report configuration
+        if: always()
+        run: |
+          echo "Text scanning:          enabled"
+          echo "Premium voice:          enabled via the task role (no access keys)"
+          echo "Password reset email:   ${{ steps.secrets.outputs.resend == 'true' && 'enabled' || 'DISABLED (resend-api-key absent)' }}"
+          echo "Scan-complete push:     ${{ steps.secrets.outputs.apns == 'true' && 'enabled' || 'disabled' }}"
+          echo "Google Play purchases:  ${{ steps.secrets.outputs.googleServiceAccount == 'true' && 'enabled' || 'disabled' }}"
