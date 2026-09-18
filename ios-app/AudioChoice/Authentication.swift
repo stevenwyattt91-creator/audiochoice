@@ -233,6 +233,10 @@ final class AuthSession: ObservableObject {
         PushNotificationRegistrar.shared.forgetDeviceToken()
         CloudCredentialStore.saveToken("")
         UserDefaults.standard.removeObject(forKey: userKey)
+        // This device caches the last access answer so an unreachable server cannot revoke a
+        // subscription it simply failed to confirm. That cache belongs to the account being signed
+        // out, so it goes with the session rather than waiting for the next account to overwrite it.
+        PurchaseManager.shared.forgetAccess()
         user = nil
         if let client, let deviceToken {
             Task { try? await client.unregisterPushDevice(token: deviceToken) }
