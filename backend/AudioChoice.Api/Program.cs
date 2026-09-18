@@ -94,7 +94,22 @@ if (databaseOptions.Enabled)
         "This AudioChoice build does not include PostgreSQL support.");
 #endif
 }
-if (temporaryAudioOptions.BlobEnabled)
+// S3 is checked before Blob so that a deployment carrying both settings resolves to AWS, which
+// makes the migration a one-line configuration change and the rollback the same line removed.
+if (temporaryAudioOptions.S3Enabled)
+{
+    if (string.IsNullOrWhiteSpace(temporaryAudioOptions.S3BucketName))
+    {
+        throw new InvalidOperationException(
+            "AudioChoice__TemporaryAudioStorage__S3BucketName is required when S3 direct uploads are enabled.");
+    }
+    builder.Services.AddSingleton(
+        S3TemporaryAudioStorage.CreateClient(temporaryAudioOptions));
+    builder.Services.AddSingleton<ITemporaryAudioStorage, S3TemporaryAudioStorage>();
+    builder.Services.AddSingleton<ICompanionTransferStorage, S3CompanionTransferStorage>();
+    builder.Services.AddSingleton<IAuditReviewMediaStorage, S3AuditReviewMediaStorage>();
+}
+else if (temporaryAudioOptions.BlobEnabled)
 {
 #if POSTGRES
     if (string.IsNullOrWhiteSpace(temporaryAudioOptions.StorageAccountName))
@@ -299,7 +314,19 @@ builder.Services.AddRateLimiter(options =>
                 QueueLimit = 0
             }));
 });
-if (temporaryAudioOptions.BlobTranscriptEnabled)
+if (temporaryAudioOptions.S3TranscriptEnabled)
+{
+    // Same requirement as the Blob pairing below: the transcript store shares the audio store's
+    // client and bucket, so enabling one without the other would register a store with nothing to
+    // talk to.
+    if (!temporaryAudioOptions.S3Enabled)
+    {
+        throw new InvalidOperationException(
+            "S3 audio storage must be enabled when S3 transcript storage is enabled.");
+    }
+    builder.Services.AddSingleton<IPrivateTranscriptStore, S3PrivateTranscriptStore>();
+}
+else if (temporaryAudioOptions.BlobTranscriptEnabled)
 {
 #if POSTGRES
     if (!temporaryAudioOptions.BlobEnabled)
