@@ -829,6 +829,65 @@ public sealed class PostgresScanCatalog(
         }
     }
 
+    public bool RegisterPreSeededEdition(BookFingerprint fingerprint, Guid ownerUserID)
+    {
+        using var connection = dataSource.OpenConnection();
+        using var transaction = connection.BeginTransaction();
+
+        var editionID = UpsertEdition(connection, transaction, fingerprint);
+
+        if (ownerUserID == Guid.Empty)
+        {
+            using var owner = new NpgsqlCommand("""
+                select owner_user_id from scan_uploads
+                order by created_at desc limit 1;
+                """, connection, transaction);
+            ownerUserID = owner.ExecuteScalar() as Guid? ?? Guid.Empty;
+            if (ownerUserID == Guid.Empty) return false;
+        }
+
+        // Nothing to do if this edition already has an upload row; CreateReanalysisJob only
+        // needs one to exist, and writing a second would leave two rows describing audio that
+        // was never stored.
+        using (var existing = new NpgsqlCommand(
+            "select 1 from scan_uploads where edition_id = $1 limit 1;", connection, transaction))
+        {
+            existing.Parameters.AddWithValue(editionID);
+            if (existing.ExecuteScalar() is not null)
+            {
+                transaction.Commit();
+                return true;
+            }
+        }
+
+        var id = Guid.NewGuid();
+        using (var insert = new NpgsqlCommand("""
+            insert into scan_uploads(
+                id, edition_id, owner_user_id, object_name, expected_size,
+                content_type, status, expires_at, delete_after, created_at, upload_token_hash)
+            values ($1, $2, $3, $4, $5, $6, 'deleted', now(), now(), now(), $7);
+            """, connection, transaction))
+        {
+            insert.Parameters.AddWithValue(id);
+            insert.Parameters.AddWithValue(editionID);
+            insert.Parameters.AddWithValue(ownerUserID);
+            insert.Parameters.AddWithValue($"pre-seeded/{id}.audio");
+            insert.Parameters.AddWithValue(fingerprint.FileSize);
+            insert.Parameters.AddWithValue(
+                string.IsNullOrWhiteSpace(fingerprint.FileType)
+                    ? "application/octet-stream"
+                    : $"audio/{fingerprint.FileType}");
+            // No token will ever be presented against this row, so it gets a value that
+            // cannot match one rather than a guessable placeholder.
+            insert.Parameters.AddWithValue(
+                InMemoryScanCatalog.HashToken(Guid.NewGuid().ToString("N")));
+            insert.ExecuteNonQuery();
+        }
+
+        transaction.Commit();
+        return true;
+    }
+
     public bool AddResultEvent(BookFingerprint fingerprint, ScanEvent scanEvent)
     {
         using var connection = dataSource.OpenConnection();

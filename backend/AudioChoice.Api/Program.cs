@@ -2031,6 +2031,60 @@ app.MapGet("/v1/admin/transcripts", async (
     return Results.Ok(transcripts);
 });
 
+// Registers a recording the server has never seen, so the catalogue can carry finished filters
+// for it before anyone imports it. Every other route into audiobook_editions runs through a
+// real listener's upload authorization, which is precisely what an un-imported book lacks --
+// so without this a book could be transcribed (the transcript store is keyed by fingerprint
+// alone) but never scanned, because a scan job needs an edition and an upload row.
+app.MapPost("/v1/admin/editions/register", (
+    AdminRegisterEditionRequest request,
+    HttpContext context,
+    IScanCatalog catalog,
+    ILogger<Program> logger) =>
+{
+    if (!IsConfiguredApiToken(context, app.Configuration)) return Results.Unauthorized();
+
+    var fingerprint = request.Fingerprint;
+    if (string.IsNullOrWhiteSpace(fingerprint?.Sha256) || fingerprint.Sha256.Length != 64)
+    {
+        return Results.BadRequest(new
+        {
+            error = "A 64-character SHA-256 of the whole file is required."
+        });
+    }
+    if (fingerprint.FileSize <= 0)
+    {
+        return Results.BadRequest(new { error = "fileSize must be the file's true byte length." });
+    }
+    if (string.IsNullOrWhiteSpace(fingerprint.WorkTitle))
+    {
+        // Explore withholds an entry whose work_title is blank, so a registration without one
+        // would silently produce a book that can never be listed.
+        return Results.BadRequest(new { error = "workTitle is required for a catalogue entry." });
+    }
+
+    if (!catalog.RegisterPreSeededEdition(fingerprint, request.OwnerUserID))
+    {
+        return Results.BadRequest(new
+        {
+            error = "No account could be found to own the upload row a scan job requires. " +
+                "Supply ownerUserID explicitly."
+        });
+    }
+
+    logger.LogInformation(
+        "Registered pre-seeded edition {Title} ({Sha}, {Bytes} bytes) for scanning before import.",
+        fingerprint.WorkTitle, fingerprint.Sha256[..12], fingerprint.FileSize);
+
+    return Results.Ok(new
+    {
+        registered = true,
+        sha256 = fingerprint.Sha256,
+        fileSize = fingerprint.FileSize,
+        workTitle = fingerprint.WorkTitle
+    });
+});
+
 // Adds one filter event to an edition's newest scan result, to repair a passage the scan
 // missed. Until this existed a result could be read but never corrected: a real miss stayed
 // unfiltered and a listener heard it, with no remedy short of editing the database by hand.

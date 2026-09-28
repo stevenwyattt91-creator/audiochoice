@@ -171,6 +171,24 @@ public sealed record AdminEditionDeleteRequest(
     bool DiscardActiveAuditWork = false);
 
 /// <summary>
+/// Registers a recording the server has never seen, so it can be transcribed, scanned and
+/// catalogued before any listener imports it.
+/// </summary>
+/// <remarks>
+/// The fingerprint must be exactly what a client would compute for the same file -- a SHA-256
+/// over the whole file as uppercase hex, with the true byte length -- because identity is
+/// (version, sha256, fileSize) and nothing else. Get it wrong and the importing client derives
+/// a different key, finds no match, and receives none of the filters or metadata prepared here.
+/// </remarks>
+public sealed record AdminRegisterEditionRequest(
+    BookFingerprint Fingerprint,
+    /// <summary>
+    /// Which account owns the upload row a scan job requires. Empty attributes it to whoever
+    /// last supplied a file, which is the operator on a seeded catalogue.
+    /// </summary>
+    Guid OwnerUserID = default);
+
+/// <summary>
 /// Adds one filter event to an edition's newest scan result, to repair a real miss.
 /// </summary>
 /// <remarks>

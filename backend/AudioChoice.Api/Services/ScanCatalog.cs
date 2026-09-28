@@ -72,6 +72,28 @@ public interface IScanCatalog
         ScanResult result);
 
     /// <summary>
+    /// Registers an edition, and the upload row a scan job needs, for a recording the server
+    /// has never seen. Returns false when no owning account could be established.
+    /// </summary>
+    /// <remarks>
+    /// What lets a book be catalogued and scanned <em>before</em> any listener imports it, so
+    /// the first person to open it gets finished filters instead of a wait. Every other way
+    /// into <c>audiobook_editions</c> runs through a real listener's upload, which is exactly
+    /// what a book nobody has imported yet does not have.
+    ///
+    /// The upload row is written as <c>deleted</c> rather than <c>authorized</c> because there
+    /// is no retained audio behind it and never will be: it exists only to satisfy
+    /// <c>scan_jobs.upload_id</c>, which is not null. Recording it as authorized would invite
+    /// the expiry sweep to chase audio that was never stored.
+    ///
+    /// <paramref name="ownerUserID"/> may be empty, in which case the account behind the most
+    /// recent upload is used. <c>scan_uploads.owner_user_id</c> is not null and references a
+    /// real account, so something has to own the row; attributing it to whoever last supplied
+    /// a file is honest for an operator-seeded catalogue and avoids inventing a fake user.
+    /// </remarks>
+    bool RegisterPreSeededEdition(BookFingerprint fingerprint, Guid ownerUserID);
+
+    /// <summary>
     /// Adds one event to an edition's newest stored scan result. Returns false when the
     /// edition has no result to add to.
     /// </summary>
@@ -427,6 +449,39 @@ public sealed class InMemoryScanCatalog : IScanCatalog
     {
         _results[FingerprintKey(fingerprint)] = result;
         Persist();
+    }
+
+    public bool RegisterPreSeededEdition(BookFingerprint fingerprint, Guid ownerUserID)
+    {
+        var key = FingerprintKey(fingerprint);
+        if (ownerUserID == Guid.Empty)
+        {
+            ownerUserID = _uploads.Values
+                .OrderByDescending(upload => upload.ID)
+                .Select(upload => upload.OwnerUserID)
+                .FirstOrDefault();
+            if (ownerUserID == Guid.Empty) return false;
+        }
+
+        if (_uploads.Values.Any(upload => FingerprintKey(upload.Fingerprint) == key)) return true;
+
+        var id = Guid.NewGuid();
+        _uploads[id] = new UploadRecord(
+            id, ownerUserID, fingerprint, $"pre-seeded/{id}.audio",
+            string.IsNullOrWhiteSpace(fingerprint.FileType)
+                ? "application/octet-stream"
+                : $"audio/{fingerprint.FileType}",
+            fingerprint.FileSize,
+            HashToken(Guid.NewGuid().ToString("N")),
+            DateTimeOffset.UtcNow)
+        {
+            // Mirrors the Postgres row's 'deleted' status: there is no retained audio behind a
+            // pre-seeded registration, so nothing should ever try to read or expire one.
+            IsUploaded = true,
+            IsDeleted = true
+        };
+        Persist();
+        return true;
     }
 
     public bool AddResultEvent(BookFingerprint fingerprint, ScanEvent scanEvent)
