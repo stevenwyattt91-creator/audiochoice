@@ -200,7 +200,13 @@ services:
       # matches vLLM's 12-request ceiling with no contention, so each in-flight book gets
       # close to a real, uncontended slice of the GPU and clears faster in wall-clock time,
       # even though fewer books are nominally "in progress" at once.
-      AudioChoice__OpenAI__ScanWorkerConcurrency: "2"
+      # Lowered from 2 to 1 for single-user use. The reasoning above still holds -- raising this
+      # never adds GPU capacity, it only splits the same fixed ceiling more ways -- and with one
+      # listener there is never a second book waiting, so 2 bought nothing. 1 gives the book in
+      # flight all six slots of each stage against vLLM's --max-num-seqs 12 with no contention,
+      # which is what makes it finish in the fewest wall-clock minutes. Wall-clock is the whole
+      # cost now: Lambda bills GPU-hours, so the cheapest scan is the one that ends soonest.
+      AudioChoice__OpenAI__ScanWorkerConcurrency: "1"
       # Must match whisper's own WHISPER_WORKERS * WHISPER_CONCURRENCY_PER_WORKER
       # above. This used to be 1x1, which serialized every transcription request
       # behind a single semaphore slot even though the GPU server itself already
