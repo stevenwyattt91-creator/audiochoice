@@ -301,7 +301,15 @@ public sealed class OpenAIProcessingOptions
     // sent to the model twice. A transcript saved under the prior version still contains those
     // doubled words, so a rescan alone does not fix an affected recording -- it needs
     // re-transcribing.
-    public string ScannerVersion { get; init; } = "7.0-dedupe-events-and-seam-words";
+    //
+    // Bumped again together with BaseAnalysisPromptVersion: the first pass's anatomy carve-out
+    // exempted "a body part named in passing" and then listed only exempt examples, so it never
+    // said where the exemption stops -- and intimate anatomy described as bare or uncovered fell
+    // under it and returned no event, even though sexual_nudity's own rung is defined for exactly
+    // that. "The badge pinned to her breast" and "her bare breast and nipples" were judged the
+    // same way. A scan made under the prior version never had the chance to report the second as
+    // nudity, so its results must not be presented as though it had.
+    public string ScannerVersion { get; init; } = "7.1-exposed-anatomy-nudity";
     /// <summary>Only jobs in this lane may be claimed by this worker instance.</summary>
     public string ProcessingLane { get; init; } = ScanProcessingLanes.AzureOpenAI;
     /// <summary>
