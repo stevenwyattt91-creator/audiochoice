@@ -78,10 +78,19 @@ public sealed class FfmpegAudioChunkerOptions
     public double ChunkDurationSeconds { get; init; } = 600;
     public double OverlapSeconds { get; init; } = 2;
     public int SampleRate { get; init; } = 16_000;
-    // Raised from 30 hours (108,000s) to 37 hours to admit a real omnibus/full-series
-    // audiobook file that exceeded the prior ceiling and was rejected before transcription
-    // ever started.
-    public double MaximumInputDurationSeconds { get; init; } = 133_200;
+    // Raised 30 hours -> 37 -> 50 as real audiobooks kept arriving above the ceiling. The 37-hour
+    // value was set for a full-series omnibus and was immediately marginal: A Clash of Kings Book 2
+    // runs 37.2 hours and was rejected by it, and Stephen King's IT runs 44.9 hours (161,632s) and
+    // failed twice before anyone could see why -- ffprobe rejects the file here, before
+    // transcription starts, so nothing downstream ever reports a reason.
+    //
+    // 50 hours is chosen to leave real headroom rather than to just clear the largest known file.
+    // At the 600-second chunk size above it produces 300 chunks, comfortably inside
+    // MaximumChunksPerJob (500), so that limit does not need to move with it.
+    //
+    // This is a cost-control limit, not a technical one. Raising it raises the maximum spend a
+    // single scan can incur.
+    public double MaximumInputDurationSeconds { get; init; } = 180_000;
 }
 
 public sealed class FfmpegAudioChunker(

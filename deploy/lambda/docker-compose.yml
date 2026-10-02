@@ -246,6 +246,21 @@ services:
       AudioChoice__OpenAI__LambdaFirstPassEnabled: "false"
       AudioChoice__OpenAI__MaximumSceneVerificationRequestsPerJob: "300"
       AudioChoice__OpenAI__MaximumSceneEscalationRequestsPerJob: "300"
+      # The audiobook length ceiling, 50 hours. Stated here rather than left to the image's
+      # own appsettings.json, for the same reason the concurrency values above are: this
+      # container is where the limit is actually enforced, and a value that lives only in the
+      # image is invisible from the host that runs it.
+      #
+      # That cost a real incident. Stephen King's IT runs 44.9 hours and failed repeatedly
+      # against the previous 37-hour ceiling. The limit was raised in appsettings.json and
+      # deployed to Azure -- which does not scan anything. This lane does, and it kept
+      # rejecting the file because its locally built image still carried the old value.
+      #
+      # Both must move together: ffmpeg's pre-processing check rejects the file before
+      # transcription, and the paid-processing check would otherwise reject it afterwards,
+      # wasting transcription already paid for.
+      AudioChoice__Ffmpeg__MaximumInputDurationSeconds: "180000"
+      AudioChoice__OpenAI__MaximumAudioDurationSeconds: "180000"
       # Apply new schema migrations (including chunk progress/title backfill)
       # before the scanner begins claiming jobs.
       AudioChoice__Database__ApplyMigrations: "true"

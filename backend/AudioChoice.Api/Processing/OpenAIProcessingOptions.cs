@@ -348,9 +348,13 @@ public sealed class OpenAIProcessingOptions
     public int MaximumSceneEscalationRequestsPerJob { get; init; } = 50;
     public int MaximumChunksPerJob { get; init; } = 500;
     public int MaximumTranscriptSegmentsPerJob { get; init; } = 100_000;
-    // Raised together with Ffmpeg's MaximumInputDurationSeconds from 30 hours to 37, to
-    // admit a real omnibus/full-series audiobook file that exceeded the prior ceiling. This
-    // is the separate paid-processing-stage limit that would otherwise reject the same file
-    // here even if the earlier ffmpeg pre-processing check had let it through.
-    public double MaximumAudioDurationSeconds { get; init; } = 133_200;
+    // Moved in step with Ffmpeg's MaximumInputDurationSeconds, 30 hours -> 37 -> 50. This is the
+    // separate paid-processing-stage ceiling, and it has to match: it would otherwise reject a file
+    // mid-scan that the earlier ffmpeg pre-processing check had already admitted, which wastes the
+    // transcription already paid for.
+    //
+    // Both values are also set in appsettings.json, and configuration wins over these defaults --
+    // so changing only the default here has no effect on a deployed build. See the remarks on
+    // FfmpegAudioChunkerOptions.MaximumInputDurationSeconds for why 50 hours.
+    public double MaximumAudioDurationSeconds { get; init; } = 180_000;
 }
