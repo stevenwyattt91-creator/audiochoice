@@ -86,7 +86,22 @@ public sealed class OpenAIContentAnalysisProvider(
     // the prior version was built from a 100-segment batch boundary that no longer exists;
     // reusing it here would silently keep serving results sliced along boundaries this
     // version was specifically changed to avoid.
-    private const string BaseAnalysisPromptVersion = "5.9-mouth-only-kissing";
+    // Bumped for the exposed-anatomy/nudity split. The anatomy carve-out told the model that "a
+    // body part named in passing is anatomy, not a sexual reference" and listed only exempt
+    // examples -- first aid, a battle wound, washing, nursing, a medical exam. Nothing said where
+    // that exemption stops, so a passage describing intimate anatomy as bare or uncovered read as
+    // the same "named in passing" case and returned no event at all, despite sexual_nudity's own
+    // rung existing for exactly it. A real listener case: "the badge pinned to her breast" and
+    // "her bare breast and nipples" were treated alike, when the first is anatomy and the second
+    // is the thing a nudity filter is switched on for.
+    //
+    // The carve-out now names the clothed/functional cases explicitly (including a pin at the
+    // breast and a breastplate, the two that misfire most in this library's own genre), and
+    // sexual_nudity now states that bare, naked, uncovered or exposed intimate anatomy reaches
+    // that rung on its own -- no act, no arousal, no partner reaction required. Both directions
+    // are stated, because widening one without restating the other is how a fix for a miss
+    // becomes a flood of false positives on armour and injuries.
+    private const string BaseAnalysisPromptVersion = "6.0-exposed-anatomy-nudity";
     // Bumped for the keyword safety net's lane isolation fix: a candidate whose window
     // happens to match a checkpoint cached under the prior version may have been built
     // before a safety-net seed's own lane existed, when it could still get coalesced into a
@@ -2478,7 +2493,11 @@ sexual_references -- sex spoken about rather than happening: a past encounter re
 joke, a comment on someone's history, an offer not taken up.
 
 sexual_nudity -- a body described unclothed, or clothing being removed, with no sexual act
-following in this passage. Undressing on its own is this rung, not explicit activity.
+following in this passage. Undressing on its own is this rung, not explicit activity. Intimate
+anatomy described as bare, naked, uncovered or exposed reaches this rung by itself, even in a
+passage that is otherwise not sexual at all and even where nobody reacts to it: a body uncovered
+in a bath scene, bare breasts noted in passing during a transformation or an injury, a shirt torn
+open. Nothing has to happen next for this to qualify.
 
 sexual_implied_activity -- sex happens and the narration does not describe it. It fades out, cuts
 away, or resumes afterwards: "later, tangled in the sheets". The act is certain, the description
@@ -2514,9 +2533,25 @@ happens to involve two characters, or a relationship's power imbalance on its ow
 
 No word is sexual content by itself. A body part named in passing is anatomy, not a sexual
 reference: a hand on a chest during first aid, a breast wound in battle, a character washing, a
-mother nursing, a medical examination. Judge the passage by what is happening in it, never by the
-presence of a word. The same applies to violence and every other category -- a word is evidence
-only in the sense the passage actually uses it.
+mother nursing, a medical examination, a badge or pin fastened at her breast, armour such as a
+breastplate. Judge the passage by what is happening in it, never by the presence of a word. The
+same applies to violence and every other category -- a word is evidence only in the sense the
+passage actually uses it.
+
+Being named in passing and being described exposed are not the same thing, and this distinction
+decides the two cases most often got wrong in opposite directions. Intimate anatomy stated as
+bare, naked, uncovered, exposed, or spilling free of clothing -- her bare breasts, her nipples
+visible or hardening, a body uncovered as clothing comes away -- is sexual_nudity, on its own,
+with no sexual act required and no arousal, touching, or partner reaction needed. That is the
+whole purpose of that rung. The anatomy carve-out above exempts a part mentioned while clothed or
+serving some other function; it does not exempt that part once the narration has put it on
+display. A listener filtering nudity is asking not to hear a body described bare, and reporting
+nothing because no act followed is exactly the omission this rung exists to prevent.
+
+The reverse still holds and is not softened: clothed contact, a part named as a location, an
+injury, bathing, nursing, or medical description is not nudity however intimate the part named.
+"The badge pinned to her breast" is anatomy. "Her bare breast" is nudity. The difference is
+whether the passage describes the body uncovered, not which word it used.
 
 ALWAYS emit sexual_complete_scene alongside sexual_implied_activity or sexual_explicit_activity
 for a CONSENSUAL scene, every time, including a brief encounter and one whose description is
