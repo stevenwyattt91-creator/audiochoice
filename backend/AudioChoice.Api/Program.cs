@@ -1,4 +1,5 @@
 using Amazon.BedrockRuntime;
+using Amazon.S3;
 using System.Security.Cryptography;
 using System.Globalization;
 using System.Text.Json;
@@ -299,7 +300,32 @@ builder.Services.AddRateLimiter(options =>
                 QueueLimit = 0
             }));
 });
-if (temporaryAudioOptions.BlobTranscriptEnabled)
+// Refused rather than resolved in favour of one. A transcript cannot be regenerated -- the audio it
+// came from is deleted when the scan completes -- so a deployment that names two destinations is
+// one where half the library could end up written somewhere nothing later reads, and the symptom
+// (a book with working filters and no read-along data) appears long after the cause.
+if (temporaryAudioOptions.BlobTranscriptEnabled && temporaryAudioOptions.S3TranscriptEnabled)
+{
+    throw new InvalidOperationException(
+        "Blob and S3 transcript storage are both enabled. Choose one: a transcript written to " +
+        "whichever loses is unreachable, and it cannot be regenerated.");
+}
+if (temporaryAudioOptions.S3TranscriptEnabled)
+{
+    if (string.IsNullOrWhiteSpace(temporaryAudioOptions.TranscriptBucketName))
+    {
+        throw new InvalidOperationException(
+            "AudioChoice:TemporaryAudioStorage:TranscriptBucketName is required when S3 " +
+            "transcript storage is enabled.");
+    }
+    builder.Services.AddSingleton<IAmazonS3>(_ =>
+        string.IsNullOrWhiteSpace(temporaryAudioOptions.S3Region)
+            ? new AmazonS3Client()
+            : new AmazonS3Client(
+                Amazon.RegionEndpoint.GetBySystemName(temporaryAudioOptions.S3Region)));
+    builder.Services.AddSingleton<IPrivateTranscriptStore, S3PrivateTranscriptStore>();
+}
+else if (temporaryAudioOptions.BlobTranscriptEnabled)
 {
 #if POSTGRES
     if (!temporaryAudioOptions.BlobEnabled)
