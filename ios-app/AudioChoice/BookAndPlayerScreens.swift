@@ -187,6 +187,7 @@ private struct LegacyPlayerScreen: View {
     @ObservedObject private var playback = AudioPlaybackManager.shared
     @State private var sleepTask: Task<Void, Never>?
     @State private var bookmarkSaved = false
+    @State private var showingSpeedStepper = false
 
     /// Loaded once per appearance rather than computed.
     ///
@@ -281,12 +282,13 @@ private struct LegacyPlayerScreen: View {
             .labelStyle(.iconOnly)
 
             HStack {
-                Menu {
-                    ForEach([0.75, 1, 1.25, 1.5, 1.75, 2], id: \.self) { rate in
-                        Button("\(String(format: "%g", rate))×") { playback.setRate(Float(rate)) }
-                    }
+                Button {
+                    showingSpeedStepper = true
                 } label: {
-                    playerTool("\(String(format: "%g", playback.playbackRate))×", "Speed")
+                    playerTool(PlaybackSpeed.label(playback.playbackRate), "Speed")
+                }
+                .popover(isPresented: $showingSpeedStepper) {
+                    SpeedStepper(playback: playback)
                 }
                 if let record {
                     NavigationLink { ChapterListScreen(record: record) } label: {
@@ -401,6 +403,7 @@ struct PlayerScreen: View {
     @State private var showingReader = false
     @State private var importingEpub = false
     @State private var rescanning = false
+    @State private var showingSpeedStepper = false
 
     /// Loaded once per appearance rather than computed.
     ///
@@ -551,11 +554,14 @@ struct PlayerScreen: View {
                 .padding(.top, 20)
 
                 HStack {
-                    Menu {
-                        ForEach([0.75, 1, 1.25, 1.5, 1.75, 2], id: \.self) { rate in
-                            Button("\(String(format: "%g", rate))×") { playback.setRate(Float(rate)) }
-                        }
-                    } label: { tool("\(String(format: "%g", playback.playbackRate))×", "Speed", isSymbol: false) }
+                    Button {
+                        showingSpeedStepper = true
+                    } label: {
+                        tool(PlaybackSpeed.label(playback.playbackRate), "Speed", isSymbol: false)
+                    }
+                    .popover(isPresented: $showingSpeedStepper) {
+                        SpeedStepper(playback: playback)
+                    }
 
                     if let record {
                         NavigationLink { ChapterListScreen(record: record) } label: { tool("list.bullet", "Chapters") }
