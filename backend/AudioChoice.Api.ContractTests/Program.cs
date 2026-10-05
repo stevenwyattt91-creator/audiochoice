@@ -3852,6 +3852,46 @@ Assert(
         "product in the bundle is accepted or the real one is refused.");
 }
 
+// The service is closed to everyone except the two remaining accounts.
+{
+    var closed = new ServiceAccessOptions();
+
+    Assert(closed.IsClosed, "The server is not closed, so anyone could still sign in.");
+
+    Assert(
+        closed.Allows("steven.wyattt91@gmail.com") &&
+        closed.Allows("cheyennee.wyatt@gmail.com"),
+        "One of the two remaining accounts was locked out of its own server.");
+
+    // Normalised the way the account store normalises what it stores, or an address typed with
+    // different casing would be refused while matching a row that does exist.
+    Assert(
+        closed.Allows("  Steven.Wyattt91@Gmail.com  "),
+        "A permitted address was refused over casing or surrounding space.");
+
+    Assert(
+        !closed.Allows("someone.else@gmail.com"),
+        "A former listener can still sign in to a service that has closed.");
+
+    // The hole this would otherwise leave: Sign in with Apple's private relay produces an address
+    // that matches nothing, and LoginExternal would create a fresh account for it.
+    Assert(
+        !closed.Allows(null) && !closed.Allows("") && !closed.Allows("   "),
+        "An identity with no usable email address was admitted to a closed server.");
+
+    // Empty restores the previous behaviour rather than locking everyone out. This type is read on
+    // every authenticated request, and a configuration mistake must not be unrecoverable without a
+    // redeploy.
+    var open = new ServiceAccessOptions { AllowedEmails = "" };
+    Assert(
+        !open.IsClosed && open.Allows("anyone@example.com"),
+        "Blanking the allowlist locked the server rather than reopening it.");
+
+    Assert(
+        closed.ClosedMessage.Contains("no longer in business", StringComparison.OrdinalIgnoreCase),
+        "The closed message no longer says the service has closed, which is the whole point of it.");
+}
+
 // A new subscription is announced once, and a renewal is not.
 //
 // This is the whole subscription-alert feature. Clients resubmit the same transaction after a

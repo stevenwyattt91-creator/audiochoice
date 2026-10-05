@@ -39,6 +39,10 @@ var databaseOptions = builder.Configuration
 var temporaryAudioOptions = builder.Configuration
     .GetSection("AudioChoice:TemporaryAudioStorage")
     .Get<TemporaryAudioStorageOptions>() ?? new TemporaryAudioStorageOptions();
+var serviceAccessOptions = builder.Configuration
+    .GetSection("AudioChoice:ServiceAccess")
+    .Get<ServiceAccessOptions>() ?? new ServiceAccessOptions();
+builder.Services.AddSingleton(serviceAccessOptions);
 
 builder.WebHost.ConfigureKestrel(options =>
 {
@@ -642,6 +646,21 @@ app.Use(async (context, next) =>
         return;
     }
 
+    // Closing sign-in is not enough on its own: a token issued before the service closed stays
+    // valid until it expires, so an account that already had one would keep working indefinitely.
+    // Checked here rather than per-endpoint so there is no route left to find.
+    //
+    // Deliberately after the dev-token branch above. An operator token resolves no user, so admin
+    // routes -- including the one that grants founder access, the only way back in for a new
+    // address -- keep working while the service is closed to everyone else.
+    if (user is not null && !serviceAccessOptions.Allows(user.Email))
+    {
+        context.Response.StatusCode = StatusCodes.Status403Forbidden;
+        await context.Response.WriteAsJsonAsync(
+            new { error = serviceAccessOptions.ClosedMessage });
+        return;
+    }
+
     if (user is not null)
     {
         context.Items[typeof(AuthUser)] = user;
@@ -659,6 +678,14 @@ app.MapPost("/v1/auth/register", async (
     ITransactionalEmailSender emailSender,
     CancellationToken cancellationToken) =>
 {
+    // Checked before the account is created, not after. Registering someone and then refusing to
+    // let them in would leave a row nobody can use and an address that now reads as "already
+    // registered" if the service ever reopens.
+    if (!serviceAccessOptions.Allows(request.Email))
+    {
+        return Results.Json(new { error = serviceAccessOptions.ClosedMessage }, statusCode: 403);
+    }
+
     var registration = accounts.Register(request);
     if (registration is null)
     {
@@ -722,6 +749,14 @@ app.MapPost("/v1/auth/register", async (
 
 app.MapPost("/v1/auth/login", (LoginRequest request, IAccountStore accounts) =>
 {
+    // Before the password is checked, so the answer is the same whether or not the account exists
+    // and whether or not the password was right. Someone who used AudioChoice should be told it
+    // closed, not told their password is wrong.
+    if (!serviceAccessOptions.Allows(request.Email))
+    {
+        return Results.Json(new { error = serviceAccessOptions.ClosedMessage }, statusCode: 403);
+    }
+
     var response = accounts.Login(request);
     return response is null ? Results.Unauthorized() : Results.Ok(response);
 }).RequireRateLimiting("authentication");
@@ -790,9 +825,19 @@ app.MapPost("/v1/auth/external", async (
     CancellationToken cancellationToken) =>
 {
     var identity = await verifier.Verify(request.Provider, request.AuthorizationCode, request.IdentityToken, cancellationToken);
-    return identity is null
-        ? Results.Unauthorized()
-        : Results.Ok(accounts.LoginExternal(identity.Provider, identity.Subject, identity.Email, request.DisplayName));
+    if (identity is null) return Results.Unauthorized();
+
+    // After the provider has been verified, because that is the first point the real address is
+    // known -- the client never supplies it. This is also the branch that closes Sign in with
+    // Apple: a private-relay address cannot match the list, so it is refused rather than quietly
+    // creating a brand new account the way LoginExternal otherwise would.
+    if (!serviceAccessOptions.Allows(identity.Email))
+    {
+        return Results.Json(new { error = serviceAccessOptions.ClosedMessage }, statusCode: 403);
+    }
+
+    return Results.Ok(
+        accounts.LoginExternal(identity.Provider, identity.Subject, identity.Email, request.DisplayName));
 }).RequireRateLimiting("authentication");
 
 app.MapGet("/v1/auth/identities", (
