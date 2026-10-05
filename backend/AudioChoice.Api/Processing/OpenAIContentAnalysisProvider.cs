@@ -101,7 +101,18 @@ public sealed class OpenAIContentAnalysisProvider(
     // that rung on its own -- no act, no arousal, no partner reaction required. Both directions
     // are stated, because widening one without restating the other is how a fix for a miss
     // becomes a flood of false positives on armour and injuries.
-    private const string BaseAnalysisPromptVersion = "6.0-exposed-anatomy-nudity";
+    // Bumped for the self-harm rubric. Measured against the 35-case ground-truth set on the
+    // production Qwen3.6-27B-FP8 host: 30/33 scored cases passed, and one of the three failures was
+    // a passage recounting that captured resistance members used suicide capsules, reported as
+    // self_harm_reference at 0.95. Self-harm is the one label group with no second verification
+    // pass -- Luna's first call is the only judgement it ever gets -- and it was also the only group
+    // with no written rubric at all, so "a passing mention of suicide" was left to mean whatever the
+    // model took it to mean. Now states that these labels describe something a character does, and
+    // that suicide or self-injury as a subject -- war dead, a faction's casualties, a method named
+    // in the abstract, a figure of speech, or self-hatred with no self-injury -- is not this
+    // category. The five self-harm positives in the set all describe a character's own acts and are
+    // unaffected.
+    private const string BaseAnalysisPromptVersion = "6.1-self-harm-rubric";
     // Bumped for the keyword safety net's lane isolation fix: a candidate whose window
     // happens to match a checkpoint cached under the prior version may have been built
     // before a safety-net seed's own lane existed, when it could still get coalesced into a
@@ -164,8 +175,18 @@ public sealed class OpenAIContentAnalysisProvider(
     // production bug (see that field's own remarks) that was corrupting the JSON on any
     // candidate whose natural description landed past 80 characters, deterministically,
     // with no fix possible short of the model getting lucky with a shorter phrasing.
+    // Bumped for the startTime lower bound. The buildup-inclusive rule said which escalation to
+    // include and never which to exclude, and measured against the ground-truth set on the
+    // production host it reached too far back on two of the three failures: a scene anchored 36s
+    // early on whispered dialogue, and one anchored 79s early in a conversation about trust and a
+    // past assault -- which that case's own notes call out as too early, since the physical scene
+    // begins at the undressing that follows. Both were accepted correctly; only the boundary was
+    // wrong. Now states that the escalation setting startTime is physical, and that dialogue does
+    // not begin a scene however charged, with a worked example of the too-early mistake beside the
+    // existing too-late one. The too-late rule is untouched -- that failure put audible content in
+    // front of a listener and is the worse of the two.
     private const string SceneVerificationVersion =
-        "6.6-schema-maxlength-fix";
+        "6.7-physical-start-boundary";
     private const string SceneEscalationVersion =
         "6.6-schema-maxlength-fix";
     private readonly string _checkpointFolder = dataPaths.AnalysisCheckpoints;
@@ -2238,6 +2259,18 @@ the buildup that makes the scene recognizable as one, not to have the skip begin
 through it once the act itself is unambiguous. Only start later, at the act itself, when the
 scene truly opens there with no preceding kissing or touching that belongs to the same
 continuous moment. Set endTime where that activity clearly finishes.
+The escalation that sets startTime is physical. Kissing, embracing, touching, undressing: one of
+those marks where the scene begins. Dialogue does not, however intimate, charged, or clearly
+leading somewhere it is -- not flirting, not a confession, not negotiating or asking for consent,
+not a conversation about a past encounter or about trust, and not narration of what a character
+wants or feels. Those may sit immediately before the scene and may be what makes it obvious one is
+coming, and they are still not part of it. Start at the first physical contact that belongs to the
+unbroken escalation, not at the talking that preceded it.
+Example of a startTime placed too early -- the opposite mistake to the one below, and equally
+wrong: a couple spend two minutes discussing her past and whether she trusts him, after which he
+undresses and the encounter begins. The correct startTime is the undressing. A startTime back in
+the conversation sweeps up minutes of dialogue that contains nothing a listener asked to skip, and
+a skip that removes ordinary conversation teaches them the filter cannot be trusted with the book.
 
 Example of a correct startTime -- a real passage from a production book, reported by a
 listener because the skip began too late and audible content still played:
@@ -2552,6 +2585,22 @@ The reverse still holds and is not softened: clothed contact, a part named as a 
 injury, bathing, nursing, or medical description is not nudity however intimate the part named.
 "The badge pinned to her breast" is anatomy. "Her bare breast" is nudity. The difference is
 whether the passage describes the body uncovered, not which word it used.
+
+The self-harm labels are about a character, not about the subject. This is the one group with no
+second verification pass, so a first-pass mistake here is final.
+self_harm_depiction -- the act shown as it happens: cutting, burning, an overdose being taken.
+self_harm_suicide_attempt -- a character attempting or actively preparing their own suicide,
+including preparation that is interrupted.
+self_harm_suicidal_thoughts -- a character's own wish to die or to end their life.
+self_harm_reference -- a character's own past self-harm or suicide attempt recalled or discussed,
+including clinically.
+None of them apply to suicide or self-injury as a subject rather than something a character does.
+Deaths in war or history, a group or faction's casualties, soldiers or prisoners using suicide
+capsules, a cause someone died for, a method named in the abstract, a threat to kill someone else,
+or a figure of speech such as "I could have died" are not self-harm content. Neither is self-hatred,
+shame, worthlessness or despair with no self-injury and no wish to die, however bleak the passage.
+A listener filtering self-harm is asking not to hear it depicted or dwelt on, not asking the book
+to avoid the fact that people die.
 
 ALWAYS emit sexual_complete_scene alongside sexual_implied_activity or sexual_explicit_activity
 for a CONSENSUAL scene, every time, including a brief encounter and one whose description is

@@ -118,6 +118,18 @@ the buildup that makes the scene recognizable as one, not to have the skip begin
 through it once the act itself is unambiguous. Only start later, at the act itself, when the
 scene truly opens there with no preceding kissing or touching that belongs to the same
 continuous moment. Set endTime where that activity clearly finishes.
+The escalation that sets startTime is physical. Kissing, embracing, touching, undressing: one of
+those marks where the scene begins. Dialogue does not, however intimate, charged, or clearly
+leading somewhere it is -- not flirting, not a confession, not negotiating or asking for consent,
+not a conversation about a past encounter or about trust, and not narration of what a character
+wants or feels. Those may sit immediately before the scene and may be what makes it obvious one is
+coming, and they are still not part of it. Start at the first physical contact that belongs to the
+unbroken escalation, not at the talking that preceded it.
+Example of a startTime placed too early -- the opposite mistake to the one below, and equally
+wrong: a couple spend two minutes discussing her past and whether she trusts him, after which he
+undresses and the encounter begins. The correct startTime is the undressing. A startTime back in
+the conversation sweeps up minutes of dialogue that contains nothing a listener asked to skip, and
+a skip that removes ordinary conversation teaches them the filter cannot be trusted with the book.
 
 Example of a correct startTime -- a real passage from a production book, reported by a
 listener because the skip began too late and audible content still played:
@@ -212,6 +224,15 @@ return accepted=false and label null.
 
 No word is content by itself. A word is evidence only in the sense the passage actually uses
 it -- judge the passage by what is actually happening in it, never by the presence of a word.
+
+These labels are about a character, not about the subject. None of them apply to suicide or
+self-injury as a subject rather than something a character does. Deaths in war or history, a
+group or faction's casualties, soldiers or prisoners using suicide capsules, a cause someone
+died for, a method named in the abstract, a threat to kill someone else, or a figure of speech
+such as "I could have died" are not self-harm content. Neither is self-hatred, shame,
+worthlessness or despair with no self-injury and no wish to die, however bleak the passage. A
+listener filtering self-harm is asking not to hear it depicted or dwelt on, not asking the book
+to avoid the fact that people die.
 """
 
 SELF_HARM_RESPONSE_FORMAT_INSTRUCTIONS = """
