@@ -2697,13 +2697,39 @@ private fun PlayerScreen(
             ) {
                 Box {
                     PlayerToolButton(formatSpeed(state.speed), "Speed") { speedMenu = true }
+                    // A stepper rather than the previous fixed list of eight speeds. Narrators
+                    // differ by less than the 0.25 gaps that list offered, and the speed that suits
+                    // one often sits between two of its stops -- so the choice was always a
+                    // compromise in one direction. The menu deliberately stays open while stepping:
+                    // finding the right speed means pressing several times and listening, not
+                    // picking once from a list.
                     DropdownMenu(expanded = speedMenu, onDismissRequest = { speedMenu = false }) {
-                        listOf(.25f, .5f, .75f, 1f, 1.25f, 1.5f, 1.75f, 2f).forEach { speed ->
-                            DropdownMenuItem(
-                                text = { Text(formatSpeed(speed)) },
-                                onClick = { player.setSpeed(speed); speedMenu = false },
-                                trailingIcon = { if (state.speed == speed) Text("✓", color = ChoiceGreen) },
+                        Row(
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            IconButton(
+                                onClick = { player.setSpeed(steppedSpeed(state.speed - SPEED_STEP)) },
+                                enabled = state.speed > SPEED_MINIMUM,
+                            ) {
+                                Icon(Icons.Outlined.Remove, "Slower")
+                            }
+                            Text(
+                                formatSpeed(state.speed),
+                                // Fixed width so the row does not jump as the label moves between
+                                // one and two decimals while a listener is still pressing.
+                                modifier = Modifier.width(72.dp),
+                                textAlign = TextAlign.Center,
+                                fontSize = 17.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = ChoiceGreen,
                             )
+                            IconButton(
+                                onClick = { player.setSpeed(steppedSpeed(state.speed + SPEED_STEP)) },
+                                enabled = state.speed < SPEED_MAXIMUM,
+                            ) {
+                                Icon(Icons.Outlined.Add, "Faster")
+                            }
                         }
                     }
                 }
@@ -3436,16 +3462,35 @@ private fun IconPlayerToolButton(icon: ImageVector, label: String, onClick: () -
     }
 }
 
-private fun formatSpeed(speed: Float): String = when (speed) {
-    .25f -> "0.25x"
-    .5f -> "0.50x"
-    .75f -> "0.75x"
-    1f -> "1.0x"
-    1.25f -> "1.25x"
-    1.5f -> "1.5x"
-    1.75f -> "1.75x"
-    2f -> "2.0x"
-    else -> "${speed}x"
+/** The smallest speed change the stepper makes. */
+private const val SPEED_STEP = 0.05f
+private const val SPEED_MINIMUM = 0.25f
+private const val SPEED_MAXIMUM = 2f
+
+/**
+ * Snaps a speed to the nearest step and clamps it to the range the stepper can reach.
+ *
+ * Rounded rather than simply added to. Repeatedly adding 0.05f to a Float accumulates error --
+ * after twenty presses 1.0 is no longer 2.0 but something near it -- and that error would be
+ * persisted per book and then formatted, so a listener would eventually see 1.4500001x.
+ */
+private fun steppedSpeed(speed: Float): Float =
+    (Math.round(speed / SPEED_STEP) * SPEED_STEP).coerceIn(SPEED_MINIMUM, SPEED_MAXIMUM)
+
+/**
+ * The speed as a listener reads it: 1.0x, 1.05x, 1.1x, 1.15x.
+ *
+ * Two decimals only when the step lands on one, so a 0.05 stop shows as 1.05x while a 0.1 stop
+ * stays 1.1x rather than 1.10x. The whole number keeps its single decimal -- 1.0x, not 1x -- since
+ * the row's width should not change as the number does.
+ */
+private fun formatSpeed(speed: Float): String {
+    val hundredths = Math.round(speed * 100)
+    return if (hundredths % 10 == 0) {
+        "%.1fx".format(hundredths / 100f)
+    } else {
+        "%.2fx".format(hundredths / 100f)
+    }
 }
 
 private fun formatTime(milliseconds: Long): String {
