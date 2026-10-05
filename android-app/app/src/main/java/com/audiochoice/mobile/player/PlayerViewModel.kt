@@ -450,6 +450,40 @@ class PlayerViewModel(
                 readerPosition = localAudio.readerPosition(book.fingerprint.sha256),
                 speed = localAudio.playbackSpeed(book.fingerprint.sha256),
             )
+
+            // Everything this book already knows, published before a single request is made.
+            //
+            // The state above carried the file, chapters and reader position, but filters,
+            // bookmarks and filter choices waited on three network calls to finish first -- so
+            // reopening a book that had been open a hundred times still showed no filters and no
+            // bookmarks until the server answered, and on a bad connection that is up to the
+            // client's own 45s connect plus 90s read timeout per call. The data was already on the
+            // device the whole time; only the order was wrong.
+            //
+            // filterAvailability is the one field that must not be guessed here. CACHED only when
+            // a scan was genuinely stored before -- scannerVersion is what distinguishes "scanned
+            // and found clean" from "never scanned" -- and LOADING otherwise, never UNAVAILABLE,
+            // because the request has not failed yet and claiming filters are off while they are
+            // still being fetched is the one thing worse than waiting.
+            val cachedPlayback = localAudio.offlinePlayback(book.fingerprint.sha256)
+            val cachedEvents = cachedPlayback.events.filterNot(::isExcludedViolenceEvent)
+            val cachedDisabledGroups = cachedPlayback.disabledGroupIDs.ifEmpty {
+                localAudio.disabledFilters(book.fingerprint.sha256).toList()
+            }
+            mutableState.value = mutableState.value.copy(
+                scanEvents = cachedEvents,
+                scannerVersion = cachedPlayback.scannerVersion,
+                filterAvailability = if (cachedPlayback.scannerVersion != null) {
+                    FilterAvailability.CACHED
+                } else {
+                    FilterAvailability.LOADING
+                },
+                bookmarks = cachedPlayback.bookmarks,
+                disabledCategoryIDs = cachedPlayback.disabledCategoryIDs.map { it.lowercase() }.toSet(),
+                disabledGroupIDs = cachedDisabledGroups.map { it.lowercase() }.toSet(),
+                disabledEventKeys = cachedPlayback.disabledEventKeys.toSet(),
+                disabledAggregateKeys = cachedPlayback.disabledAggregateKeys.toSet(),
+            )
             // Earlier Experimental builds could attach an EPUB before the
             // reader-sync endpoint existed. Retry automatically on opening the
             // book so users never have to remove and reattach their file.
@@ -476,7 +510,6 @@ class PlayerViewModel(
             val settingsRequest = async {
                 runCatching { api.bookFilterSettings(accessToken, book.id) }.getOrNull()
             }
-            val cachedPlayback = localAudio.offlinePlayback(book.fingerprint.sha256)
             val scan = scanRequest.await()
             val events = (scan?.result?.events ?: cachedPlayback.events).filterNot(::isExcludedViolenceEvent)
             // A scan that was previously saved always carries a scanner version,
