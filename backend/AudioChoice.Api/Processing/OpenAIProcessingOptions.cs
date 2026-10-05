@@ -309,7 +309,15 @@ public sealed class OpenAIProcessingOptions
     // that. "The badge pinned to her breast" and "her bare breast and nipples" were judged the
     // same way. A scan made under the prior version never had the chance to report the second as
     // nudity, so its results must not be presented as though it had.
-    public string ScannerVersion { get; init; } = "7.1-exposed-anatomy-nudity";
+    //
+    // Bumped again together with BaseAnalysisPromptVersion and SceneVerificationVersion, for the
+    // two accuracy fixes measured against the 35-case ground-truth set on the production host
+    // (30/33 scored before): a startTime lower bound, since the buildup-inclusive rule reached back
+    // into dialogue and anchored two scenes 36s and 79s early, and a self-harm rubric, since that
+    // group has no verification pass and had no written rubric, so a passage about captured
+    // resistance members using suicide capsules was reported as a self-harm reference. A scan made
+    // under the prior version had neither correction and must not be presented as though it had.
+    public string ScannerVersion { get; init; } = "7.2-boundary-and-self-harm-rubric";
     /// <summary>Only jobs in this lane may be claimed by this worker instance.</summary>
     public string ProcessingLane { get; init; } = ScanProcessingLanes.AzureOpenAI;
     /// <summary>
