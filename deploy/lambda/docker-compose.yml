@@ -148,14 +148,30 @@ services:
       AudioChoice__DataPath: /data
       AudioChoice__OpenAI__WorkerEnabled: "true"
       AudioChoice__OpenAI__ProcessingLane: ios-beta-lambda
-      # Transcripts MUST go to shared Blob storage, not this container's disk.
-      # Nothing mounts a volume for the scanner and these instances are replaced
-      # nightly, so a file-backed transcript is destroyed within a day -- while the
-      # scan result survives in PostgreSQL. That combination is exactly what makes a
-      # book show working filters and yet report no read-along timing data.
-      # Requires BlobEnabled and StorageAccountName in lambda-worker.env; the
-      # scanner refuses to start otherwise rather than writing somewhere temporary.
-      AudioChoice__TemporaryAudioStorage__BlobTranscriptEnabled: "true"
+      # Transcripts MUST go to shared object storage, not this container's disk. Nothing mounts a
+      # volume for the scanner and these instances are replaced nightly, so a file-backed
+      # transcript is destroyed within a day -- while the scan result survives in the catalog. That
+      # combination is exactly what makes a book show working filters and yet report no read-along
+      # timing data.
+      #
+      # Moved from Azure Blob to S3. Same reasoning, different bucket: the business is closed and
+      # the Azure subscription is being paid out of pocket, while the AWS account has credits. The
+      # 47 transcripts that existed were copied across first and verified object-for-object and
+      # byte-for-byte, and the Blob container was deliberately left intact -- a transcript cannot be
+      # regenerated, because the audio it came from is deleted the moment a scan completes.
+      #
+      # S3PrivateTranscriptStore derives its object key exactly as the Blob store derived its blob
+      # name, so this is a switch rather than a migration: either store can read what the other
+      # wrote, and reverting is changing these three lines back.
+      #
+      # Enabling both at once is refused at startup, so BlobTranscriptEnabled must not come back
+      # while this is set. Needs AWS credentials in lambda-worker.env that can write the bucket --
+      # the Polly-scoped key cannot.
+      AudioChoice__TemporaryAudioStorage__S3TranscriptEnabled: "true"
+      AudioChoice__TemporaryAudioStorage__TranscriptBucketName: audiochoice-transcripts-522895896460
+      AudioChoice__TemporaryAudioStorage__S3Region: us-east-1
+      # Left off deliberately, not removed: see above on why both cannot be enabled together.
+      AudioChoice__TemporaryAudioStorage__BlobTranscriptEnabled: "false"
       AudioChoice__OpenAI__TranscriptionProvider: faster-whisper
       # Classification transport. Switched to a fully self-hosted vLLM model (Qwen3.6-27B,
       # served by the qwen service above) for every tier -- no OpenAI credits required for
