@@ -655,6 +655,13 @@ app.Use(async (context, next) =>
     // address -- keep working while the service is closed to everyone else.
     if (user is not null && !serviceAccessOptions.Allows(user.Email))
     {
+        // An account refused here holds a token that was valid when it was issued, so every
+        // request its app makes fails at once with nothing on the device to explain it. Logged
+        // for the same reason as the sign-in refusal: the address is the diagnosis.
+        app.Logger.LogWarning(
+            "Refused a closed-service request from {Email} for {Path}.",
+            string.IsNullOrWhiteSpace(user.Email) ? "(no address on account)" : user.Email,
+            context.Request.Path.Value);
         context.Response.StatusCode = StatusCodes.Status403Forbidden;
         await context.Response.WriteAsJsonAsync(
             new { error = serviceAccessOptions.ClosedMessage });
@@ -833,6 +840,17 @@ app.MapPost("/v1/auth/external", async (
     // creating a brand new account the way LoginExternal otherwise would.
     if (!serviceAccessOptions.Allows(identity.Email))
     {
+        // Recorded because the listener cannot see it and neither could anyone else. A
+        // provider's account chooser picks its own default, so the address actually signed in
+        // with is not necessarily the one the person intended, and the refusal is deliberately
+        // identical for every address -- which leaves no way to tell "wrong account" apart from
+        // "allowlist is wrong" without this line. On a two-account server the address is the
+        // whole diagnosis.
+        app.Logger.LogWarning(
+            "Refused a closed-service sign-in for {Provider} address {Email}. Allowed: {Allowed}.",
+            identity.Provider,
+            string.IsNullOrWhiteSpace(identity.Email) ? "(none supplied)" : identity.Email,
+            string.Join(", ", serviceAccessOptions.AllowedEmailList));
         return Results.Json(new { error = serviceAccessOptions.ClosedMessage }, statusCode: 403);
     }
 
