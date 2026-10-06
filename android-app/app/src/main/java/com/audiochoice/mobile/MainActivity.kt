@@ -112,6 +112,20 @@ class MainActivity : ComponentActivity() {
         pendingExternalAudioUri.value = uri
     }
 
+    /**
+     * Restores the playback transport before the listener can touch it.
+     *
+     * A paused playback service is not a foreground service, so the system stops it freely
+     * while the phone is locked. The controller survives that as a connected-looking object
+     * whose commands go nowhere, which left the player unable to resume until the app was
+     * force-stopped. Reconnecting here means the session is rebuilt during the return to the
+     * app rather than discovered broken on the first press of play.
+     */
+    override fun onStart() {
+        super.onStart()
+        playerViewModel.reattachTransport()
+    }
+
     override fun onStop() {
         playerViewModel.saveProgressSync()
         super.onStop()

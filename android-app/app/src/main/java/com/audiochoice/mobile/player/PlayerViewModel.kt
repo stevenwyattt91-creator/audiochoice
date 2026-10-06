@@ -294,14 +294,46 @@ class PlayerViewModel(
         }
     }
 
-    init {
+    /**
+     * Notices when the playback service goes away.
+     *
+     * A paused MediaSessionService is no longer a foreground service, so the system is free
+     * to stop it while the phone is locked or the app is simply not in front. The controller
+     * object survives that, still non-null, reporting `isConnected == false` -- and every
+     * transport call through it becomes a silent no-op. Nothing here used to notice, so
+     * coming back to a book paused a while ago left a player that would not play, would not
+     * seek and showed no error, recoverable only by force-stopping the app.
+     */
+    private val controllerLifecycle = object : MediaController.Listener {
+        override fun onDisconnected(controller: MediaController) {
+            if (this@PlayerViewModel.controller !== controller) return
+            runCatching { controller.removeListener(playerListener) }
+            this@PlayerViewModel.controller = null
+            connectedController.value = null
+            // Position is deliberately left alone. lastKnownPositionMs already holds the last
+            // believable reading, and it is what the reconnect resumes from.
+            mutableState.value = mutableState.value.copy(isPlaying = false, isReady = false)
+        }
+    }
+
+    /** Guards against a second connection attempt while one is already in flight. */
+    private var connecting = false
+    private var lastReconnectAttemptMs = 0L
+
+    private fun connectController() {
+        if (connecting || controller?.isConnected == true) return
+        connecting = true
+        controllerFuture?.let { MediaController.releaseFuture(it) }
         val sessionToken = SessionToken(
             context,
             ComponentName(context, AudioChoicePlaybackService::class.java),
         )
-        val pending = MediaController.Builder(context, sessionToken).buildAsync()
+        val pending = MediaController.Builder(context, sessionToken)
+            .setListener(controllerLifecycle)
+            .buildAsync()
         controllerFuture = pending
         pending.addListener({
+            connecting = false
             val connected = runCatching { pending.get() }.getOrNull()
             if (connected == null) {
                 mutableState.value = mutableState.value.copy(
@@ -318,12 +350,78 @@ class PlayerViewModel(
                 isReady = connected.playbackState == Player.STATE_READY,
             )
             connectedController.value = connected
+            restorePlaybackItemIfMissing(connected)
         }, ContextCompat.getMainExecutor(context))
+    }
+
+    /**
+     * Reloads the open book when the transport has nothing loaded.
+     *
+     * Reconnecting is only half of a recovery. A service that was stopped released its
+     * ExoPlayer with it, so the session this reconnects to is empty: play() on a player with
+     * no media item does nothing, which looks identical to the failure being fixed. Also
+     * covers a session that is still connected but was left idle, which is what a playback
+     * error in the background leaves behind.
+     *
+     * Deliberately does not start playing. The listener paused on purpose; this restores the
+     * ability to resume, not the playback itself.
+     */
+    private fun restorePlaybackItemIfMissing(active: MediaController) {
+        if (active.mediaItemCount > 0) return
+        val current = mutableState.value
+        val book = current.book ?: return
+        val uri = current.localUri ?: return
+        // The in-memory reading is preferred over the stored checkpoint: both are written on
+        // pause, but the checkpoint is shared with the server sync and can have been reset by
+        // a reconciliation, while this value only ever came from the player itself.
+        val resumeMs = lastKnownPositionMs.takeIf { it > 0 } ?: resumePositionMs(book)
+        pendingResumeMs = resumeMs.takeIf { it > RESUME_TOLERANCE_MS }
+        active.setMediaItem(mediaItemFor(book, uri, current.coverPath), resumeMs)
+        active.setPlaybackSpeed(current.speed)
+        active.prepare()
+        // Same ordering as open(): filters are applied before the player can become ready, so
+        // resuming cannot begin inside an enabled filter window.
+        enforceEnabledFilters(resumeMs, allowLookAhead = false)
+        mutableState.value = mutableState.value.copy(
+            isPlaying = false,
+            positionMs = resumeMs,
+        )
+        trace(book.id, "transport restored at=$resumeMs")
+    }
+
+    /**
+     * Restores a working transport, if it needs it.
+     *
+     * Called every time the app comes to the front, which is the moment the listener is about
+     * to press play, and the moment a service stopped while they were away has to be replaced.
+     * Cheap and idempotent when the session is healthy.
+     */
+    fun reattachTransport() {
+        val existing = controller
+        if (existing == null || !existing.isConnected) {
+            connectController()
+            return
+        }
+        restorePlaybackItemIfMissing(existing)
+    }
+
+    init {
+        connectController()
 
         viewModelScope.launch {
             // Nothing to poll until the service connection exists.
             connectedController.filterNotNull().first()
             while (isActive) {
+                // Heals a session lost while the app was in front, where no lifecycle callback
+                // arrives to prompt a reconnect. Throttled because a device that genuinely
+                // cannot bind the service would otherwise be retried several times a second.
+                if (controller == null && !connecting && mutableState.value.book != null) {
+                    val now = android.os.SystemClock.elapsedRealtime()
+                    if (now - lastReconnectAttemptMs > RECONNECT_RETRY_MS) {
+                        lastReconnectAttemptMs = now
+                        connectController()
+                    }
+                }
                 // Only ever cache a believable reading. The old unguarded reads
                 // poisoned this cache with the 0 that a released controller
                 // reports, which is what the save path then persisted.
@@ -1576,6 +1674,9 @@ class PlayerViewModel(
          * being overwritten while a resume is still outstanding.
          */
         const val RESUME_TOLERANCE_MS = 3_000L
+
+        /** How long to wait between attempts to rebind a playback service that has gone away. */
+        const val RECONNECT_RETRY_MS = 2_000L
         val LAST_BOOK_ID_KEY = PlaybackProgressKeys.LAST_BOOK_ID
     }
 
