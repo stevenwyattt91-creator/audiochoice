@@ -315,6 +315,41 @@ class LocalAudioStore(private val context: Context) {
         java.io.File(context.filesDir, "catalog_covers/${catalogID.lowercase()}.image")
             .takeIf { it.isFile }?.absolutePath
 
+    /**
+     * Every cover already on this device, keyed the way the library and Explore screens read them.
+     *
+     * The library now renders from its cached snapshot before the server is asked anything, and
+     * artwork has to arrive on that same first frame. Cover files are the one part of a book that
+     * was never in the snapshot, so rebuilding the map from the server -- a library call, an
+     * Explore call, then a download per edition -- left every row artless until that whole chain
+     * finished, which is the wait the cached snapshot exists to remove.
+     *
+     * Read as a directory listing rather than a lookup per book so this costs two listings no
+     * matter how large the library grows, and so a cover stored for an edition the account no
+     * longer owns still shows up for its Explore row.
+     */
+    suspend fun cachedCoverPaths(books: List<LibraryBook>): Map<String, String> =
+        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            val covers = mutableMapOf<String, String>()
+            // Catalogue art first: a cover saved against the book's own fingerprint is the more
+            // specific of the two and must win when both exist.
+            listOf("catalog_covers", "book_covers").forEach { directory ->
+                java.io.File(context.filesDir, directory).listFiles()?.forEach { file ->
+                    if (file.isFile && file.name.endsWith(".image")) {
+                        covers[file.name.removeSuffix(".image").lowercase()] = file.absolutePath
+                    }
+                }
+            }
+            // A book imported before its edition's artwork was resolved has no cover of its own,
+            // only the catalogue's, which is stored under the first 24 characters of the hash.
+            // Library rows look the cover up by full hash, so map it across.
+            books.forEach { book ->
+                val sha256 = book.fingerprint.sha256.lowercase()
+                if (sha256 !in covers) covers[sha256.take(24)]?.let { covers[sha256] = it }
+            }
+            covers
+        }
+
     suspend fun saveCatalogCover(catalogID: String, bytes: ByteArray): String =
         kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
             val directory = java.io.File(context.filesDir, "catalog_covers").apply { mkdirs() }

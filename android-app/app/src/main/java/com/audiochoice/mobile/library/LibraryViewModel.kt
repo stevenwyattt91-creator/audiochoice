@@ -117,6 +117,11 @@ class LibraryViewModel(
                     loading = true,
                     loaded = true,
                     books = cachedBooks,
+                    // Published with the books, not after the refresh. Artwork is already on disk;
+                    // leaving it out of this frame showed the whole library with no covers until
+                    // the server round-trip finished, and kept it that way for good if the
+                    // refresh failed, because only the success path ever built this map.
+                    coverPaths = localAudio.cachedCoverPaths(cachedBooks),
                 )
             }
             runCatching {
@@ -168,7 +173,13 @@ class LibraryViewModel(
                     }
                     item.copy(coverImageURL = coverURL)
                 }
-                val enriched = serverBooks.map { book -> enrichBook(accessToken, book, explore) }
+                // One book's upsert failing must not discard the refresh for every other book.
+                // This writes catalogue corrections back to the account, so a single rejected
+                // record used to abort the whole load and drop the library back to its cached
+                // snapshot -- indistinguishable, on screen, from being offline.
+                val enriched = serverBooks.map { book ->
+                    runCatching { enrichBook(accessToken, book, explore) }.getOrDefault(book)
+                }
 
                 // A library book can retain its cover even before its scan is published
                 // in Explore. Cache that account-level URL for details and player use.
@@ -182,11 +193,9 @@ class LibraryViewModel(
                         }
                     }
                 }
-                val covers = enriched.mapNotNull { book ->
-                    localAudio.coverPath(book.fingerprint.sha256)?.let { path ->
-                        book.fingerprint.sha256.lowercase() to path
-                    }
-                }.toMap().toMutableMap()
+                // The same disk scan the cached frame published, so a refresh can only add
+                // artwork, never blank a row that was already showing some.
+                val covers = localAudio.cachedCoverPaths(enriched).toMutableMap()
                 explore.forEach { item ->
                     val ownedBooks = enriched.filter { it.matchesCatalog(item) }
                     val cached = localAudio.catalogCoverPath(item.catalogID)
