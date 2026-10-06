@@ -112,11 +112,13 @@ class LibraryViewModel(
         viewModelScope.launch {
             mutableState.value = mutableState.value.copy(loading = true, error = null)
             val cachedBooks = localAudio.librarySnapshot(accountID)
+            val cachedExplore = localAudio.exploreSnapshot(accountID)
             if (cachedBooks.isNotEmpty()) {
                 mutableState.value = mutableState.value.copy(
                     loading = true,
                     loaded = true,
                     books = cachedBooks,
+                    exploreBooks = cachedExplore,
                     // Published with the books, not after the refresh. Artwork is already on disk;
                     // leaving it out of this frame showed the whole library with no covers until
                     // the server round-trip finished, and kept it that way for good if the
@@ -208,6 +210,7 @@ class LibraryViewModel(
                     }
                 }
                 localAudio.saveLibrarySnapshot(accountID, enriched)
+                localAudio.saveExploreSnapshot(accountID, explore)
                 Triple(enriched, explore, covers.toMap())
             }.onSuccess {
                 mutableState.value = LibraryUiState(

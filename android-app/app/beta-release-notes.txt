@@ -1,27 +1,18 @@
-Google sign-in, playback after a pause, and cover art.
+The library opens instantly now.
 
-Google sign-in could fail with an opaque error after the app had been rotated,
-switched between light and dark, or left long enough for Android to reclaim the
-screen. Sign-in was holding on to the screen it was first built with, which by
-then no longer existed. It now uses whatever screen is actually in front.
+Opening the app showed a loading bar and an empty screen for about ten seconds
+before any books appeared. The books were already on the phone the whole time:
+the app saves a copy of your library locally and loads that before it calls the
+server, but the library screen was throwing it away and drawing only a progress
+bar until the server answered. It now draws your books immediately and shows a
+thin line under the title while it checks for updates in the background.
 
-Note: the other half of the sign-in problem was a certificate fingerprint that
-was never registered with Google for this beta app. That was fixed on the
-server side and needs no app update.
+Explore is cached the same way, so the scanned catalogue is there the moment you
+switch to it instead of waiting on a request.
 
-Pausing, locking the phone, then coming back left the player unable to play,
-seek or do anything, with no error shown. A paused playback service is not a
-foreground service, so Android is free to stop it while you are away, and the
-app kept talking to the session that went with it. The app now notices the
-session is gone, rebuilds it when you return, and reloads the book at the exact
-position you paused it. Still paused, so nothing starts on its own.
+Cover art appears straight away too, from the phone.
 
-Cover art is back. The artwork was never lost, it was on the phone the whole
-time. The library loads from the phone first and the covers were being left out
-of that first load, so they only reappeared once the app had finished checking
-in with the server, and stayed blank for good if that check did not complete.
-Covers now appear the moment the library opens.
-
-Also in this build: the playback speed control is a - / + stepper that moves in
-0.05 steps between 0.25x and 2.0x, and a book's own filters and bookmarks show
-immediately on open instead of waiting on the network.
+Earlier in this run of builds: pausing, locking the phone and coming back no
+longer leaves the player unable to play, Google sign-in no longer breaks after
+the app has been rotated or left in the background, and the playback speed
+control is a - / + stepper moving in 0.05 steps between 0.25x and 2.0x.
