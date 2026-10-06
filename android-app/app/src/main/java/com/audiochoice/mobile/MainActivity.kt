@@ -38,7 +38,11 @@ class MainActivity : ComponentActivity() {
         AuthViewModel.Factory(
             api,
             SessionStore(applicationContext, json),
-            GoogleSignInClient(this),
+            // Application context: this factory runs once, but the ViewModel it builds
+            // survives Activity recreation, so an Activity captured here would be a
+            // destroyed one for the rest of the process's life. The Activity that
+            // Credential Manager needs is supplied per sign-in from the composition.
+            GoogleSignInClient(applicationContext),
         )
     }
     private val importViewModel by viewModels<ImportViewModel> {

@@ -111,6 +111,9 @@ fun AudioChoiceApp(
     onCompanionTransferHandled: () -> Unit,
 ) {
     val state by auth.state.collectAsStateWithLifecycle()
+    // Read from the composition rather than captured once, so this is always the Activity
+    // currently on screen even after a recreation. Credential Manager needs a live one.
+    val activity = androidx.compose.ui.platform.LocalContext.current
     Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
         when {
             state.loadingSession -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -121,7 +124,7 @@ fun AudioChoiceApp(
                 error = state.error,
                 onLogin = auth::login,
                 onRegister = auth::register,
-                onGoogle = auth::googleSignIn,
+                onGoogle = { auth.googleSignIn(activity) },
                 onDismissError = auth::dismissError,
                 onRequestReset = auth::requestPasswordReset,
                 onConfirmReset = auth::confirmPasswordReset,
