@@ -41,6 +41,40 @@ public sealed class ServiceAccessOptions
         .Distinct(StringComparer.Ordinal)
         .ToArray();
 
+    /// <summary>
+    /// Reduces an address to the mailbox it actually reaches.
+    /// </summary>
+    /// <remarks>
+    /// Gmail ignores dots in the local part and everything from a '+' onward, so
+    /// <c>stevenwyattt91@gmail.com</c>, <c>steven.wyattt91@gmail.com</c> and
+    /// <c>steven.wyattt91+anything@gmail.com</c> are one account that Google will hand back
+    /// under whichever spelling it has on file. Comparing the raw strings locked the owner out
+    /// of his own server over a single dot, with a message saying the service was closed.
+    ///
+    /// This collapses aliases of the same mailbox and nothing else: it widens the list by zero
+    /// accounts, because Google already treats these as the same person. Deliberately limited to
+    /// Google's own domains -- a dot is significant in a local part generally, and stripping one
+    /// elsewhere really would admit a different mailbox.
+    /// </remarks>
+    private static string Canonical(string? email)
+    {
+        var trimmed = email?.Trim().ToLowerInvariant();
+        if (string.IsNullOrEmpty(trimmed)) return string.Empty;
+        var at = trimmed.LastIndexOf('@');
+        if (at <= 0 || at == trimmed.Length - 1) return trimmed;
+
+        var local = trimmed[..at];
+        var domain = trimmed[(at + 1)..];
+        if (domain is not ("gmail.com" or "googlemail.com")) return trimmed;
+
+        var plus = local.IndexOf('+', StringComparison.Ordinal);
+        if (plus >= 0) local = local[..plus];
+        local = local.Replace(".", string.Empty, StringComparison.Ordinal);
+        // An address that is nothing but dots and tags is not a mailbox. Fall back to the
+        // address as given rather than inventing "@gmail.com" as something that could match.
+        return local.Length == 0 ? trimmed : $"{local}@gmail.com";
+    }
+
     /// <summary>Whether the server is admitting only a named list.</summary>
     public bool IsClosed => AllowedEmailList.Count > 0;
 
@@ -57,8 +91,14 @@ public sealed class ServiceAccessOptions
     public bool Allows(string? email)
     {
         if (!IsClosed) return true;
-        var normalized = email?.Trim().ToLowerInvariant();
-        if (string.IsNullOrEmpty(normalized)) return false;
-        return AllowedEmailList.Contains(normalized, StringComparer.Ordinal);
+        var canonical = Canonical(email);
+        if (canonical.Length == 0) return false;
+        // Both sides are canonicalised, so the list can be written with or without the dots and
+        // still match whichever spelling the provider reports. Linear over a list of two.
+        foreach (var allowed in AllowedEmailList)
+        {
+            if (string.Equals(Canonical(allowed), canonical, StringComparison.Ordinal)) return true;
+        }
+        return false;
     }
 }

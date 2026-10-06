@@ -3869,6 +3869,23 @@ Assert(
         closed.Allows("  Steven.Wyattt91@Gmail.com  "),
         "A permitted address was refused over casing or surrounding space.");
 
+    // Gmail ignores dots in the local part and anything from a '+' onward, and Google hands back
+    // whichever spelling it has on file -- which for this owner is the undotted one. Comparing raw
+    // strings refused him from his own server over a single dot, and told him the service was
+    // closed while doing it.
+    Assert(
+        closed.Allows("stevenwyattt91@gmail.com") &&
+        closed.Allows("steven.wyattt91+phone@gmail.com") &&
+        closed.Allows("stevenwyattt91@googlemail.com"),
+        "A Gmail alias of a permitted address was refused, which is the same mailbox.");
+
+    // The same collapsing must not reach past Google's domains, where a dot really does separate
+    // one mailbox from another.
+    Assert(
+        !closed.Allows("stevenwyattt91@example.com") &&
+        !new ServiceAccessOptions { AllowedEmails = "a.b@example.com" }.Allows("ab@example.com"),
+        "Dots were stripped outside Gmail, admitting a genuinely different address.");
+
     Assert(
         !closed.Allows("someone.else@gmail.com"),
         "A former listener can still sign in to a service that has closed.");
