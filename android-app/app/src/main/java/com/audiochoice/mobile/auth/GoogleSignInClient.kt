@@ -21,15 +21,30 @@ class GoogleSignInFailure(
     cause: Throwable? = null,
 ) : Exception(message, cause)
 
+/**
+ * @param context Application-scoped. Only ever used to create the Credential Manager, never to
+ *   show anything, so this object is safe to hold for the lifetime of a retained ViewModel.
+ */
 class GoogleSignInClient(private val context: Context) {
-    suspend fun requestIdToken(): String {
+    /**
+     * @param activity The Activity that is on screen right now, needed because Credential
+     *   Manager presents the account chooser itself.
+     *
+     *   Passed in per call rather than captured at construction. This object is built by a
+     *   ViewModel factory, and a ViewModel outlives the Activity that created it: after any
+     *   recreation -- a rotation, a light/dark switch, or the system reclaiming the Activity
+     *   while the process lives on -- the captured reference pointed at a destroyed Activity,
+     *   and every Google sign-in from that point failed with an opaque Credential Manager
+     *   error until the app was force-stopped.
+     */
+    suspend fun requestIdToken(activity: Context): String {
         val clientId = BuildConfig.GOOGLE_SERVER_CLIENT_ID
         check(clientId.isNotBlank()) { "Google sign-in has not been connected to this build yet." }
         val option = GetSignInWithGoogleOption.Builder(clientId).build()
         val request = GetCredentialRequest.Builder().addCredentialOption(option).build()
 
         val credential = try {
-            CredentialManager.create(context).getCredential(context, request).credential
+            CredentialManager.create(context).getCredential(activity, request).credential
         } catch (failure: GetCredentialException) {
             throw translate(failure)
         }

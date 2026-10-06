@@ -65,7 +65,13 @@ class AuthViewModel(
         api.register(RegisterRequest(email.trim(), password, referralCode = referralCode.trim().ifBlank { null }))
     }
 
-    fun googleSignIn() = authenticate { api.googleSignIn(google.requestIdToken()) }
+    /**
+     * @param activity The Activity currently on screen, supplied by the caller because
+     *   Credential Manager needs somewhere live to present its account chooser and this
+     *   ViewModel outlives any Activity it could have captured.
+     */
+    fun googleSignIn(activity: android.content.Context) =
+        authenticate { api.googleSignIn(google.requestIdToken(activity)) }
 
     /**
      * Asks for a reset code, reporting only whether the request was accepted.

@@ -1,19 +1,26 @@
-Two fixes for things that needed the app closed and reopened.
+Google sign-in, playback after a pause, and cover art.
+
+Google sign-in could fail with an opaque error after the app had been rotated,
+switched between light and dark, or left long enough for Android to reclaim the
+screen. Sign-in was holding on to the screen it was first built with, which by
+then no longer existed. It now uses whatever screen is actually in front.
+
+Note: the other half of the sign-in problem was a certificate fingerprint that
+was never registered with Google for this beta app. That was fixed on the
+server side and needs no app update.
 
 Pausing, locking the phone, then coming back left the player unable to play,
 seek or do anything, with no error shown. A paused playback service is not a
-foreground service, so Android is free to stop it while you are away. The app
-kept talking to the session that went with it, so every button press went
-nowhere. The app now notices that the session is gone, rebuilds it when you
-return, and reloads the book at the exact position you paused it. Still paused,
-so nothing starts playing on its own.
+foreground service, so Android is free to stop it while you are away, and the
+app kept talking to the session that went with it. The app now notices the
+session is gone, rebuilds it when you return, and reloads the book at the exact
+position you paused it. Still paused, so nothing starts on its own.
 
-Cover art is back. The library had started opening with every cover blank. The
-artwork was never lost, it was on the phone the whole time. The library loads
-from the phone first and the covers were being left out of that first load, so
-they only reappeared once the app had finished checking in with the server, and
-stayed blank for good if that check did not complete. Covers now appear the
-moment the library opens, with no wait.
+Cover art is back. The artwork was never lost, it was on the phone the whole
+time. The library loads from the phone first and the covers were being left out
+of that first load, so they only reappeared once the app had finished checking
+in with the server, and stayed blank for good if that check did not complete.
+Covers now appear the moment the library opens.
 
 Also in this build: the playback speed control is a - / + stepper that moves in
 0.05 steps between 0.25x and 2.0x, and a book's own filters and bookmarks show
