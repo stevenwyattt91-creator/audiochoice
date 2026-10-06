@@ -1022,7 +1022,12 @@ private fun LibraryHome(
 ) {
     var sort by rememberSaveable { mutableStateOf(LibrarySort.RECENT) }
     var sortMenu by remember { mutableStateOf(false) }
-    if (loading) { LinearProgressIndicator(Modifier.fillMaxWidth()); return }
+    // Only when there is genuinely nothing to show. This used to return on `loading` alone,
+    // which threw away the cached snapshot the view model publishes before it calls the server
+    // and replaced the entire library with a bare progress bar for as long as the refresh took.
+    // The whole point of the snapshot is that the books are already on the device; the refresh
+    // is an update, not a prerequisite, and it is reported by the strip inside the list below.
+    if (loading && books.isEmpty()) { LinearProgressIndicator(Modifier.fillMaxWidth()); return }
     if (books.isEmpty()) {
         Box(
             Modifier.fillMaxWidth().border(1.dp, ChoiceOutline, RoundedCornerShape(16.dp)).background(ChoiceSurface, RoundedCornerShape(16.dp)).padding(32.dp),
@@ -1057,6 +1062,12 @@ private fun LibraryHome(
     }
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
         Text("My Library", fontSize = 26.sp, fontWeight = FontWeight.Bold)
+        // A refresh in progress over books that are already readable, rather than instead of
+        // them. Thin and under the title so it never moves the list as it appears and goes.
+        if (loading) {
+            Spacer(Modifier.height(6.dp))
+            LinearProgressIndicator(Modifier.fillMaxWidth().height(2.dp))
+        }
         if (featured != null) {
             Spacer(Modifier.height(16.dp))
             Text("Continue Listening", fontSize = 15.sp, fontWeight = FontWeight.SemiBold)

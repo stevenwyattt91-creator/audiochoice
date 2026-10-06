@@ -75,6 +75,7 @@ class LocalAudioStore(private val context: Context) {
     private fun epubAlignmentTextKey(sha256: String) = stringPreferencesKey("epub_alignment_text_${sha256.lowercase()}")
     private fun epubAlignmentVersionKey(sha256: String) = stringPreferencesKey("epub_alignment_version_${sha256.lowercase()}")
     private fun libraryKey(accountID: String) = stringPreferencesKey("library_${accountID.lowercase()}")
+    private fun exploreKey(accountID: String) = stringPreferencesKey("explore_${accountID.lowercase()}")
     private fun offlinePlaybackKey(sha256: String) = stringPreferencesKey("offline_playback_${sha256.lowercase()}")
     private fun pendingBookmarksKey(sha256: String) = stringPreferencesKey("pending_bookmarks_${sha256.lowercase()}")
     private fun filterSettingsDirtyKey(sha256: String) = stringPreferencesKey("filter_settings_dirty_${sha256.lowercase()}")
@@ -135,6 +136,23 @@ class LocalAudioStore(private val context: Context) {
     suspend fun librarySnapshot(accountID: String): List<LibraryBook> =
         context.localAudioDataStore.data.first()[libraryKey(accountID)]
             ?.let { runCatching { json.decodeFromString<List<LibraryBook>>(it) }.getOrNull() }
+            .orEmpty()
+
+    /**
+     * The Explore catalogue as the server last described it.
+     *
+     * Stored for the same reason the library is: so the screen has something to draw before any
+     * request is made. Without it the catalogue was the one part of the app that still had to
+     * wait on the network every single time, and its covers were already cached on disk, so the
+     * only thing missing was the list of titles that goes with them.
+     */
+    suspend fun saveExploreSnapshot(accountID: String, catalog: List<ExploreCatalogBook>) {
+        context.localAudioDataStore.edit { it[exploreKey(accountID)] = json.encodeToString(catalog) }
+    }
+
+    suspend fun exploreSnapshot(accountID: String): List<ExploreCatalogBook> =
+        context.localAudioDataStore.data.first()[exploreKey(accountID)]
+            ?.let { runCatching { json.decodeFromString<List<ExploreCatalogBook>>(it) }.getOrNull() }
             .orEmpty()
 
     suspend fun saveOfflinePlayback(sha256: String, value: OfflineBookPlayback) {
