@@ -2,7 +2,7 @@
 
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 
-const API = process.env.NEXT_PUBLIC_AUDIOCHOICE_API_URL || "https://audiochoice-stg-api.grayocean-b35d4bf9.eastus.azurecontainerapps.io";
+const API = process.env.NEXT_PUBLIC_AUDIOCHOICE_API_URL || "https://api.audiochoiceapp.com";
 const GOOGLE_CLIENT_ID = process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID || "105248861745-34kh2v9g9825kb1drs3jrgmijjum2p3o.apps.googleusercontent.com";
 type Access = { userID: string; email: string; displayName: string; role: string; active: boolean };
 type BookFingerprint = { version: number; sha256: string; fileSize: number; duration?: number; fileType: string; workTitle?: string; author?: string; seriesTitle?: string; seriesNumber?: number; editionType?: string; partNumber?: number; totalParts?: number };

@@ -395,7 +395,7 @@ sealed class CompanionSettings
 {
     private readonly string _path = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "AudioChoice", "companion-session.json");
     private Session _session;
-    public string ApiBaseUrl => Environment.GetEnvironmentVariable("AUDIOCHOICE_API_URL")?.TrimEnd('/') ?? "https://audiochoice-stg-api.grayocean-b35d4bf9.eastus.azurecontainerapps.io";
+    public string ApiBaseUrl => Environment.GetEnvironmentVariable("AUDIOCHOICE_API_URL")?.TrimEnd('/') ?? "https://api.audiochoiceapp.com";
     public string GoogleClientID => Environment.GetEnvironmentVariable("AUDIOCHOICE_GOOGLE_CLIENT_ID") ?? "105248861745-34kh2v9g9825kb1drs3jrgmijjum2p3o.apps.googleusercontent.com";
     public string? AccessToken => _session.AccessToken;
     public bool IsSignedIn => !string.IsNullOrWhiteSpace(_session.AccessToken);

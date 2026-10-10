@@ -43,6 +43,9 @@ var serviceAccessOptions = builder.Configuration
     .GetSection("AudioChoice:ServiceAccess")
     .Get<ServiceAccessOptions>() ?? new ServiceAccessOptions();
 builder.Services.AddSingleton(serviceAccessOptions);
+var dataVolumeSeedOptions = builder.Configuration
+    .GetSection("AudioChoice:DataVolumeSeed")
+    .Get<DataVolumeSeedOptions>() ?? new DataVolumeSeedOptions();
 
 builder.WebHost.ConfigureKestrel(options =>
 {
@@ -99,7 +102,27 @@ if (databaseOptions.Enabled)
         "This AudioChoice build does not include PostgreSQL support.");
 #endif
 }
-if (temporaryAudioOptions.BlobEnabled)
+// S3 is checked before Blob so that a deployment carrying both settings resolves to AWS, which
+// makes the migration a one-line configuration change and the rollback the same line removed.
+if (temporaryAudioOptions.S3Enabled)
+{
+    if (string.IsNullOrWhiteSpace(temporaryAudioOptions.S3BucketName))
+    {
+        throw new InvalidOperationException(
+            "AudioChoice__TemporaryAudioStorage__S3BucketName is required when S3 direct uploads are enabled.");
+    }
+    builder.Services.AddSingleton(
+        S3TemporaryAudioStorage.CreateClient(temporaryAudioOptions));
+    builder.Services.AddSingleton<ITemporaryAudioStorage, S3TemporaryAudioStorage>();
+    builder.Services.AddSingleton<ICompanionTransferStorage, S3CompanionTransferStorage>();
+    builder.Services.AddSingleton<IAuditReviewMediaStorage, S3AuditReviewMediaStorage>();
+    // Restores edition-signatures.json onto a new data volume. Registered inside the S3 branch
+    // because it needs that client, and ahead of anything that reads the volume so the file is in
+    // place before FileEditionSignatureStore loads it.
+    builder.Services.AddSingleton(dataVolumeSeedOptions);
+    builder.Services.AddSingleton<DataVolumeSeeder>();
+}
+else if (temporaryAudioOptions.BlobEnabled)
 {
 #if POSTGRES
     if (string.IsNullOrWhiteSpace(temporaryAudioOptions.StorageAccountName))
@@ -322,11 +345,22 @@ if (temporaryAudioOptions.S3TranscriptEnabled)
             "AudioChoice:TemporaryAudioStorage:TranscriptBucketName is required when S3 " +
             "transcript storage is enabled.");
     }
-    builder.Services.AddSingleton<IAmazonS3>(_ =>
-        string.IsNullOrWhiteSpace(temporaryAudioOptions.S3Region)
-            ? new AmazonS3Client()
-            : new AmazonS3Client(
-                Amazon.RegionEndpoint.GetBySystemName(temporaryAudioOptions.S3Region)));
+    // The transcript bucket is deliberately its own bucket, separate from S3Enabled's shared
+    // media bucket (see TemporaryAudioStorageOptions.TranscriptBucketName's remarks), but both
+    // read the same S3Region setting, so when S3Enabled has already registered an IAmazonS3
+    // singleton (via S3TemporaryAudioStorage.CreateClient) there is nothing a second client
+    // would do differently -- registering another would just overwrite the first in the
+    // container and leave whichever store resolves second holding the only live client.
+    // Registering only when audio storage has not already done so keeps exactly one IAmazonS3
+    // in the container no matter which of S3Enabled/S3TranscriptEnabled are turned on.
+    if (!temporaryAudioOptions.S3Enabled)
+    {
+        builder.Services.AddSingleton<IAmazonS3>(_ =>
+            string.IsNullOrWhiteSpace(temporaryAudioOptions.S3Region)
+                ? new AmazonS3Client()
+                : new AmazonS3Client(
+                    Amazon.RegionEndpoint.GetBySystemName(temporaryAudioOptions.S3Region)));
+    }
     builder.Services.AddSingleton<IPrivateTranscriptStore, S3PrivateTranscriptStore>();
 }
 else if (temporaryAudioOptions.BlobTranscriptEnabled)
@@ -551,6 +585,14 @@ if (openAIOptions.WorkerEnabled)
 }
 
 var app = builder.Build();
+
+// Before the host runs, so the data volume is complete before anything reads it. Only registered
+// when S3 storage is selected, and a no-op unless AudioChoice:DataVolumeSeed:Enabled is set.
+if (app.Services.GetService<DataVolumeSeeder>() is { } dataVolumeSeeder)
+{
+    await dataVolumeSeeder.RestoreAsync(CancellationToken.None);
+}
+
 app.Logger.LogInformation(
     "Transcription provider {Provider}; faster-whisper endpoint {Endpoint}; chunk timeout {TimeoutSeconds}s; lane {Lane}",
     openAIOptions.TranscriptionProvider,

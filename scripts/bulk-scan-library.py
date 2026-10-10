@@ -42,7 +42,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-DEFAULT_API = "https://audiochoice-stg-api.grayocean-b35d4bf9.eastus.azurecontainerapps.io"
+DEFAULT_API = "https://api.audiochoiceapp.com"
 AUDIO_SUFFIXES = {".m4b", ".m4a", ".mp3", ".aac", ".flac", ".ogg", ".wav"}
 # Matches the mobile clients, which upload in 8 MiB blocks against the same SAS URL.
 BLOCK_SIZE = 8 * 1024 * 1024

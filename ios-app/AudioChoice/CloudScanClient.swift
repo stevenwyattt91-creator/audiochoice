@@ -119,8 +119,11 @@ struct CloudScanClient {
         try await post(value, path: "v1/scans/requests")
     }
 
+    /// Bounded well below the 60-second default, because this one call stands between the launch
+    /// spinner and the app. An unreachable server used to hold that spinner for the full minute
+    /// before anything was decided, which is the whole app appearing not to load.
     func accountAccess() async throws -> AccountAccessResponse {
-        try await get(path: "v1/account/access")
+        try await get(path: "v1/account/access", timeout: 10)
     }
 
     /// Registers this device so the server can say when a scan finished.
@@ -413,9 +416,10 @@ struct CloudScanClient {
         try validate(response: response, data: data)
     }
 
-    private func get<Output: Decodable>(path: String) async throws -> Output {
+    private func get<Output: Decodable>(path: String, timeout: TimeInterval? = nil) async throws -> Output {
         var request = URLRequest(url: endpoint(path))
         request.httpMethod = "GET"
+        if let timeout { request.timeoutInterval = timeout }
         addAPIHeaders(to: &request)
         return try await response(for: request)
     }

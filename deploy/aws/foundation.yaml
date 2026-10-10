@@ -1,0 +1,516 @@
+AWSTemplateFormatVersion: '2010-09-09'
+
+# The AudioChoice foundation on AWS: network, image registry, object storage, the shared /data
+# filesystem, and the database. Everything here is long-lived and is created once.
+#
+# Mirrors deploy/azure/bootstrap.bicep and deploy/azure/database.bicep, which it replaces. Kept as a
+# separate stack from api.yaml for the same reason the Bicep was split: the API is redeployed on
+# every push and the things holding state must not be in the blast radius of that.
+#
+# Cost shape at these sizes, us-east-1 on-demand, roughly: RDS db.t4g.micro ~$12/mo plus ~$4 of gp3,
+# EFS ~$6/mo for 20 GiB, S3 and ECR by usage. The ALB and the Fargate task live in api.yaml and add
+# roughly another $34. No NAT gateway anywhere, which is deliberate and explained at the subnets.
+
+Description: AudioChoice foundation - VPC, ECR, S3, EFS and RDS PostgreSQL
+
+Parameters:
+  NamePrefix:
+    Type: String
+    Default: audiochoice
+    Description: Prefix for every resource name and for the cross-stack export names.
+
+  DatabaseUsername:
+    Type: String
+    Default: audiochoice_admin
+    Description: >-
+      Master username for the PostgreSQL instance. Carried over from the Azure
+      deployment so the connection string shape does not change.
+
+  # cfn-lint raises W1011 here, preferring a dynamic reference over a NoEcho parameter.
+  # Taken deliberately rather than silenced: a dynamic reference would have this stack read the
+  # password from Secrets Manager or Parameter Store, which means the secret must already exist
+  # before the stack that creates the database can run. That inverts the bootstrap -- the whole
+  # point of this template is to be the first thing deployed into an empty account.
+  #
+  # The password is passed once, at creation, from a repository secret, with NoEcho so it is
+  # absent from stack events, the console and describe-stacks output. It is never read back:
+  # the deploy workflow writes the assembled connection string to Parameter Store as a
+  # SecureString, and the running task reads only that.
+  DatabasePassword:
+    Type: String
+    NoEcho: true
+    MinLength: 16
+    Description: >-
+      Master password for the PostgreSQL instance. Supplied by the deploy workflow
+      from a repository secret and never stored in the template.
+
+  DatabaseEngineVersion:
+    Type: String
+    Default: '16'
+    Description: >-
+      PostgreSQL major version. Matches the Azure Flexible Server it replaces.
+      A bare major version lets RDS choose the current default minor.
+
+  DatabaseInstanceClass:
+    Type: String
+    Default: db.t4g.micro
+    Description: >-
+      Burstable, the AWS counterpart of Azure's Standard_B1ms. db.t4g.small is the
+      next step up if connection count or query load needs it.
+
+  DatabaseAllocatedStorage:
+    Type: Number
+    Default: 32
+    Description: Gibibytes of gp3 storage, matching the 32 GB Azure disk.
+
+  WebsiteOrigins:
+    Type: CommaDelimitedList
+    Default: 'https://audiochoiceapp.com,https://www.audiochoiceapp.com'
+    Description: >-
+      Browser origins allowed to PUT directly to presigned URLs. The Azure storage
+      account carried exactly these two in its CORS rules; the companion handoff on
+      the website depends on them.
+
+Resources:
+
+  # ---------------------------------------------------------------------------
+  # Network
+  #
+  # Two public subnets and no private subnets, which is a deliberate cost choice. A Fargate task in a
+  # private subnet needs either a NAT gateway (~$32/mo plus data processing) or a set of VPC
+  # endpoints to reach ECR, S3, CloudWatch and Secrets Manager. This service also has to reach the
+  # public internet regardless -- OpenAI, Resend, APNs, Apple's JWS keys, Google Play, the Lambda
+  # Labs GPU host -- so a NAT gateway would be paying for something the task needs anyway.
+  #
+  # The task therefore runs in a public subnet with a public IP, and is protected by its security
+  # group rather than by its subnet: nothing may reach port 8080 except the load balancer. The
+  # database and the filesystem are likewise unreachable except from the task's own security group,
+  # and the database is not publicly accessible at all.
+  # ---------------------------------------------------------------------------
+
+  Vpc:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: 10.20.0.0/16
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      Tags:
+        - Key: Name
+          Value: !Sub '${NamePrefix}-vpc'
+
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: Name
+          Value: !Sub '${NamePrefix}-igw'
+
+  InternetGatewayAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      InternetGatewayId: !Ref InternetGateway
+      VpcId: !Ref Vpc
+
+  # Two availability zones because both the load balancer and the RDS subnet group require it, not
+  # because the service runs two copies of itself.
+  SubnetA:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref Vpc
+      AvailabilityZone: !Select [0, !GetAZs '']
+      CidrBlock: 10.20.1.0/24
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: !Sub '${NamePrefix}-public-a'
+
+  SubnetB:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref Vpc
+      AvailabilityZone: !Select [1, !GetAZs '']
+      CidrBlock: 10.20.2.0/24
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: !Sub '${NamePrefix}-public-b'
+
+  RouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref Vpc
+      Tags:
+        - Key: Name
+          Value: !Sub '${NamePrefix}-public'
+
+  DefaultRoute:
+    Type: AWS::EC2::Route
+    DependsOn: InternetGatewayAttachment
+    Properties:
+      RouteTableId: !Ref RouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway
+
+  SubnetARouteAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref RouteTable
+      SubnetId: !Ref SubnetA
+
+  SubnetBRouteAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref RouteTable
+      SubnetId: !Ref SubnetB
+
+  # ---------------------------------------------------------------------------
+  # Security groups
+  #
+  # Declared here rather than in api.yaml because the database and filesystem rules reference the
+  # task group, and keeping the whole mesh in one stack means the rules are readable in one place.
+  # ---------------------------------------------------------------------------
+
+  LoadBalancerSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Public HTTPS ingress to the AudioChoice API load balancer
+      VpcId: !Ref Vpc
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 0.0.0.0/0
+          Description: HTTPS from the public internet
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+          Description: HTTP, redirected to HTTPS by the listener
+      Tags:
+        - Key: Name
+          Value: !Sub '${NamePrefix}-alb'
+
+  TaskSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: AudioChoice API task - reachable only from the load balancer
+      VpcId: !Ref Vpc
+      Tags:
+        - Key: Name
+          Value: !Sub '${NamePrefix}-task'
+
+  TaskIngressFromLoadBalancer:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref TaskSecurityGroup
+      IpProtocol: tcp
+      FromPort: 8080
+      ToPort: 8080
+      SourceSecurityGroupId: !Ref LoadBalancerSecurityGroup
+      Description: >-
+        The container port from the load balancer only. The task holds a public IP for
+        egress, so this rule is the only thing standing in front of it.
+
+  DatabaseSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: AudioChoice PostgreSQL - reachable only from the API task
+      VpcId: !Ref Vpc
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 5432
+          ToPort: 5432
+          SourceSecurityGroupId: !Ref TaskSecurityGroup
+          Description: >-
+            PostgreSQL from the API task. Narrower than the Azure deployment it
+            replaces, whose AllowAzureServices firewall rule admitted any
+            Azure-hosted service in any subscription.
+      Tags:
+        - Key: Name
+          Value: !Sub '${NamePrefix}-db'
+
+  FileSystemSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: AudioChoice shared /data filesystem
+      VpcId: !Ref Vpc
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 2049
+          ToPort: 2049
+          SourceSecurityGroupId: !Ref TaskSecurityGroup
+          Description: NFS from the API task
+      Tags:
+        - Key: Name
+          Value: !Sub '${NamePrefix}-efs'
+
+  # ---------------------------------------------------------------------------
+  # Image registry
+  # ---------------------------------------------------------------------------
+
+  Repository:
+    Type: AWS::ECR::Repository
+    Properties:
+      RepositoryName: !Sub '${NamePrefix}-api'
+      ImageScanningConfiguration:
+        ScanOnPush: true
+      # Every push tags an image with its commit SHA, so untagged layers are only ever
+      # the residue of overwritten tags and there is nothing to keep them for.
+      LifecyclePolicy:
+        LifecyclePolicyText: |
+          {
+            "rules": [
+              {
+                "rulePriority": 1,
+                "description": "Expire untagged images after a day",
+                "selection": {
+                  "tagStatus": "untagged",
+                  "countType": "sinceImagePushed",
+                  "countUnit": "days",
+                  "countNumber": 1
+                },
+                "action": { "type": "expire" }
+              },
+              {
+                "rulePriority": 2,
+                "description": "Keep the 20 most recent tagged images",
+                "selection": {
+                  "tagStatus": "any",
+                  "countType": "imageCountMoreThan",
+                  "countNumber": 20
+                },
+                "action": { "type": "expire" }
+              }
+            ]
+          }
+
+  # ---------------------------------------------------------------------------
+  # Object storage
+  #
+  # One bucket carrying the four prefixes that were four Azure containers:
+  # temporary-audio/, companion-transfers/, audit-review-media/, private-transcripts/.
+  # ---------------------------------------------------------------------------
+
+  Bucket:
+    Type: AWS::S3::Bucket
+    # Retained on stack deletion. Two of these prefixes hold data that exists nowhere
+    # else -- read-along transcripts and auditor review media -- and a stack teardown
+    # must not be able to take them.
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      BucketName: !Sub '${NamePrefix}-media-${AWS::AccountId}'
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      OwnershipControls:
+        Rules:
+          - ObjectOwnership: BucketOwnerEnforced
+      CorsConfiguration:
+        CorsRules:
+          - AllowedOrigins: !Ref WebsiteOrigins
+            AllowedMethods: [GET, HEAD, PUT]
+            AllowedHeaders: ['*']
+            ExposedHeaders: ['ETag']
+            MaxAge: 3600
+      LifecycleConfiguration:
+        Rules:
+          # Both of these are relay storage with an expiry already enforced in the
+          # application (MaximumRetentionHours, and the companion transfer's own
+          # ExpiresAt). The lifecycle rules are the backstop for anything the cleanup
+          # services miss, so a failed scan cannot leave a 20 GiB object being paid for
+          # indefinitely.
+          - Id: expire-temporary-audio
+            Status: Enabled
+            Prefix: temporary-audio/
+            ExpirationInDays: 2
+            AbortIncompleteMultipartUpload:
+              DaysAfterInitiation: 1
+          - Id: expire-companion-transfers
+            Status: Enabled
+            Prefix: companion-transfers/
+            ExpirationInDays: 2
+            AbortIncompleteMultipartUpload:
+              DaysAfterInitiation: 1
+          # Note the absence of a rule for audit-review-media/ and private-transcripts/.
+          # Those are durable and must never be expired on a timer.
+
+  # ---------------------------------------------------------------------------
+  # Shared /data filesystem
+  #
+  # Replaces the AzureFile share. This is not scratch space: IEditionAliasStore and
+  # IEditionSignatureStore are file-backed even when the database is enabled, so edition
+  # aliases and signatures live here and nowhere else.
+  # ---------------------------------------------------------------------------
+
+  FileSystem:
+    Type: AWS::EFS::FileSystem
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      Encrypted: true
+      PerformanceMode: generalPurpose
+      ThroughputMode: bursting
+      FileSystemTags:
+        - Key: Name
+          Value: !Sub '${NamePrefix}-data'
+
+  MountTargetA:
+    Type: AWS::EFS::MountTarget
+    Properties:
+      FileSystemId: !Ref FileSystem
+      SubnetId: !Ref SubnetA
+      SecurityGroups:
+        - !Ref FileSystemSecurityGroup
+
+  MountTargetB:
+    Type: AWS::EFS::MountTarget
+    Properties:
+      FileSystemId: !Ref FileSystem
+      SubnetId: !Ref SubnetB
+      SecurityGroups:
+        - !Ref FileSystemSecurityGroup
+
+  # The container runs as the non-root `app` user, which is uid/gid 1654 in the .NET 8
+  # runtime images. The access point owns the directory as that user so the application
+  # can write without the container needing root, matching the Dockerfile's own
+  # `chown -R app:app /data`.
+  AccessPoint:
+    Type: AWS::EFS::AccessPoint
+    Properties:
+      FileSystemId: !Ref FileSystem
+      PosixUser:
+        Uid: '1654'
+        Gid: '1654'
+      RootDirectory:
+        Path: /data
+        CreationInfo:
+          OwnerUid: '1654'
+          OwnerGid: '1654'
+          Permissions: '0755'
+      AccessPointTags:
+        - Key: Name
+          Value: !Sub '${NamePrefix}-data'
+
+  # ---------------------------------------------------------------------------
+  # Database
+  # ---------------------------------------------------------------------------
+
+  DatabaseSubnetGroup:
+    Type: AWS::RDS::DBSubnetGroup
+    Properties:
+      DBSubnetGroupDescription: AudioChoice PostgreSQL subnets
+      SubnetIds:
+        - !Ref SubnetA
+        - !Ref SubnetB
+
+  Database:
+    Type: AWS::RDS::DBInstance
+    # A stack deletion takes a final snapshot rather than the data. Every account,
+    # entitlement, library row and affiliate record is in here.
+    DeletionPolicy: Snapshot
+    UpdateReplacePolicy: Snapshot
+    Properties:
+      DBInstanceIdentifier: !Sub '${NamePrefix}-db'
+      DBName: audiochoice
+      Engine: postgres
+      EngineVersion: !Ref DatabaseEngineVersion
+      DBInstanceClass: !Ref DatabaseInstanceClass
+      AllocatedStorage: !Ref DatabaseAllocatedStorage
+      StorageType: gp3
+      StorageEncrypted: true
+      MasterUsername: !Ref DatabaseUsername
+      MasterUserPassword: !Ref DatabasePassword
+      DBSubnetGroupName: !Ref DatabaseSubnetGroup
+      VPCSecurityGroups:
+        - !Ref DatabaseSecurityGroup
+      # Not reachable from the internet. The Azure server it replaces was, behind a
+      # firewall rule that allowed every Azure service in every subscription.
+      PubliclyAccessible: false
+      MultiAZ: false
+      BackupRetentionPeriod: 7
+      AutoMinorVersionUpgrade: true
+      CopyTagsToSnapshot: true
+      DeletionProtection: true
+      EnablePerformanceInsights: false
+
+  # ---------------------------------------------------------------------------
+  # Logs
+  # ---------------------------------------------------------------------------
+
+  LogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/aws/ecs/${NamePrefix}-api'
+      # 30 days, matching the Log Analytics workspace this replaces.
+      RetentionInDays: 30
+
+Outputs:
+
+  VpcId:
+    Value: !Ref Vpc
+    Export:
+      Name: !Sub '${NamePrefix}-vpc-id'
+
+  SubnetIds:
+    Value: !Join [',', [!Ref SubnetA, !Ref SubnetB]]
+    Export:
+      Name: !Sub '${NamePrefix}-subnet-ids'
+
+  LoadBalancerSecurityGroupId:
+    Value: !Ref LoadBalancerSecurityGroup
+    Export:
+      Name: !Sub '${NamePrefix}-alb-sg'
+
+  TaskSecurityGroupId:
+    Value: !Ref TaskSecurityGroup
+    Export:
+      Name: !Sub '${NamePrefix}-task-sg'
+
+  RepositoryUri:
+    Value: !GetAtt Repository.RepositoryUri
+    Export:
+      Name: !Sub '${NamePrefix}-repository-uri'
+
+  BucketName:
+    Value: !Ref Bucket
+    Export:
+      Name: !Sub '${NamePrefix}-bucket'
+
+  BucketArn:
+    Value: !GetAtt Bucket.Arn
+    Export:
+      Name: !Sub '${NamePrefix}-bucket-arn'
+
+  FileSystemId:
+    Value: !Ref FileSystem
+    Export:
+      Name: !Sub '${NamePrefix}-filesystem-id'
+
+  AccessPointId:
+    Value: !Ref AccessPoint
+    Export:
+      Name: !Sub '${NamePrefix}-access-point-id'
+
+  LogGroupName:
+    Value: !Ref LogGroup
+    Export:
+      Name: !Sub '${NamePrefix}-log-group'
+
+  DatabaseAddress:
+    Value: !GetAtt Database.Endpoint.Address
+    Export:
+      Name: !Sub '${NamePrefix}-db-address'
+
+  DatabaseConnectionStringTemplate:
+    Description: >-
+      The connection string the API expects, with the password left out. The deploy
+      workflow substitutes the password and writes the result to SSM as
+      /audiochoice/postgres-connection-string.
+    Value: !Sub 'Host=${Database.Endpoint.Address};Port=5432;Database=audiochoice;Username=${DatabaseUsername};Password=PASSWORD;SSL Mode=Require;Trust Server Certificate=true'

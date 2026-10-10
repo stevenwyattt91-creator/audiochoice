@@ -27,7 +27,7 @@ import sys
 import urllib.error
 import urllib.request
 
-DEFAULT_API = "https://audiochoice-stg-api.grayocean-b35d4bf9.eastus.azurecontainerapps.io"
+DEFAULT_API = "https://api.audiochoiceapp.com"
 
 
 def call(api, path, token, body=None, method=None):

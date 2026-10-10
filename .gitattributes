@@ -1,0 +1,18 @@
+# Shell scripts must keep LF endings regardless of the platform they are edited on.
+#
+# These are checked out on Linux and macOS -- the deploy runner, and whichever machine runs the
+# migration. A CRLF checkout makes the shebang read as "/usr/bin/env bash\r", and the kernel
+# reports "bad interpreter: no such file or directory", which is a confusing way to be told about
+# a line ending. Authoring on Windows makes that the default without this rule.
+*.sh text eol=lf
+
+# Same reasoning for the other things executed rather than read. YAML is whitespace-significant and
+# CloudFormation and GitHub Actions both parse it on Linux.
+*.yaml text eol=lf
+*.yml text eol=lf
+Dockerfile text eol=lf
+*.bicep text eol=lf
+
+# SQL migrations are applied by the server on Linux. LF keeps the checksums and diffs stable
+# whichever platform wrote them.
+*.sql text eol=lf

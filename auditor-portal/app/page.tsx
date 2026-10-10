@@ -4,7 +4,7 @@ import { FormEvent, useEffect, useRef, useState } from "react";
 
 const API =
   process.env.NEXT_PUBLIC_AUDIOCHOICE_API_URL ||
-  "https://audiochoice-stg-api.grayocean-b35d4bf9.eastus.azurecontainerapps.io";
+  "https://api.audiochoiceapp.com";
 type Access = { userID: string; displayName: string; role: string };
 type Audit = {
   id: string;

@@ -1,0 +1,617 @@
+AWSTemplateFormatVersion: '2010-09-09'
+
+# The AudioChoice API service: ECS Fargate task, load balancer and the IAM roles that replace
+# Azure's managed identity. Redeployed on every push; holds no state.
+#
+# Mirrors deploy/azure/api.bicep, which it replaces. Reads the foundation stack's exports, so
+# foundation.yaml must be deployed first.
+#
+# Two things from the Azure template are deliberately gone. There is no equivalent of the AcrPull or
+# Key Vault Secrets User role assignments, because on AWS the execution role's own policy covers
+# both. And AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY are no longer passed at all: Polly and Bedrock
+# are reached with the task role, so the premium voice stops depending on a pair of long-lived keys
+# that were being kept in a vault.
+
+Description: AudioChoice API - ECS Fargate service behind an Application Load Balancer
+
+Parameters:
+  NamePrefix:
+    Type: String
+    Default: audiochoice
+
+  ImageTag:
+    Type: String
+    Description: Tag of the image in ECR, set by the deploy workflow to the commit SHA.
+
+  CertificateArn:
+    Type: String
+    Description: >-
+      ACM certificate for DomainName, in this region. Issued and validated before this
+      stack is deployed rather than created here, because a certificate created inside a
+      stack holds the whole deployment in CREATE_IN_PROGRESS until its DNS validation
+      record appears -- and this domain's DNS is not in Route 53.
+
+  DomainName:
+    Type: String
+    Default: api.audiochoiceapp.com
+    Description: >-
+      The hostname the apps are built against. A domain under our own control is the
+      point: the Azure deployment published on an azurecontainerapps.io name, which no
+      DNS record could repoint, so every shipped build had that provider's hostname
+      compiled into it and moving hosts required an App Store release.
+
+  DesiredCount:
+    Type: Number
+    Default: 1
+    Description: Matches the Azure revision's pinned minReplicas/maxReplicas of 1.
+
+  TaskCpu:
+    Type: String
+    Default: '512'
+    Description: 0.5 vCPU, matching the Azure container app.
+
+  TaskMemory:
+    Type: String
+    Default: '1024'
+    Description: 1 GiB, matching the Azure container app.
+
+  GoogleClientID:
+    Type: String
+    Default: '105248861745-34kh2v9g9825kb1drs3jrgmijjum2p3o.apps.googleusercontent.com,105248861745-hikuiqttbh10okeksf972rk5osdf4d0c.apps.googleusercontent.com'
+    Description: Comma-separated Google OAuth client IDs accepted as token audiences.
+
+  AppleClientID:
+    Type: String
+    Default: 'com.audiochoice.website,com.audiochoice.mobile'
+    Description: Comma-separated Apple client IDs accepted as token audiences.
+
+  TransactionalEmailEnabled:
+    Type: String
+    Default: 'true'
+    AllowedValues: ['true', 'false']
+
+  ResendApiKeyPresent:
+    Type: String
+    Default: 'false'
+    AllowedValues: ['true', 'false']
+    Description: >-
+      Whether /audiochoice/resend-api-key exists in Parameter Store. Referencing an
+      absent parameter makes the task fail to start, exactly as referencing an absent
+      Key Vault secret failed a whole Azure revision, so this is asked rather than
+      assumed. Without it, email stays off and password reset cannot send.
+
+  ApnsAuthKeyPresent:
+    Type: String
+    Default: 'false'
+    AllowedValues: ['true', 'false']
+
+  ApnsKeyID:
+    Type: String
+    Default: ''
+
+  ApnsTeamID:
+    Type: String
+    Default: '8M67MANZ4S'
+
+  NarrationTextScanEnabled:
+    Type: String
+    Default: 'true'
+    AllowedValues: ['true', 'false']
+
+  NarrationSynthesisEnabled:
+    Type: String
+    Default: 'true'
+    AllowedValues: ['true', 'false']
+    Description: >-
+      No longer gated on a credentials-present flag the way the Azure deployment was.
+      Polly is reached with the task role, so there is no key that can be missing.
+
+  ApplePurchasesEnabled:
+    Type: String
+    Default: 'true'
+    AllowedValues: ['true', 'false']
+
+  ApplePurchasesBundleID:
+    Type: String
+    Default: com.audiochoice.mobile
+
+  ApplePurchasesProductIDs:
+    Type: String
+    Default: Monthly
+
+  ApplePurchasesKeyID:
+    Type: String
+    Default: ''
+
+  ApplePurchasesIssuerID:
+    Type: String
+    Default: ''
+
+  AppleNotificationTokenPresent:
+    Type: String
+    Default: 'false'
+    AllowedValues: ['true', 'false']
+
+  GooglePurchasesEnabled:
+    Type: String
+    Default: 'false'
+    AllowedValues: ['true', 'false']
+
+  GooglePurchasesPackageName:
+    Type: String
+    Default: com.audiochoice.mobile
+
+  GooglePurchasesProductIDs:
+    Type: String
+    Default: ''
+
+  GoogleServiceAccountPresent:
+    Type: String
+    Default: 'false'
+    AllowedValues: ['true', 'false']
+
+  GoogleNotificationTokenPresent:
+    Type: String
+    Default: 'false'
+    AllowedValues: ['true', 'false']
+
+  SeedDataVolume:
+    Type: String
+    Default: 'true'
+    AllowedValues: ['true', 'false']
+    Description: >-
+      Restore edition-signatures.json and edition-aliases.json onto the EFS volume from
+      the bucket's data-volume-seed/ prefix when they are absent. On for the migration,
+      and safe to leave on: seeding never replaces a file that already exists. The
+      signature file has no table behind it and nothing regenerates it, so this is the
+      only path by which it reaches the new volume.
+
+Conditions:
+  HasResendApiKey: !Equals [!Ref ResendApiKeyPresent, 'true']
+  HasApnsAuthKey: !Equals [!Ref ApnsAuthKeyPresent, 'true']
+  HasAppleNotificationToken: !Equals [!Ref AppleNotificationTokenPresent, 'true']
+  HasGoogleServiceAccount: !Equals [!Ref GoogleServiceAccountPresent, 'true']
+  HasGoogleNotificationToken: !Equals [!Ref GoogleNotificationTokenPresent, 'true']
+  EmailActuallyEnabled: !And
+    - !Equals [!Ref TransactionalEmailEnabled, 'true']
+    - !Equals [!Ref ResendApiKeyPresent, 'true']
+  GooglePurchasesActuallyEnabled: !And
+    - !Equals [!Ref GooglePurchasesEnabled, 'true']
+    - !Equals [!Ref GoogleServiceAccountPresent, 'true']
+
+Resources:
+
+  Cluster:
+    Type: AWS::ECS::Cluster
+    Properties:
+      ClusterName: !Sub '${NamePrefix}-cluster'
+      ClusterSettings:
+        - Name: containerInsights
+          Value: disabled
+
+  # ---------------------------------------------------------------------------
+  # IAM
+  #
+  # Two roles, because they are used at different times by different principals. The execution role
+  # belongs to the ECS agent and is used before the container exists, to pull the image, write log
+  # streams and read the secrets that become environment variables. The task role belongs to the
+  # running application and is what the AWS SDK inside it picks up -- the direct counterpart of the
+  # user-assigned managed identity the Azure deployment used for blob access.
+  # ---------------------------------------------------------------------------
+
+  ExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub '${NamePrefix}-api-execution'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
+      Policies:
+        - PolicyName: read-runtime-secrets
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - ssm:GetParameters
+                Resource:
+                  - !Sub 'arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${NamePrefix}/*'
+              - Effect: Allow
+                Action:
+                  - kms:Decrypt
+                Resource: '*'
+                Condition:
+                  StringEquals:
+                    'kms:ViaService': !Sub 'ssm.${AWS::Region}.amazonaws.com'
+
+  TaskRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub '${NamePrefix}-api-task'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: media-bucket
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              # Scoped to the one bucket, and the object actions scoped to its contents.
+              # This is what replaces the Storage Blob Data Contributor role assignment.
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:PutObject
+                  - s3:DeleteObject
+                Resource: !Sub
+                  - '${Arn}/*'
+                  - Arn: !ImportValue
+                      'Fn::Sub': '${NamePrefix}-bucket-arn'
+              - Effect: Allow
+                Action:
+                  - s3:ListBucket
+                Resource: !ImportValue
+                  'Fn::Sub': '${NamePrefix}-bucket-arn'
+        - PolicyName: narration-and-analysis
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              # The premium voice. Granted to the role rather than carried as an access
+              # key pair in a vault, which is how the Azure deployment had to do it.
+              - Effect: Allow
+                Action:
+                  - polly:SynthesizeSpeech
+                Resource: '*'
+              # Bedrock is a configured-but-unused analysis lane today: the default
+              # processing lane runs on the self-hosted GPU host. Granted so that lane
+              # works if it is ever selected, and harmless while it is not.
+              - Effect: Allow
+                Action:
+                  - bedrock:InvokeModel
+                  - bedrock:InvokeModelWithResponseStream
+                Resource: '*'
+        - PolicyName: shared-filesystem
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - elasticfilesystem:ClientMount
+                  - elasticfilesystem:ClientWrite
+                Resource: !Sub
+                  - 'arn:${AWS::Partition}:elasticfilesystem:${AWS::Region}:${AWS::AccountId}:file-system/${FileSystemId}'
+                  - FileSystemId: !ImportValue
+                      'Fn::Sub': '${NamePrefix}-filesystem-id'
+
+  # ---------------------------------------------------------------------------
+  # Load balancer
+  # ---------------------------------------------------------------------------
+
+  LoadBalancer:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Name: !Sub '${NamePrefix}-api'
+      Type: application
+      Scheme: internet-facing
+      SecurityGroups:
+        - !ImportValue
+          'Fn::Sub': '${NamePrefix}-alb-sg'
+      Subnets: !Split
+        - ','
+        - !ImportValue
+          'Fn::Sub': '${NamePrefix}-subnet-ids'
+      LoadBalancerAttributes:
+        # A scan upload authorization request is cheap, but the API also serves audio
+        # materialization and long analysis calls. 120 seconds matches the platform
+        # default and is well inside the client timeouts.
+        - Key: idle_timeout.timeout_seconds
+          Value: '120'
+        - Key: routing.http2.enabled
+          Value: 'true'
+
+  TargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Name: !Sub '${NamePrefix}-api'
+      VpcId: !ImportValue
+        'Fn::Sub': '${NamePrefix}-vpc-id'
+      Port: 8080
+      Protocol: HTTP
+      TargetType: ip
+      # /health, the same path the Azure liveness and readiness probes used. Note that a
+      # 200 from it does not prove the routing table was built -- endpoint construction in
+      # minimal APIs is lazy -- which is why the deploy workflow smoke-tests a real route
+      # instead of trusting this.
+      HealthCheckPath: /health
+      HealthCheckProtocol: HTTP
+      HealthCheckIntervalSeconds: 15
+      HealthCheckTimeoutSeconds: 5
+      HealthyThresholdCount: 2
+      UnhealthyThresholdCount: 4
+      Matcher:
+        HttpCode: '200'
+      TargetGroupAttributes:
+        - Key: deregistration_delay.timeout_seconds
+          Value: '20'
+
+  HttpsListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      LoadBalancerArn: !Ref LoadBalancer
+      Port: 443
+      Protocol: HTTPS
+      Certificates:
+        - CertificateArn: !Ref CertificateArn
+      SslPolicy: ELBSecurityPolicy-TLS13-1-2-2021-06
+      DefaultActions:
+        - Type: forward
+          TargetGroupArn: !Ref TargetGroup
+
+  # Redirected rather than served. The Azure ingress set allowInsecure false, and the
+  # iOS and Android clients will not make a plaintext request anyway; this exists so a
+  # browser or a curl against http:// lands somewhere sensible.
+  HttpRedirectListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      LoadBalancerArn: !Ref LoadBalancer
+      Port: 80
+      Protocol: HTTP
+      DefaultActions:
+        - Type: redirect
+          RedirectConfig:
+            Protocol: HTTPS
+            Port: '443'
+            StatusCode: HTTP_301
+
+  # ---------------------------------------------------------------------------
+  # Task definition
+  # ---------------------------------------------------------------------------
+
+  TaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: !Sub '${NamePrefix}-api'
+      RequiresCompatibilities: [FARGATE]
+      NetworkMode: awsvpc
+      Cpu: !Ref TaskCpu
+      Memory: !Ref TaskMemory
+      ExecutionRoleArn: !GetAtt ExecutionRole.Arn
+      TaskRoleArn: !GetAtt TaskRole.Arn
+      RuntimePlatform:
+        CpuArchitecture: X86_64
+        OperatingSystemFamily: LINUX
+      Volumes:
+        - Name: data
+          EFSVolumeConfiguration:
+            FilesystemId: !ImportValue
+              'Fn::Sub': '${NamePrefix}-filesystem-id'
+            TransitEncryption: ENABLED
+            AuthorizationConfig:
+              AccessPointId: !ImportValue
+                'Fn::Sub': '${NamePrefix}-access-point-id'
+              IAM: ENABLED
+      ContainerDefinitions:
+        - Name: api
+          Image: !Sub
+            - '${Uri}:${ImageTag}'
+            - Uri: !ImportValue
+                'Fn::Sub': '${NamePrefix}-repository-uri'
+              ImageTag: !Ref ImageTag
+          Essential: true
+          PortMappings:
+            - ContainerPort: 8080
+              Protocol: tcp
+          MountPoints:
+            - SourceVolume: data
+              ContainerPath: /data
+              ReadOnly: false
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !ImportValue
+                'Fn::Sub': '${NamePrefix}-log-group'
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: api
+          Environment:
+            # Behind a load balancer that terminates TLS, so the application has to trust
+            # the forwarded scheme and address or it will build http:// links and log the
+            # balancer's IP as every caller's.
+            - Name: ASPNETCORE_FORWARDEDHEADERS_ENABLED
+              Value: 'true'
+            - Name: AWS_REGION
+              Value: !Ref AWS::Region
+            - Name: AudioChoice__DataPath
+              Value: /data
+            - Name: AudioChoice__Database__Enabled
+              Value: 'true'
+            - Name: AudioChoice__Database__ApplyMigrations
+              Value: 'true'
+            - Name: AudioChoice__MaximumUploadBytes
+              Value: '21474836480'
+
+            # Storage. S3Enabled is what selects the new provider; Program.cs checks it
+            # before BlobEnabled, so leaving the Azure settings behind would be harmless.
+            - Name: AudioChoice__TemporaryAudioStorage__S3Enabled
+              Value: 'true'
+            - Name: AudioChoice__TemporaryAudioStorage__S3TranscriptEnabled
+              Value: 'true'
+            - Name: AudioChoice__TemporaryAudioStorage__S3BucketName
+              Value: !ImportValue
+                'Fn::Sub': '${NamePrefix}-bucket'
+            - Name: AudioChoice__TemporaryAudioStorage__S3Region
+              Value: !Ref AWS::Region
+            # The four prefixes, named explicitly so the object layout is visible here
+            # rather than only in the options defaults.
+            - Name: AudioChoice__TemporaryAudioStorage__ContainerName
+              Value: temporary-audio
+            - Name: AudioChoice__TemporaryAudioStorage__CompanionTransferContainerName
+              Value: companion-transfers
+            - Name: AudioChoice__TemporaryAudioStorage__AuditReviewContainerName
+              Value: audit-review-media
+            - Name: AudioChoice__TemporaryAudioStorage__TranscriptContainerName
+              Value: private-transcripts
+
+            - Name: AudioChoice__DataVolumeSeed__Enabled
+              Value: !Ref SeedDataVolume
+            - Name: AudioChoice__DataVolumeSeed__Prefix
+              Value: data-volume-seed
+
+            # This process serves the API and does not scan. The GPU host runs the worker.
+            - Name: AudioChoice__OpenAI__WorkerEnabled
+              Value: 'false'
+
+            - Name: AudioChoice__Authentication__GoogleClientID
+              Value: !Ref GoogleClientID
+            - Name: AudioChoice__Authentication__AppleClientID
+              Value: !Ref AppleClientID
+
+            - Name: AudioChoice__TransactionalEmail__Enabled
+              Value: !If [EmailActuallyEnabled, 'true', 'false']
+            - Name: AudioChoice__TransactionalEmail__FromAddress
+              Value: AudioChoice <no-reply@audiochoiceapp.com>
+            - Name: AudioChoice__TransactionalEmail__ReplyToAddress
+              Value: support@audiochoiceapp.com
+            - Name: AudioChoice__TransactionalEmail__ActionBaseURL
+              Value: https://audiochoiceapp.com
+
+            - Name: AudioChoice__Narration__TextScanEnabled
+              Value: !Ref NarrationTextScanEnabled
+            - Name: AudioChoice__Narration__SynthesisEnabled
+              Value: !Ref NarrationSynthesisEnabled
+
+            - Name: AudioChoice__Purchases__AppleEnabled
+              Value: !Ref ApplePurchasesEnabled
+            - Name: AudioChoice__Purchases__AppleBundleID
+              Value: !Ref ApplePurchasesBundleID
+            - Name: AudioChoice__Purchases__AppleProductIDs
+              Value: !Ref ApplePurchasesProductIDs
+            - Name: AudioChoice__Purchases__AppleKeyID
+              Value: !Ref ApplePurchasesKeyID
+            - Name: AudioChoice__Purchases__AppleIssuerID
+              Value: !Ref ApplePurchasesIssuerID
+
+            - Name: AudioChoice__Purchases__GoogleEnabled
+              Value: !If [GooglePurchasesActuallyEnabled, 'true', 'false']
+            - Name: AudioChoice__Purchases__GooglePackageName
+              Value: !Ref GooglePurchasesPackageName
+            - Name: AudioChoice__Purchases__GoogleProductIDs
+              Value: !Ref GooglePurchasesProductIDs
+
+            - !If
+              - HasApnsAuthKey
+              - Name: AudioChoice__Push__Enabled
+                Value: 'true'
+              - !Ref AWS::NoValue
+            - !If
+              - HasApnsAuthKey
+              - Name: AudioChoice__Push__KeyID
+                Value: !Ref ApnsKeyID
+              - !Ref AWS::NoValue
+            - !If
+              - HasApnsAuthKey
+              - Name: AudioChoice__Push__TeamID
+                Value: !Ref ApnsTeamID
+              - !Ref AWS::NoValue
+
+          Secrets:
+            - Name: AudioChoice__ApiToken
+              ValueFrom: !Sub 'arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${NamePrefix}/api-token'
+            - Name: AudioChoice__Database__ConnectionString
+              ValueFrom: !Sub 'arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${NamePrefix}/postgres-connection-string'
+            - Name: AudioChoice__Authentication__AppleClientSecret
+              ValueFrom: !Sub 'arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${NamePrefix}/apple-client-secret'
+            - !If
+              - HasResendApiKey
+              - Name: AudioChoice__TransactionalEmail__ApiKey
+                ValueFrom: !Sub 'arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${NamePrefix}/resend-api-key'
+              - !Ref AWS::NoValue
+            - !If
+              - HasApnsAuthKey
+              - Name: AudioChoice__Push__PrivateKey
+                ValueFrom: !Sub 'arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${NamePrefix}/apns-auth-key'
+              - !Ref AWS::NoValue
+            - !If
+              - HasAppleNotificationToken
+              - Name: AudioChoice__Purchases__AppleNotificationToken
+                ValueFrom: !Sub 'arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${NamePrefix}/apple-purchases-notification-token'
+              - !Ref AWS::NoValue
+            - !If
+              - HasGoogleServiceAccount
+              - Name: AudioChoice__Purchases__GoogleServiceAccountJson
+                ValueFrom: !Sub 'arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${NamePrefix}/google-purchases-service-account'
+              - !Ref AWS::NoValue
+            - !If
+              - HasGoogleNotificationToken
+              - Name: AudioChoice__Purchases__GoogleNotificationToken
+                ValueFrom: !Sub 'arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${NamePrefix}/google-purchases-notification-token'
+              - !Ref AWS::NoValue
+
+  Service:
+    Type: AWS::ECS::Service
+    DependsOn:
+      - HttpsListener
+      - HttpRedirectListener
+    Properties:
+      ServiceName: !Sub '${NamePrefix}-api'
+      Cluster: !Ref Cluster
+      LaunchType: FARGATE
+      TaskDefinition: !Ref TaskDefinition
+      DesiredCount: !Ref DesiredCount
+      # The container applies 29 SQL migrations before it serves anything, so the health
+      # check has to be given time to stop killing it mid-migration.
+      HealthCheckGracePeriodSeconds: 120
+      DeploymentConfiguration:
+        # Stop the old task before starting the new one, rather than overlapping them.
+        # Both would apply migrations at once otherwise, and the startup initializer is
+        # not written for two instances racing. The cost is a short gap on each deploy,
+        # which is what the single pinned Azure revision already did.
+        MinimumHealthyPercent: 0
+        MaximumPercent: 100
+        DeploymentCircuitBreaker:
+          Enable: true
+          Rollback: true
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          # A public IP so the task can reach ECR, S3, OpenAI, Resend, APNs and the GPU
+          # host without a NAT gateway. Inbound is closed to everything but the load
+          # balancer by the task security group.
+          AssignPublicIp: ENABLED
+          Subnets: !Split
+            - ','
+            - !ImportValue
+              'Fn::Sub': '${NamePrefix}-subnet-ids'
+          SecurityGroups:
+            - !ImportValue
+              'Fn::Sub': '${NamePrefix}-task-sg'
+      LoadBalancers:
+        - ContainerName: api
+          ContainerPort: 8080
+          TargetGroupArn: !Ref TargetGroup
+
+Outputs:
+  LoadBalancerHostname:
+    Description: >-
+      The load balancer's own hostname. DomainName must be pointed here with a CNAME
+      before the apps can reach the API, because a certificate cannot be issued for an
+      amazonaws.com name and the clients require HTTPS.
+    Value: !GetAtt LoadBalancer.DNSName
+
+  ApiBaseUrl:
+    Description: The value the clients should be built against.
+    Value: !Sub 'https://${DomainName}'
+
+  ClusterName:
+    Value: !Ref Cluster
+
+  ServiceName:
+    Value: !GetAtt Service.Name

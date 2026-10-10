@@ -40,7 +40,13 @@ struct PaywallGate: View {
 
     var body: some View {
         Group {
-            if !hasCheckedAccess {
+            // The spinner only blocks a launch that has nothing to go on yet. `PurchaseManager`
+            // restores this device's last known access in its initializer, so an account that was
+            // admitted before is admitted again immediately while the refresh below re-checks in the
+            // background -- and a server that answers differently still corrects it, including a
+            // revocation. Waiting for the network first meant a launch could not get past this
+            // spinner while the API was unreachable, for the full request timeout, every time.
+            if !hasCheckedAccess && !hasAccess {
                 ZStack {
                     ACTheme.background.ignoresSafeArea()
                     ProgressView().tint(ACTheme.accent)
