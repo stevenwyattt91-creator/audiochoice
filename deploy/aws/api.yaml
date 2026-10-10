@@ -155,6 +155,16 @@ Parameters:
     Default: 'false'
     AllowedValues: ['true', 'false']
 
+  TranscriptBucketName:
+    Type: String
+    Default: audiochoice-transcripts-522895896460
+    Description: >-
+      The dedicated bucket private scan transcripts are stored in, separate from the
+      shared media bucket foundation.yaml creates. Kept as its own bucket because the
+      real transcript migration ran against this standalone bucket before the rest of
+      this stack's S3 fields existed; folding it into the shared bucket's prefixes now
+      would orphan every transcript already written here.
+
   SeedDataVolume:
     Type: String
     Default: 'true'
@@ -262,6 +272,22 @@ Resources:
                   - s3:ListBucket
                 Resource: !ImportValue
                   'Fn::Sub': '${NamePrefix}-bucket-arn'
+        - PolicyName: transcript-bucket
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              # The dedicated transcript bucket (see TranscriptBucketName's own remarks),
+              # separate from the shared media bucket above.
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:PutObject
+                  - s3:DeleteObject
+                Resource: !Sub 'arn:${AWS::Partition}:s3:::${TranscriptBucketName}/*'
+              - Effect: Allow
+                Action:
+                  - s3:ListBucket
+                Resource: !Sub 'arn:${AWS::Partition}:s3:::${TranscriptBucketName}'
         - PolicyName: narration-and-analysis
           PolicyDocument:
             Version: '2012-10-17'
@@ -445,6 +471,8 @@ Resources:
               Value: 'true'
             - Name: AudioChoice__TemporaryAudioStorage__S3TranscriptEnabled
               Value: 'true'
+            - Name: AudioChoice__TemporaryAudioStorage__TranscriptBucketName
+              Value: !Ref TranscriptBucketName
             - Name: AudioChoice__TemporaryAudioStorage__S3BucketName
               Value: !ImportValue
                 'Fn::Sub': '${NamePrefix}-bucket'
