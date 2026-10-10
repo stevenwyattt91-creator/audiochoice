@@ -3252,9 +3252,28 @@ app.MapPost("/v1/scans/requests", async (
     if (result is not null)
     {
         // Playback and imports must always receive the most recently saved filter
-        // result. Scanner upgrades are intentional, admin-controlled work; they
-        // must never hide an already usable filter profile or start paid work merely
-        // because someone opens a book.
+        // result immediately -- scanner upgrades must never hide an already usable
+        // filter profile or make someone wait before a book opens. But if the saved
+        // result was produced by an older scanner than the one currently configured
+        // (e.g. an older, less sensitive Qwen prompt/sampling tweak), opportunistically
+        // queue a reanalysis in the background against the saved transcript so the
+        // filter profile catches up without the caller ever noticing or re-importing.
+        // CreateReanalysisJob/FindActiveJob already dedupe, so this is safe to call on
+        // every stale hit without risking duplicate jobs.
+        if (result.ScannerVersion != openAIOptions.ScannerVersion)
+        {
+            var staleUser = CurrentUser(context);
+            if (staleUser is not null)
+            {
+                var rescan = catalog.CreateReanalysisJob(
+                    staleUser.ID, request.Fingerprint, ScanLane(context));
+                if (rescan is not null)
+                {
+                    queue.TryQueue(rescan.ID);
+                }
+            }
+        }
+
         return Results.Ok(new CloudScanResponse(
             CloudScanStatus.Available,
             Result: result));
@@ -3556,6 +3575,21 @@ app.MapPost("/v1/scans/jobs", (
     var existingResult = catalog.FindResult(request.Fingerprint);
     if (existingResult is not null)
     {
+        // Same staleness check as /v1/scans/requests: return the usable saved result
+        // immediately, but if it predates the currently configured scanner (newer Qwen
+        // sensitivity tweaks, rubric changes, etc.) opportunistically queue a background
+        // reanalysis against the saved transcript. CreateReanalysisJob dedupes against
+        // any already-active job for this fingerprint, so this is safe on every call.
+        if (existingResult.ScannerVersion != openAIOptions.ScannerVersion && user is not null)
+        {
+            var rescan = catalog.CreateReanalysisJob(
+                user.ID, request.Fingerprint, ScanLane(context));
+            if (rescan is not null)
+            {
+                queue.TryQueue(rescan.ID);
+            }
+        }
+
         return Results.Ok(new CloudScanResponse(
             CloudScanStatus.Completed,
             Result: existingResult));

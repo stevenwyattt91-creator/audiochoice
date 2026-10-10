@@ -317,22 +317,41 @@ public sealed class OpenAIProcessingOptions
     // group has no verification pass and had no written rubric, so a passage about captured
     // resistance members using suicide capsules was reported as a self-harm reference. A scan made
     // under the prior version had neither correction and must not be presented as though it had.
-    public string ScannerVersion { get; init; } = "7.2-boundary-and-self-harm-rubric";
+    //
+    // Bumped again together with BaseAnalysisPromptVersion, at the owner's request to catch more
+    // sexual references and innuendo rather than only explicit statements: expanded
+    // sexual_suggestive_dialogue's own definition with concrete euphemism/double-entendre examples,
+    // told the model not to under-score confidence purely for being implied rather than explicit,
+    // and lowered MinimumEventConfidence from 0.55 to 0.45 to match. This is a deliberate recall
+    // increase for the sexual-content categories specifically, and will surface more
+    // sexual_suggestive_dialogue (and, modestly, other sexual-rung) events than before on books
+    // that rely on implication rather than explicit language. A scan made under the prior version
+    // never had this wider definition or this floor and must not be presented as though it had.
+    public string ScannerVersion { get; init; } = "7.3-innuendo-sensitivity";
     /// <summary>Only jobs in this lane may be claimed by this worker instance.</summary>
     public string ProcessingLane { get; init; } = ScanProcessingLanes.AzureOpenAI;
     /// <summary>
     /// The lowest confidence that may reach a listener as a filter event.
     /// </summary>
     /// <remarks>
-    /// The analysis prompt already tells the model to omit anything below 0.55, but that was
-    /// advisory: nothing enforced it, and no confidence threshold existed anywhere outside
+    /// The analysis prompt already tells the model to omit anything below this floor, but that
+    /// was advisory: nothing enforced it, and no confidence threshold existed anywhere outside
     /// the sexual-scene verifier. Enforcing the number the prompt already states means a
     /// low-confidence guess cannot be presented with the same authority as a firm detection.
     ///
     /// Exact profanity word matches are exempt, because matching a literal word involves no
     /// judgement and is reported at full confidence.
+    ///
+    /// Lowered from 0.55 to 0.45 together with sexual_suggestive_dialogue's own prompt
+    /// expansion (see OpenAIContentAnalysisProvider.BuildInput's innuendo/euphemism remarks):
+    /// a passage whose sexual intent is only implied is, by its nature, a passage the model is
+    /// less certain about than one that states something outright -- a 0.55 floor was
+    /// systematically excluding exactly the subtler, innuendo-level cues this rung exists to
+    /// catch, independent of whether the model recognized them at all. The prompt was also
+    /// changed to tell the model not to under-score confidence purely because a passage is
+    /// implied rather than explicit, so this floor and that instruction move together.
     /// </remarks>
-    public double MinimumEventConfidence { get; init; } = .55;
+    public double MinimumEventConfidence { get; init; } = .45;
     public int MaximumRetries { get; init; } = 3;
     public int MaximumJobAttempts { get; init; } = 3;
     // Lowered from 100 after a real production batch of exactly 100 segments measured over

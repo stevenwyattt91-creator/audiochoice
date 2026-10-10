@@ -112,7 +112,17 @@ public sealed class OpenAIContentAnalysisProvider(
     // in the abstract, a figure of speech, or self-hatred with no self-injury -- is not this
     // category. The five self-harm positives in the set all describe a character's own acts and are
     // unaffected.
-    private const string BaseAnalysisPromptVersion = "6.1-self-harm-rubric";
+    // Bumped again together with ScannerVersion and MinimumEventConfidence, at the owner's
+    // request to catch more sexual references and innuendo: sexual_suggestive_dialogue's
+    // definition now gives concrete examples of euphemism and double entendre and explicitly
+    // tells the model that an unmistakable innuendo does not need an explicit statement to be
+    // reported, and the prompt's own confidence instruction now tells the model not to mark a
+    // passage down purely for being implied rather than explicit. The enforced floor dropped
+    // from 0.55 to 0.45 for the same reason -- implied content is inherently lower-confidence
+    // than explicit content, and the old floor was discarding exactly the subtler cues this
+    // change targets. A scan made under the prior version never had this wider definition or
+    // this floor and must not be presented as though it had.
+    private const string BaseAnalysisPromptVersion = "6.2-innuendo-sensitivity";
     // Bumped for the keyword safety net's lane isolation fix: a candidate whose window
     // happens to match a checkpoint cached under the prior version may have been built
     // before a safety-net seed's own lane existed, when it could still get coalesced into a
@@ -2510,6 +2520,18 @@ character imagining what might happen next. Kissing itself belongs to sexual_kis
 here, however brief the rest of the passage's tension is; everything else on this rung (biting,
 grabbing, an embrace with no kiss in it, wanting) stays exactly as it was.
 
+Innuendo belongs here even when nothing explicit is ever said. A double entendre, a euphemism an
+adult would recognize but a child would not ("warm up the bed," "see what the sheets look like
+in the morning," "show you my etchings," a joke that only lands if you know what it is really
+about), banter that is clearly sexual in intent even while staying technically clean, a comment
+on someone's body or appeal phrased as a compliment or a tease, dialogue that trails off
+suggestively, or two characters' charged silence after a loaded remark are all
+sexual_suggestive_dialogue. Do not require the dialogue to be unambiguous or require that both
+characters' intentions be stated outright -- if an adult listener would read it as sexual
+undertone, report it at this rung even if a literal-minded reading of the words alone would not.
+This rung exists specifically to catch what is implied rather than stated; reserve the higher
+rungs for when the passage actually says or shows more than that.
+
 sexual_kissing -- a kiss, or a sustained series of kisses, on the mouth, that goes beyond a
 brief, incidental peck: a kiss the narration lingers on, a sustained or passionate kiss. This
 rung is for kissing on the mouth only. A kiss anywhere else on the body -- the cheek, forehead,
@@ -2664,7 +2686,11 @@ can censor and count it; otherwise return null. The profane word should also be 
 For profanity, emit one event for every occurrence so playback can skip each timestamp; the
 app will group all occurrences of the same word under one switch. For longer sexual, violent, substance,
 or self-harm scenes, emit one event spanning the complete supported scene rather than one
-event per sentence. Do not invent content or identifiers. Omit events below 0.55 confidence.
+event per sentence. Do not invent content or identifiers. Omit events below 0.45 confidence.
+A subtler or implied cue -- innuendo, euphemism, an unstated-but-clear undertone -- is not a
+reason to lower your confidence on its own: judge confidence by how clearly the passage supports
+the label you chose, not by how explicit the passage is. An unmistakable innuendo can be
+reported at high confidence even though nothing explicit was ever said.
 
 Transcript segments:
 """ + transcript;
