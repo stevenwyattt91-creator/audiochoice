@@ -122,7 +122,29 @@ public sealed class OpenAIContentAnalysisProvider(
     // than explicit content, and the old floor was discarding exactly the subtler cues this
     // change targets. A scan made under the prior version never had this wider definition or
     // this floor and must not be presented as though it had.
-    private const string BaseAnalysisPromptVersion = "6.2-innuendo-sensitivity";
+    //
+    // Bumped again together with ScannerVersion, at the owner's request, to narrow the same
+    // rung back down in three specific ways the widening above would otherwise over-flag.
+    // Crude or vulgar language used for rivalry, insult, or combat -- not sexual in subject even
+    // though it borrows sexual words -- stays unflagged, with a worked example from this
+    // library's own genre (a boss-fight taunt). The same wording flips to this rung the moment
+    // it actually sexualizes a specific person rather than describing a fight or a contest,
+    // particularly dwelling on someone's body or desirability rather than their skill or ego.
+    // And naming what a character does for a living -- including sex work -- is treated like
+    // naming any other occupation, not sexual content, unless the passage goes on to actually
+    // linger on it sexually rather than simply stating it. A scan made under the prior version
+    // never had these carve-outs and would over-report exactly the three patterns above.
+    //
+    // Bumped again together with ScannerVersion, at the owner's explicit request, for a lower
+    // bar specifically when a woman is the subject of a crude remark rather than a mutual
+    // participant in it. The rivalry exemption just above is for two people trading the same
+    // insult back and forth; a crude joke, taunt, or comment that instead uses a woman as its
+    // subject or punchline -- about her body, what would be done to or with her, or treating her
+    // as the prize rather than a party to the exchange -- does not get that exemption regardless
+    // of how the surrounding dialogue frames it, and an ambiguous case is resolved in favor of
+    // reporting it. A scan made under the prior version applied the rivalry exemption too
+    // broadly to exactly this pattern.
+    private const string BaseAnalysisPromptVersion = "6.4-women-lower-bar";
     // Bumped for the keyword safety net's lane isolation fix: a candidate whose window
     // happens to match a checkpoint cached under the prior version may have been built
     // before a safety-net seed's own lane existed, when it could still get coalesced into a
@@ -2531,6 +2553,46 @@ characters' intentions be stated outright -- if an adult listener would read it 
 undertone, report it at this rung even if a literal-minded reading of the words alone would not.
 This rung exists specifically to catch what is implied rather than stated; reserve the higher
 rungs for when the passage actually says or shows more than that.
+
+Two things widen this rung and one narrows it, and all three matter as much as the examples
+above. A crude joke, insult, or taunt that borrows sexual language without actually being about
+sex or arousal is NOT sexual_suggestive_dialogue, however vulgar it sounds: two characters told
+to stop comparing the size of their anatomy because they are competing over who is better, a
+crude taunt about someone's performance in a fight rather than in bed, or a vulgarly-phrased
+threat or insult with no sexual intent behind it, stay unflagged. The test is what the moment is
+actually about -- rivalry, ego, combat, comedy -- not whether the words it borrows could also
+describe sex. An example from this library's own genre: during a boss fight, a crude taunt like
+"you're about to get fucked" or a joke about needing lube before a hard encounter is banter about
+the fight, not about sex, and stays unflagged even though the wording is explicit -- it is not
+read as sexual because nothing in the scene is.
+
+That same crude joke flips to sexual_suggestive_dialogue the moment it is actually aimed at
+sexualizing a person rather than describing a fight, a contest, or an insult with no sexual
+subject -- particularly a joke, comment, or innuendo that lingers on a specific person's body,
+appeal, or desirability rather than their skill, ego, or performance at something non-sexual.
+"Stop comparing dicks" when it is about rivalry is not this rung; a joke that goes on to actually
+describe or dwell on either man's anatomy, or that is really about one of them wanting the other,
+would be.
+
+Hold a woman to the lower bar the moment any part of this applies to her: the rivalry/insult
+exemption above is for two people trading crude jabs at each other, not for a remark that uses a
+woman as its subject or its punchline rather than its target. A crude joke or taunt between two
+men about each other is the exemption; the same joke made about a woman present, mentioned, or
+being discussed -- a comment on her body, what someone would do to or with her, treating her as
+the prize or the butt of the joke rather than a participant trading the same insult back -- is
+sexual_suggestive_dialogue, full stop, no matter how the men's own dialogue frames it or how
+minor it seems. When a passage is ambiguous about whether a crude remark is mutual rivalry or is
+actually about a woman in it, resolve it as the latter and report it.
+
+Naming what a character is or does for a living -- a prostitute, a sex worker, an escort, a
+madam, someone who "sells herself" -- is NOT sexual content by itself, the same way naming a
+character's job as a soldier or a thief is not violence or theft content. State it and move on:
+this is a fact about the character, not a sexual reference. It becomes sexual_suggestive_dialogue
+or higher only when the passage goes on to actually linger on it sexually -- describing her
+body or appearance in a sexualized way, describing what clients do with her, a scene of her
+working, or dialogue that dwells on it rather than simply mentioning it. "She was the city's most
+famous prostitute" stays unflagged on its own; a paragraph describing her figure, what she wears
+to attract clients, or propositioning a customer is not.
 
 sexual_kissing -- a kiss, or a sustained series of kisses, on the mouth, that goes beyond a
 brief, incidental peck: a kiss the narration lingers on, a sustained or passionate kiss. This

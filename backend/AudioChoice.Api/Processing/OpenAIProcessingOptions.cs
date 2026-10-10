@@ -327,7 +327,23 @@ public sealed class OpenAIProcessingOptions
     // sexual_suggestive_dialogue (and, modestly, other sexual-rung) events than before on books
     // that rely on implication rather than explicit language. A scan made under the prior version
     // never had this wider definition or this floor and must not be presented as though it had.
-    public string ScannerVersion { get; init; } = "7.3-innuendo-sensitivity";
+    //
+    // Bumped again together with BaseAnalysisPromptVersion, at the owner's request, for three
+    // carve-outs narrowing the same rung: crude/vulgar language used for rivalry, insult, or
+    // combat rather than sex (e.g. a boss-fight taunt) stays unflagged; that same wording flips
+    // back to this rung once it actually sexualizes a specific person rather than describing a
+    // fight or contest; and naming a character's occupation, including sex work, is treated like
+    // naming any other job rather than sexual content, unless the passage goes on to actually
+    // linger on it sexually. A scan made under the prior version never had these carve-outs and
+    // may have over-reported exactly these three patterns.
+    //
+    // Bumped again together with BaseAnalysisPromptVersion, at the owner's explicit request, for
+    // a lower reporting bar when a woman is the subject of a crude remark rather than a mutual
+    // participant in one: the rivalry exemption above no longer applies to a joke, taunt, or
+    // comment that uses a woman as its subject or punchline, regardless of how the surrounding
+    // dialogue frames it, and an ambiguous case is resolved toward reporting it. A scan made
+    // under the prior version applied that exemption too broadly to this pattern.
+    public string ScannerVersion { get; init; } = "7.5-women-lower-bar";
     /// <summary>Only jobs in this lane may be claimed by this worker instance.</summary>
     public string ProcessingLane { get; init; } = ScanProcessingLanes.AzureOpenAI;
     /// <summary>
