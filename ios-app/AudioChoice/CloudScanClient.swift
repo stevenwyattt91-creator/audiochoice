@@ -342,6 +342,25 @@ struct CloudScanClient {
         try validate(response: response, data: responseData)
     }
 
+    /// Replaces the artwork for a book already in the listener's own library with one they
+    /// chose themselves. Unlike `uploadExploreCover`, which the app only ever calls to fill
+    /// in a cover that is still missing, this is a deliberate choice and the server always
+    /// overwrites for it (see the backend's `/v1/library/{bookID}/cover` handler). The new
+    /// cover is shared by every owner of that same edition, which is what makes it show up
+    /// in the library list, book details, and the player for both accounts on this family
+    /// plan.
+    func uploadLibraryCover(_ data: Data, bookID: UUID) async throws {
+        var request = URLRequest(url: endpoint("v1/library/\(bookID.uuidString)/cover"))
+        request.httpMethod = "PUT"
+        request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
+        request.setValue("ios-beta", forHTTPHeaderField: "X-AudioChoice-Scan-Channel")
+        request.setValue("image/jpeg", forHTTPHeaderField: "Content-Type")
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        request.httpBody = data
+        let (responseData, response) = try await session.data(for: request)
+        try validate(response: response, data: responseData)
+    }
+
     func upload(
         fileURL: URL,
         authorization: CloudUploadAuthorizationResponse,

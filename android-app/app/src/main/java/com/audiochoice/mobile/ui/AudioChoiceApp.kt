@@ -614,6 +614,13 @@ private fun LibraryShell(
                         detailBook = saved
                     }
                 },
+                onChangeCover = { bytes ->
+                    library.uploadCustomCover(accessToken, book, bytes) {
+                        library.state.value.coverPaths[book.fingerprint.sha256.lowercase()]?.let { path ->
+                            player.updateCoverPathIfForBook(book.id, path)
+                        }
+                    }
+                },
                 onDelete = {
                     library.delete(accessToken, book) {
                         player.close()
@@ -1916,7 +1923,9 @@ private fun BookDetailsScreen(
     onFilters: () -> Unit,
     onDelete: () -> Unit,
     onEditDetails: (title: String, author: String?, narrator: String?) -> Unit,
+    onChangeCover: (ByteArray) -> Unit,
 ) {
+    val context = androidx.compose.ui.platform.LocalContext.current
     val state by player.state.collectAsStateWithLifecycle()
     var chapterDialog by remember { mutableStateOf(false) }
     var bookmarkDialog by remember { mutableStateOf(false) }
@@ -1925,7 +1934,25 @@ private fun BookDetailsScreen(
     var showDiagnostics by remember { mutableStateOf(false) }
     var confirmDelete by remember { mutableStateOf(false) }
     var readingEditionSheet by remember { mutableStateOf(false) }
+    var coverError by remember { mutableStateOf<String?>(null) }
     val epubLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri -> uri?.let(player::attachEpub) }
+    val coverPicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        runCatching {
+            context.contentResolver.openInputStream(uri)?.use { it.readBytes() }
+                ?: throw java.io.IOException("That image could not be opened.")
+        }.onSuccess { bytes -> onChangeCover(bytes) }
+            .onFailure { error -> coverError = error.message ?: "That image could not be used as a cover." }
+    }
+    coverError?.let { message ->
+        AlertDialog(
+            onDismissRequest = { coverError = null },
+            icon = { Icon(Icons.Outlined.BrokenImage, null, tint = ChoiceGreen) },
+            title = { Text("Couldn't update cover") },
+            text = { Text(message) },
+            confirmButton = { TextButton(onClick = { coverError = null }) { Text("OK") } },
+        )
+    }
     if (showDiagnostics) {
         // Reads the persisted trace rather than live state: the failure only occurs
         // across a process restart, so the useful values are the ones recorded before
@@ -1992,6 +2019,11 @@ private fun BookDetailsScreen(
                         text = { Text("Edit Details") },
                         leadingIcon = { Icon(Icons.Outlined.Edit, null) },
                         onClick = { moreMenu = false; editDetails = true },
+                    )
+                    DropdownMenuItem(
+                        text = { Text("Change Cover Art") },
+                        leadingIcon = { Icon(Icons.Outlined.Image, null) },
+                        onClick = { moreMenu = false; coverPicker.launch("image/*") },
                     )
                     if (BuildConfig.BETA_BUILD) {
                         DropdownMenuItem(
@@ -2236,7 +2268,11 @@ private fun BookArtwork(
     modifier: Modifier = Modifier,
     isFinished: Boolean = false,
 ) {
-    // produceState keeps the disk read and decode off the composition thread.
+    // produceState keeps the disk read and decode off the composition thread. Keyed only on
+    // coverPath, so a listener-uploaded cover (see LocalAudioStore.saveCustomBookCover) is
+    // written under a filename that changes every time, rather than overwriting the same
+    // path in place -- otherwise this would keep showing whatever bitmap it decoded the
+    // first time it ever saw that path, even after the file underneath changed.
     val cover by produceState<ImageBitmap?>(initialValue = null, coverPath) {
         value = coverPath?.let { path ->
             withContext(Dispatchers.IO) { decodeDownsampledCover(path) }
@@ -3585,6 +3621,13 @@ private fun ImportScreen(importer: ImportViewModel, accessToken: String, showLib
     }
     LaunchedEffect(state.phase, state.scanProgress) {
         val serverProgress = state.scanProgress.coerceIn(0, 100) / 100f
+        if (state.phase == ImportPhase.UPLOADING) {
+            // Upload progress already updates frequently and accurately from real bytes
+            // transferred (see AudioChoiceApi.uploadSingleRequest/uploadAudio), so it is
+            // reflected directly with no projection/smoothing.
+            displayedScanProgress = serverProgress
+            return@LaunchedEffect
+        }
         if (state.phase != ImportPhase.ANALYZING) {
             displayedScanProgress = 0f
             return@LaunchedEffect
@@ -3723,7 +3766,7 @@ private fun ImportScreen(importer: ImportViewModel, accessToken: String, showLib
                     Modifier.size(42.dp).border(1.dp, if (active) ChoiceGreen else ChoiceOutline, RoundedCornerShape(50)),
                     contentAlignment = Alignment.Center,
                 ) {
-                    if (active && steps[index].first == ImportPhase.ANALYZING) {
+                    if (active && (steps[index].first == ImportPhase.ANALYZING || steps[index].first == ImportPhase.UPLOADING)) {
                         CircularProgressIndicator(
                             progress = { displayedScanProgress },
                             color = ChoiceGreen,

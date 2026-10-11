@@ -3427,6 +3427,41 @@ app.MapPut("/v1/explore/{catalogID}/cover", async (
         : Results.NotFound();
 });
 
+// Lets a listener replace the artwork for a book already in their own library -- unlike
+// the Explore/import cover paths above, which only ever fill in a *missing* cover, this is
+// a deliberate user choice and so is always allowed to overwrite whatever cover (official
+// or previously customised) the edition currently has. The edition's artwork is shared by
+// every owner of that same recording (see audiobook_editions.cover_image), which is what
+// makes the result show up in the library grid, book details, and the player for both: the
+// `GET /v1/library` query already resolves cover_image into `/v1/explore/{catalogID}/cover`
+// (see PostgresUserLibraryStore), so no library-row field needs to change here.
+app.MapPut("/v1/library/{bookID:guid}/cover", async (
+    Guid bookID,
+    HttpContext context,
+    IUserLibraryStore library,
+    IScanCatalog catalog,
+    CancellationToken cancellationToken) =>
+{
+    var user = CurrentUser(context);
+    if (user is null) return Results.Unauthorized();
+
+    var book = library.List(user.ID).FirstOrDefault(value => value.ID == bookID);
+    if (book is null) return Results.NotFound(new { error = "That audiobook is not in your library." });
+
+    if (context.Request.ContentLength is null or <= 0 or > 2_000_000)
+        return Results.BadRequest(new { error = "Cover artwork must be between 1 byte and 2 MB." });
+    var contentType = context.Request.ContentType?.ToLowerInvariant();
+    if (contentType is not ("image/jpeg" or "image/png" or "image/webp"))
+        return Results.BadRequest(new { error = "Cover artwork must be JPEG, PNG, or WebP." });
+
+    await using var memory = new MemoryStream((int)context.Request.ContentLength.Value);
+    await context.Request.Body.CopyToAsync(memory, cancellationToken);
+
+    return catalog.SaveEditionCover(book.Fingerprint, memory.ToArray(), contentType, replaceExisting: true)
+        ? Results.NoContent()
+        : Results.NotFound(new { error = "No audiobook edition matches that book's fingerprint." });
+});
+
 app.MapPost("/v1/uploads/authorizations", async (
     CloudUploadAuthorizationRequest request,
     HttpContext context,

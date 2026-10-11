@@ -120,6 +120,35 @@ class AudioChoiceApi(private val json: Json) {
         }
     }
 
+    /**
+     * Replaces the artwork for a book already in the listener's own library with one they
+     * chose themselves. Unlike [uploadEmbeddedCover], which only fills in a cover that is
+     * still missing, this always overwrites -- it is a deliberate choice, not a fallback.
+     * The new cover is shared by every owner of that same edition (see the backend's
+     * `/v1/library/{bookID}/cover` handler), so it is enough to re-resolve this one book's
+     * cover afterward; the library list, book details, and player all read from the same
+     * cached path once it is saved.
+     */
+    suspend fun uploadLibraryCover(accessToken: String, bookID: String, bytes: ByteArray): Unit = withContext(Dispatchers.IO) {
+        val uploadBytes = prepareCoverForUpload(bytes)
+        val connection = (URL("$baseUrl/v1/library/$bookID/cover").openConnection() as HttpURLConnection).apply {
+            requestMethod = "PUT"
+            connectTimeout = 30_000
+            readTimeout = 30_000
+            doOutput = true
+            setFixedLengthStreamingMode(uploadBytes.size)
+            setRequestProperty("Authorization", "Bearer $accessToken")
+            setRequestProperty("Content-Type", detectImageContentType(uploadBytes))
+        }
+        try {
+            connection.outputStream.use { it.write(uploadBytes) }
+            val status = connection.responseCode
+            if (status !in 200..299) throw ApiException(status, "Cover artwork could not be saved ($status).")
+        } finally {
+            connection.disconnect()
+        }
+    }
+
     suspend fun downloadExploreCover(accessToken: String, coverPath: String): ByteArray = withContext(Dispatchers.IO) {
         val url = if (coverPath.startsWith("http")) coverPath else "$baseUrl$coverPath"
         val connection = (URL(url).openConnection() as HttpURLConnection).apply {

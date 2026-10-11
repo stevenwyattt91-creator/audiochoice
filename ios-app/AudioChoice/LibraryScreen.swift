@@ -334,25 +334,15 @@ struct LibraryScreen: View {
 
     @ViewBuilder
     private func libraryCover(_ record: LibraryBookRecord, compact: Bool) -> some View {
-        if record.artworkFileName != nil {
-            BookCover(
-                title: record.book.title,
-                compact: compact,
-                artworkFileName: record.artworkFileName,
-                isFinished: record.isFinished
-            )
-        } else if let cloud = accountBook(for: record),
-                  let client = try? CloudScanClient.configured(),
-                  let url = client.coverURL(for: cloud.coverImageURL) {
-            // RemoteBookCover draws its own artwork, so the badge is layered on here
-            // rather than threading the flag through a second cover view.
-            RemoteBookCover(url: url, title: record.book.title)
-                .overlay(alignment: .topTrailing) {
-                    if record.isFinished { FinishedBadge(compact: compact) }
-                }
-        } else {
-            BookCover(title: record.book.title, compact: compact, isFinished: record.isFinished)
-        }
+        let remoteURL = accountBook(for: record).flatMap { (try? CloudScanClient.configured())?.coverURL(for: $0.coverImageURL) }
+        BookCover(
+            title: record.book.title,
+            compact: compact,
+            artworkFileName: record.artworkFileName,
+            isFinished: record.isFinished,
+            preferRemoteCover: record.hasCustomCover,
+            remoteCoverURL: remoteURL
+        )
     }
 
     private func accountBook(for record: LibraryBookRecord) -> AccountLibraryBook? {

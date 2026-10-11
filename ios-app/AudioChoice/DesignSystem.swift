@@ -30,6 +30,20 @@ struct BookCover: View {
     var compact = false
     var artworkFileName: String? = nil
     var isFinished = false
+    /// Set when the listener has deliberately replaced this book's cover (see
+    /// `LibraryBookRecord.hasCustomCover`). The server is the one source of truth for a
+    /// custom cover -- it is shared by every owner of the edition -- so when this is set,
+    /// [remoteCoverURL] is preferred over [artworkFileName] rather than the other way
+    /// around, which is this view's normal preference for a book that still only has
+    /// whatever art its own file happened to carry.
+    var preferRemoteCover = false
+    var remoteCoverURL: URL? = nil
+    @State private var remoteImage: UIImage?
+
+    private var localImage: UIImage? {
+        guard let artworkFileName else { return nil }
+        return UIImage(contentsOfFile: AudiobookImportService.artworkURL(fileName: artworkFileName).path)
+    }
 
     var body: some View {
         ZStack {
@@ -53,12 +67,12 @@ struct BookCover: View {
                 .padding(10)
                 .frame(maxHeight: .infinity, alignment: .bottom)
 
-            if let artworkFileName,
-               let image = UIImage(contentsOfFile: AudiobookImportService.artworkURL(fileName: artworkFileName).path) {
-                Image(uiImage: image)
-                    .resizable()
-                    .scaledToFill()
-                    .clipped()
+            if preferRemoteCover, let remoteImage {
+                Image(uiImage: remoteImage).resizable().scaledToFill().clipped()
+            } else if let localImage {
+                Image(uiImage: localImage).resizable().scaledToFill().clipped()
+            } else if let remoteImage {
+                Image(uiImage: remoteImage).resizable().scaledToFill().clipped()
             }
         }
         .clipped()
@@ -69,6 +83,15 @@ struct BookCover: View {
         }
         .overlay(alignment: .topTrailing) {
             if isFinished { FinishedBadge(compact: compact) }
+        }
+        .task(id: remoteCoverURL) {
+            remoteImage = nil
+            // Only worth fetching remotely when it would actually be shown: either there is
+            // no local art at all, or a custom cover means the remote copy must win anyway.
+            guard let remoteCoverURL, preferRemoteCover || localImage == nil,
+                  let client = try? CloudScanClient.configured(),
+                  let data = try? await client.coverImageData(from: remoteCoverURL) else { return }
+            remoteImage = UIImage(data: data)
         }
     }
 }

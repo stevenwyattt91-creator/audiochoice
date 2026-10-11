@@ -179,6 +179,23 @@ class PlayerViewModel(
     )
 
     /**
+     * Updates the cached cover for the book currently loaded here, if it's the same book.
+     *
+     * Cover resolution normally happens once, in [open]. A listener who customises a cover
+     * from the book details screen while that same book is also the one loaded in the
+     * player needs to see it immediately rather than only after the player is reopened --
+     * [com.audiochoice.mobile.ui.BookDetailsScreen] prefers this state's cover over the
+     * library's own cached path specifically so the "now playing" cover never looks stale,
+     * which means this is the value that has to change for that preference to show anything
+     * new.
+     */
+    fun updateCoverPathIfForBook(bookID: String, coverPath: String) {
+        if (mutableState.value.book?.id == bookID) {
+            mutableState.value = mutableState.value.copy(coverPath = coverPath)
+        }
+    }
+
+    /**
      * Returns the ID of the last book that was playing before the process was
      * killed, or null if nothing was open. Used by the UI to auto-restore the
      * player screen after an Activity recreation.

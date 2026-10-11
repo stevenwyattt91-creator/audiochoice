@@ -325,9 +325,18 @@ class LocalAudioStore(private val context: Context) {
             ?.let { runCatching { json.decodeFromString<List<AudioChapter>>(it) }.getOrNull() }
             .orEmpty()
 
-    fun coverPath(sha256: String): String? =
-        java.io.File(context.filesDir, "book_covers/${sha256.lowercase()}.image")
+    fun coverPath(sha256: String): String? {
+        val key = sha256.lowercase()
+        // A listener-uploaded cover (see saveCustomBookCover) always wins over the plain
+        // embedded/catalogue cover for the same book, and lives under a filename that
+        // changes on every replacement rather than this method's usual stable path.
+        val custom = java.io.File(context.filesDir, "book_covers")
+            .listFiles { file -> file.name.startsWith("$key.custom-") && file.name.endsWith(".image") }
+            ?.maxByOrNull { it.lastModified() }
+        if (custom != null) return custom.absolutePath
+        return java.io.File(context.filesDir, "book_covers/$key.image")
             .takeIf { it.isFile }?.absolutePath
+    }
 
     fun catalogCoverPath(catalogID: String): String? =
         java.io.File(context.filesDir, "catalog_covers/${catalogID.lowercase()}.image")
@@ -351,13 +360,29 @@ class LocalAudioStore(private val context: Context) {
             val covers = mutableMapOf<String, String>()
             // Catalogue art first: a cover saved against the book's own fingerprint is the more
             // specific of the two and must win when both exist.
+            val customCoverPattern = Regex("^(.+)\\.custom-(\\d+)$")
+            val customCovers = mutableMapOf<String, Pair<Long, String>>() // sha256 -> (timestamp, path)
             listOf("catalog_covers", "book_covers").forEach { directory ->
                 java.io.File(context.filesDir, directory).listFiles()?.forEach { file ->
-                    if (file.isFile && file.name.endsWith(".image")) {
-                        covers[file.name.removeSuffix(".image").lowercase()] = file.absolutePath
+                    if (!file.isFile || !file.name.endsWith(".image")) return@forEach
+                    val base = file.name.removeSuffix(".image")
+                    val customMatch = customCoverPattern.matchEntire(base)
+                    if (customMatch != null) {
+                        // A listener-uploaded cover (see saveCustomBookCover) is named
+                        // "{sha256}.custom-{timestamp}.image" so BookArtwork always sees a new
+                        // path when one is replaced. Collapse that back to the plain sha256
+                        // key and always prefer it over any plain cover for the same book.
+                        val key = customMatch.groupValues[1].lowercase()
+                        val timestamp = customMatch.groupValues[2].toLongOrNull() ?: 0L
+                        if (timestamp > (customCovers[key]?.first ?: -1L)) {
+                            customCovers[key] = timestamp to file.absolutePath
+                        }
+                    } else {
+                        covers[base.lowercase()] = file.absolutePath
                     }
                 }
             }
+            customCovers.forEach { (key, value) -> covers[key] = value.second }
             // A book imported before its edition's artwork was resolved has no cover of its own,
             // only the catalogue's, which is stored under the first 24 characters of the hash.
             // Library rows look the cover up by full hash, so map it across.
@@ -378,6 +403,26 @@ class LocalAudioStore(private val context: Context) {
         kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
             val directory = java.io.File(context.filesDir, "book_covers").apply { mkdirs() }
             java.io.File(directory, "${sha256.lowercase()}.image").apply { writeBytes(bytes) }.absolutePath
+        }
+
+    /**
+     * Saves a listener-chosen cover under a filename that changes every time, instead of the
+     * stable `{sha256}.image` path [saveBookCover] uses. [BookArtwork] keys its decode cache on
+     * the path string itself, so overwriting the same filename in place would leave every
+     * screen already showing the old bitmap until some unrelated recomposition happened to
+     * reload it. A fresh path forces every screen holding it to redecode immediately.
+     *
+     * Deletes the previous custom cover file for this book, if any, so repeatedly changing
+     * the cover does not leave old copies behind on disk.
+     */
+    suspend fun saveCustomBookCover(sha256: String, bytes: ByteArray): String =
+        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            val directory = java.io.File(context.filesDir, "book_covers").apply { mkdirs() }
+            val key = sha256.lowercase()
+            directory.listFiles { file -> file.name.startsWith("$key.custom-") }
+                ?.forEach { it.delete() }
+            java.io.File(directory, "$key.custom-${System.currentTimeMillis()}.image")
+                .apply { writeBytes(bytes) }.absolutePath
         }
 
     suspend fun coverBytes(sha256: String): ByteArray? =

@@ -90,6 +90,33 @@ class LibraryViewModel(
         }
     }
 
+    /**
+     * Replaces the artwork for one of the listener's own books with an image they chose
+     * themselves, uploading it to the server (so it shows up everywhere the cover is
+     * resolved from the account -- other devices, the player, book details) and updating
+     * the local cache immediately so this device reflects it without waiting on a refresh.
+     */
+    fun uploadCustomCover(
+        accessToken: String,
+        book: LibraryBook,
+        bytes: ByteArray,
+        onComplete: () -> Unit = {},
+    ) {
+        viewModelScope.launch {
+            runCatching {
+                api.uploadLibraryCover(accessToken, book.id, bytes)
+                localAudio.saveCustomBookCover(book.fingerprint.sha256, bytes)
+            }.onSuccess { path ->
+                mutableState.value = mutableState.value.copy(
+                    coverPaths = mutableState.value.coverPaths + (book.fingerprint.sha256.lowercase() to path),
+                )
+                onComplete()
+            }.onFailure { error ->
+                mutableState.value = mutableState.value.copy(error = error.message)
+            }
+        }
+    }
+
     fun delete(accessToken: String, book: LibraryBook, onComplete: () -> Unit = {}) {
         viewModelScope.launch {
             runCatching {

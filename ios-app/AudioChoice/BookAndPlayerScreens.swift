@@ -1,4 +1,5 @@
 import SwiftUI
+import PhotosUI
 
 struct BookDetailScreen: View {
     var book: MobileBook
@@ -10,15 +11,28 @@ struct BookDetailScreen: View {
     @State private var record: LibraryBookRecord?
     @State private var showingRename = false
     @State private var draftTitle = ""
+    @State private var accountBook: AccountLibraryBook?
+    @State private var showingCoverPicker = false
+    @State private var coverErrorMessage: String?
 
     /// The record's title wins, because it is the one renaming updates.
     private var shownTitle: String { record?.book.title ?? book.title }
     private var isFinished: Bool { record?.isFinished ?? false }
+    private var remoteCoverURL: URL? {
+        guard let accountBook, let client = try? CloudScanClient.configured() else { return nil }
+        return client.coverURL(for: accountBook.coverImageURL)
+    }
 
     var body: some View {
         ScrollView {
             VStack(spacing: 20) {
-                BookCover(title: shownTitle, artworkFileName: record?.artworkFileName, isFinished: isFinished)
+                BookCover(
+                    title: shownTitle,
+                    artworkFileName: record?.artworkFileName,
+                    isFinished: isFinished,
+                    preferRemoteCover: record?.hasCustomCover ?? false,
+                    remoteCoverURL: remoteCoverURL
+                )
                     .frame(width: 220, height: 290)
                     .shadow(color: .black.opacity(0.45), radius: 18, y: 10)
 
@@ -119,6 +133,9 @@ struct BookDetailScreen: View {
                         draftTitle = shownTitle
                         showingRename = true
                     }
+                    Button("Change Cover Art", systemImage: "photo") {
+                        showingCoverPicker = true
+                    }
                 }
             }
         }
@@ -126,6 +143,7 @@ struct BookDetailScreen: View {
             record = AudiobookLibraryStore.load().first { $0.id == book.id }
             isFavorite = UserLibraryStore.isFavorite(book.id)
             bookmarkCount = UserLibraryStore.bookmarks(for: book.id).count
+            Task { await loadAccountBook() }
         }
         .alert("Edit title", isPresented: $showingRename) {
             TextField("Title", text: $draftTitle)
@@ -141,6 +159,82 @@ struct BookDetailScreen: View {
                 BookmarkSheet(record: record, currentPosition: AudioPlaybackManager.savedPosition(for: record.id))
             }
         }
+        .photosPicker(isPresented: $showingCoverPicker, selection: Binding(
+            get: { nil },
+            set: { item in
+                guard let item else { return }
+                Task { await changeCover(from: item) }
+            }
+        ), matching: .images)
+        .alert("Couldn't update cover", isPresented: Binding(
+            get: { coverErrorMessage != nil },
+            set: { if !$0 { coverErrorMessage = nil } }
+        )) {
+            Button("OK", role: .cancel) { coverErrorMessage = nil }
+        } message: {
+            Text(coverErrorMessage ?? "")
+        }
+    }
+
+    private func loadAccountBook() async {
+        guard let client = try? CloudScanClient.configured() else { return }
+        let books = (try? await client.library()) ?? []
+        if let id = record?.accountLibraryID {
+            accountBook = books.first { $0.id == id }
+        } else if let sha = record?.fingerprint?.sha256 {
+            accountBook = books.first { $0.fingerprint.sha256.caseInsensitiveCompare(sha) == .orderedSame }
+        }
+    }
+
+    /// Uploads a listener-chosen cover and marks this book as carrying one from now on.
+    ///
+    /// The server call has to succeed before [LibraryBookRecord.hasCustomCover] is set:
+    /// otherwise a failed upload would still flip the book over to preferring a remote
+    /// cover that was never actually saved, and it would show nothing until the next
+    /// successful attempt.
+    private func changeCover(from item: PhotosPickerItem) async {
+        guard let record, let accountID = record.accountLibraryID ?? accountBook?.id else {
+            coverErrorMessage = "This book needs to finish syncing to your account before its cover can be changed."
+            return
+        }
+        guard let data = try? await item.loadTransferable(type: Data.self),
+              let image = UIImage(data: data) else {
+            coverErrorMessage = "That image could not be opened."
+            return
+        }
+        guard let jpegData = Self.preparedCoverData(image) else {
+            coverErrorMessage = "That image could not be used as a cover."
+            return
+        }
+        do {
+            let client = try CloudScanClient.configured()
+            try await client.uploadLibraryCover(jpegData, bookID: accountID)
+            var updated = record
+            updated.hasCustomCover = true
+            AudiobookLibraryStore.update(updated)
+            self.record = updated
+            await loadAccountBook()
+        } catch {
+            coverErrorMessage = error.localizedDescription
+        }
+    }
+
+    /// Keeps a listener-chosen cover below the API's 2 MB limit, matching the sizing the
+    /// app already applies when it uploads a book's own embedded artwork (see
+    /// `ExploreScannedBooksScreen.preparedCoverData`).
+    fileprivate static func preparedCoverData(_ image: UIImage) -> Data? {
+        let maximumDimension: CGFloat = 1400
+        let scale = min(1, maximumDimension / max(image.size.width, image.size.height))
+        let size = CGSize(width: image.size.width * scale, height: image.size.height * scale)
+        let renderer = UIGraphicsImageRenderer(size: size)
+        let resized = renderer.image { _ in image.draw(in: CGRect(origin: .zero, size: size)) }
+        var quality: CGFloat = 0.85
+        var data = resized.jpegData(compressionQuality: quality)
+        while let current = data, current.count > 1_900_000, quality > 0.4 {
+            quality -= 0.1
+            data = resized.jpegData(compressionQuality: quality)
+        }
+        return data
     }
 
     /// Saves the new title locally first, then tells the account.
@@ -411,9 +505,14 @@ struct PlayerScreen: View {
     /// twice a second as the playback position moves, so the whole library was being read
     /// continuously during playback.
     @State private var record: LibraryBookRecord?
+    @State private var accountBook: AccountLibraryBook?
 
     private var hasReadingEdition: Bool {
         record.map { ReaderStore.hasEpub(bookID: $0.id) } ?? false
+    }
+    private var remoteCoverURL: URL? {
+        guard let accountBook, let client = try? CloudScanClient.configured() else { return nil }
+        return client.coverURL(for: accountBook.coverImageURL)
     }
 
     var body: some View {
@@ -472,7 +571,12 @@ struct PlayerScreen: View {
                     .frame(maxWidth: geometry.size.width * 0.86)
                     .padding(.top, 38)
 
-                BookCover(title: book.title, artworkFileName: record?.artworkFileName)
+                BookCover(
+                    title: book.title,
+                    artworkFileName: record?.artworkFileName,
+                    preferRemoteCover: record?.hasCustomCover ?? false,
+                    remoteCoverURL: remoteCoverURL
+                )
                     .frame(width: min(geometry.size.width * 0.86, 340), height: min(geometry.size.width * 0.86, 340))
                     .padding(.top, 28)
                     .shadow(color: .black.opacity(0.45), radius: 16, y: 8)
@@ -614,6 +718,13 @@ struct PlayerScreen: View {
                 // Guarded on isPlaying because load returns early for the book already open, so
                 // arriving here while it plays must not toggle it off.
                 if autoPlay, !playback.isPlaying { playback.togglePlayback() }
+            }
+            guard record?.hasCustomCover == true, let client = try? CloudScanClient.configured() else { return }
+            let books = (try? await client.library()) ?? []
+            if let id = record?.accountLibraryID {
+                accountBook = books.first { $0.id == id }
+            } else if let sha = record?.fingerprint?.sha256 {
+                accountBook = books.first { $0.fingerprint.sha256.caseInsensitiveCompare(sha) == .orderedSame }
             }
         }
         .sheet(isPresented: $showingBookmarks) {

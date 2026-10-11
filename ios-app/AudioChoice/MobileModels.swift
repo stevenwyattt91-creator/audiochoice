@@ -51,6 +51,14 @@ struct LibraryBookRecord: Identifiable, Codable {
     var scanState: String?
     /// Server-side library record. The audio itself stays private to this device.
     var accountLibraryID: UUID? = nil
+    /// Set once the listener deliberately replaces this book's cover from book details.
+    ///
+    /// `artworkFileName` is read automatically from the file's own tags at import, so its
+    /// presence alone cannot distinguish "this is the file's cover" from "this is the one
+    /// the listener chose instead" -- without this flag, libraryCover() would keep
+    /// preferring stale embedded art over a cover a listener just uploaded, since both are
+    /// local and the embedded one is checked first.
+    var hasCustomCover: Bool = false
 
     /// The title to send as identity evidence: the file's own, never a correction.
     var evidenceTitle: String { identityTitle ?? book.title }
@@ -72,7 +80,8 @@ struct LibraryBookRecord: Identifiable, Codable {
         chapterMarkers: [AudiobookChapter]? = nil,
         pendingScanID: UUID? = nil,
         scanState: String? = nil,
-        accountLibraryID: UUID? = nil
+        accountLibraryID: UUID? = nil,
+        hasCustomCover: Bool = false
     ) {
         self.id = id
         self.book = book
@@ -91,6 +100,7 @@ struct LibraryBookRecord: Identifiable, Codable {
         self.pendingScanID = pendingScanID
         self.scanState = scanState
         self.accountLibraryID = accountLibraryID
+        self.hasCustomCover = hasCustomCover
     }
 
     /// Decodes leniently, because the stored library outlives any one version of this type.
@@ -121,6 +131,7 @@ struct LibraryBookRecord: Identifiable, Codable {
         pendingScanID = try values.decodeIfPresent(UUID.self, forKey: .pendingScanID)
         scanState = try values.decodeIfPresent(String.self, forKey: .scanState)
         accountLibraryID = try values.decodeIfPresent(UUID.self, forKey: .accountLibraryID)
+        hasCustomCover = try values.decodeIfPresent(Bool.self, forKey: .hasCustomCover) ?? false
     }
 }
 
