@@ -367,7 +367,12 @@ class AudioChoiceApi(private val json: Json) {
         onProgress: (Float) -> Unit = {},
     ) = withContext(Dispatchers.IO) {
         if (authorization.headers.keys.none { it.equals("x-ms-blob-type", ignoreCase = true) }) {
-            uploadSingleRequest(authorization, resolver, uri, expectedSize)
+            // S3 (and anything else presigning a single PUT, not an Azure block-blob) has no
+            // x-ms-blob-type header to chunk against, but the upload itself is still a single
+            // long-running stream -- reporting progress only at 0% and 100% is what made this
+            // counter look broken after the move off Azure Blob. uploadSingleRequest now reports
+            // incrementally as bytes actually leave the device, same as the chunked path below.
+            uploadSingleRequest(authorization, resolver, uri, expectedSize, onProgress)
             onProgress(1f)
             return@withContext
         }
@@ -411,6 +416,7 @@ class AudioChoiceApi(private val json: Json) {
         resolver: ContentResolver,
         uri: Uri,
         expectedSize: Long,
+        onProgress: (Float) -> Unit = {},
     ) {
         val connection = (URL(authorization.uploadURL).openConnection() as HttpURLConnection).apply {
             requestMethod = authorization.method
@@ -426,7 +432,17 @@ class AudioChoiceApi(private val json: Json) {
         try {
             resolver.openInputStream(uri).use { input ->
                 requireNotNull(input) { "The selected audiobook is no longer available." }
-                connection.outputStream.use { output -> input.copyTo(output, 1024 * 1024) }
+                connection.outputStream.use { output ->
+                    val buffer = ByteArray(1024 * 1024)
+                    var uploaded = 0L
+                    while (true) {
+                        val read = input.read(buffer)
+                        if (read < 0) break
+                        output.write(buffer, 0, read)
+                        uploaded += read
+                        onProgress((uploaded.toDouble() / expectedSize.coerceAtLeast(1)).toFloat().coerceIn(0f, 1f))
+                    }
+                }
             }
             val status = connection.responseCode
             if (status !in 200..299) throw ApiException(status, "The private audiobook upload failed ($status).")
