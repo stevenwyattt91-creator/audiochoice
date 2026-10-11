@@ -352,23 +352,51 @@ public sealed class PostgresAccountStore(NpgsqlDataSource dataSource) : IAccount
             : null;
     }
 
+    /// <summary>
+    /// Finds an existing account by email, treating Gmail dot/plus-tag aliases of the same
+    /// mailbox as the same address.
+    /// </summary>
+    /// <remarks>
+    /// A plain <c>lower(email) = lower($1)</c> SQL match previously missed exactly this case:
+    /// a Google sign-in reporting "stevenwyattt91@gmail.com" did not match an existing
+    /// "steven.wyattt91@gmail.com" row, so a fresh sign-in created a brand-new, empty account
+    /// instead of being matched to the real one -- its library, bookmarks and progress stayed
+    /// on the original row, untouched but now unreachable from the "wrong"-looking sign-in.
+    ///
+    /// Narrowed to <c>%@gmail.com</c>/<c>%@googlemail.com</c> at the SQL layer first (an index
+    /// on <c>lower(email)</c> still helps there), then compared canonically in C# with
+    /// <see cref="EmailCanonicalizer.Canonical"/> -- the same function the allowlist check uses,
+    /// so the two can never disagree about which strings name the same mailbox. The result set
+    /// this scans is bounded by how many Gmail accounts actually exist, not the whole table.
+    /// </remarks>
     private static AuthUser? FindUserByEmail(
         NpgsqlConnection connection,
         NpgsqlTransaction transaction,
         string email,
         string provider)
     {
+        var canonical = EmailCanonicalizer.Canonical(email);
+        if (canonical.Length == 0) return null;
         using var command = new NpgsqlCommand("""
-            select id, email, display_name from users
-            where lower(email) = lower($1)
-            order by created_at
-            limit 1;
+            select id, email, display_name, created_at from users
+            where lower(email) like '%@gmail.com' or lower(email) like '%@googlemail.com'
+            order by created_at;
             """, connection, transaction);
-        command.Parameters.AddWithValue(email);
         using var reader = command.ExecuteReader();
-        return reader.Read()
-            ? new AuthUser(reader.GetGuid(0), reader.GetString(1), reader.GetString(2), provider)
-            : null;
+        AuthUser? match = null;
+        DateTimeOffset? matchCreatedAt = null;
+        while (reader.Read())
+        {
+            if (!string.Equals(EmailCanonicalizer.Canonical(reader.GetString(1)), canonical, StringComparison.Ordinal))
+            {
+                continue;
+            }
+            var createdAt = reader.GetFieldValue<DateTimeOffset>(3);
+            if (match is not null && matchCreatedAt <= createdAt) continue;
+            match = new AuthUser(reader.GetGuid(0), reader.GetString(1), reader.GetString(2), provider);
+            matchCreatedAt = createdAt;
+        }
+        return match;
     }
 
     private static bool UserExists(
