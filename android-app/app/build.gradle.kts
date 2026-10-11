@@ -40,7 +40,7 @@ android {
         applicationId = "com.audiochoice.mobile"
         minSdk = 26
         targetSdk = 37
-        versionCode = 34
+        versionCode = 36
         versionName = "1.0"
 
         ndk {

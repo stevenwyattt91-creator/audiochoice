@@ -21,6 +21,7 @@
         "cloudformation:ExecuteChangeSet",
         "cloudformation:DeleteChangeSet",
         "cloudformation:ListChangeSets",
+        "cloudformation:GetTemplateSummary",
         "cloudformation:TagResource",
         "cloudformation:UntagResource"
       ],

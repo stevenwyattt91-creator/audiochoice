@@ -1,18 +1,23 @@
-The library opens instantly now.
+The filter scanner now looks only for sexual content.
 
-Opening the app showed a loading bar and an empty screen for about ten seconds
-before any books appeared. The books were already on the phone the whole time:
-the app saves a copy of your library locally and loads that before it calls the
-server, but the library screen was throwing it away and drawing only a progress
-bar until the server answered. It now draws your books immediately and shows a
-thin line under the title while it checks for updates in the background.
+Profanity, violence, drug/alcohol references, blasphemy, and self-harm are no
+longer scanned for or filterable -- those switches are gone from the filter
+screen. The sexual-content filters themselves got more sensitive: innuendo,
+euphemism, and crude-but-non-sexual banter are now judged more carefully, with
+a lower bar for anything that sexualizes a woman specifically. Every book will
+get a fresh scan the next time you open it to pick up the new rules.
 
-Explore is cached the same way, so the scanned catalogue is there the moment you
-switch to it instead of waiting on a request.
+The backend this app talks to has moved. You shouldn't notice anything
+different, but if you see a sign-in or library error after updating, let us
+know.
 
-Cover art appears straight away too, from the phone.
+Earlier in this run of builds: the library opens instantly from your phone's
+own copy instead of showing a loading bar, cover art and Explore load from
+cache immediately, pausing/locking the phone and coming back no longer leaves
+the player stuck, Google sign-in no longer breaks after the app is rotated or
+backgrounded, and playback speed is a -/+ stepper moving in 0.05 steps between
+0.25x and 2.0x.
 
-Earlier in this run of builds: pausing, locking the phone and coming back no
-longer leaves the player unable to play, Google sign-in no longer breaks after
-the app has been rotated or left in the background, and the playback speed
-control is a - / + stepper moving in 0.05 steps between 0.25x and 2.0x.
+Fixed: the private upload progress percentage wasn't moving during an
+upload (it would jump straight from 0% to 100%). It now climbs steadily
+while the file uploads, same as before.
