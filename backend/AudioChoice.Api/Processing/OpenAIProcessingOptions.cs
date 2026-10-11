@@ -343,7 +343,14 @@ public sealed class OpenAIProcessingOptions
     // comment that uses a woman as its subject or punchline, regardless of how the surrounding
     // dialogue frames it, and an ambiguous case is resolved toward reporting it. A scan made
     // under the prior version applied that exemption too broadly to this pattern.
-    public string ScannerVersion { get; init; } = "7.5-women-lower-bar";
+    //
+    // Bumped again together with BaseAnalysisPromptVersion, at the owner's explicit request, to
+    // extend the lower bar for women beyond just the rivalry exemption: any remark, innuendo,
+    // banter, body-part comment, or mention of nudity concerning a woman now reports at
+    // sexual_suggestive_dialogue or higher even when mild, while plain stated admiration with
+    // nothing more said about her body stays unflagged. A scan made under the prior version
+    // would miss milder instances of exactly this pattern.
+    public string ScannerVersion { get; init; } = "7.6-women-lower-bar-extended";
     /// <summary>Only jobs in this lane may be claimed by this worker instance.</summary>
     public string ProcessingLane { get; init; } = ScanProcessingLanes.AzureOpenAI;
     /// <summary>

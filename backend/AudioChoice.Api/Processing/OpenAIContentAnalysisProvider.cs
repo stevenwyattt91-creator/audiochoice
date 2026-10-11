@@ -144,7 +144,16 @@ public sealed class OpenAIContentAnalysisProvider(
     // of how the surrounding dialogue frames it, and an ambiguous case is resolved in favor of
     // reporting it. A scan made under the prior version applied the rivalry exemption too
     // broadly to exactly this pattern.
-    private const string BaseAnalysisPromptVersion = "6.4-women-lower-bar";
+    //
+    // Bumped again together with ScannerVersion, at the owner's explicit request, to extend that
+    // lower bar beyond the rivalry exemption specifically: any remark, innuendo, banter, comment
+    // on a body part, or mention of nudity concerning a woman now reports at this rung or higher
+    // even when mild or brief, with plain stated admiration (finding her beautiful, a simple
+    // compliment on her looks) carved out explicitly so this does not sweep in ordinary attraction
+    // that says nothing more about her body or what anyone wants from her. A scan made under the
+    // prior version held a woman to the same bar as everything else on this rung and would miss
+    // milder instances of exactly what this change targets.
+    private const string BaseAnalysisPromptVersion = "6.5-women-lower-bar-extended";
     // Bumped for the keyword safety net's lane isolation fix: a candidate whose window
     // happens to match a checkpoint cached under the prior version may have been built
     // before a safety-net seed's own lane existed, when it could still get coalesced into a
@@ -2574,15 +2583,26 @@ appeal, or desirability rather than their skill, ego, or performance at somethin
 describe or dwell on either man's anatomy, or that is really about one of them wanting the other,
 would be.
 
-Hold a woman to the lower bar the moment any part of this applies to her: the rivalry/insult
-exemption above is for two people trading crude jabs at each other, not for a remark that uses a
-woman as its subject or its punchline rather than its target. A crude joke or taunt between two
-men about each other is the exemption; the same joke made about a woman present, mentioned, or
-being discussed -- a comment on her body, what someone would do to or with her, treating her as
-the prize or the butt of the joke rather than a participant trading the same insult back -- is
-sexual_suggestive_dialogue, full stop, no matter how the men's own dialogue frames it or how
-minor it seems. When a passage is ambiguous about whether a crude remark is mutual rivalry or is
-actually about a woman in it, resolve it as the latter and report it.
+Hold a woman to a lower bar than the rest of this rung: the rivalry/insult exemption above is for
+two people trading crude jabs at each other, not for a remark that uses a woman as its subject or
+its punchline rather than its target. A crude joke or taunt between two men about each other is
+the exemption; the same joke made about a woman present, mentioned, or being discussed -- a
+comment on her body, what someone would do to or with her, treating her as the prize or the butt
+of the joke rather than a participant trading the same insult back -- is sexual_suggestive_dialogue,
+full stop, no matter how the men's own dialogue frames it or how minor it seems. When a passage is
+ambiguous about whether a crude remark is mutual rivalry or is actually about a woman in it,
+resolve it as the latter and report it.
+
+Beyond that specific exemption, report any remark, innuendo, banter, comment on a body part, or
+mention of nudity concerning a woman at this rung or higher, even a mild or brief one that would
+not necessarily reach this bar for a man or for a passage with no particular subject. Plain
+admiration on its own -- a character finding a woman beautiful or attractive, a simple compliment
+on her looks, noticing she is pretty, with nothing more said about her body or what anyone wants
+from her -- is not sexual content and stays unflagged; this lower bar is for content that goes
+beyond that into a remark, joke, tease, or description with sexual intent or sexual subject
+matter, not for ordinary attraction stated plainly. The line is the same one the rest of this
+rung already draws between stating a fact and lingering on it sexually -- it is drawn earlier,
+and more readily resolved in favor of reporting, when the subject is a woman.
 
 Naming what a character is or does for a living -- a prostitute, a sex worker, an escort, a
 madam, someone who "sells herself" -- is NOT sexual content by itself, the same way naming a
