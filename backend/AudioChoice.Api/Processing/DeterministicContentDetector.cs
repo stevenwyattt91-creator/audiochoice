@@ -12,149 +12,13 @@ public sealed record DeterministicDetection(
 
 public static partial class DeterministicContentDetector
 {
-    private static readonly IReadOnlyDictionary<string, string> ProfanityLabels =
-        new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
-        {
-            ["damn"] = "profanity_mild",
-            ["hell"] = "profanity_mild",
-            ["crap"] = "profanity_mild",
-            ["ass"] = "profanity_mild",
-            ["bastard"] = "profanity_strong",
-            ["bitch"] = "profanity_strong",
-            ["shit"] = "profanity_strong",
-            ["fuck"] = "profanity_strong",
-            ["fucking"] = "profanity_strong",
-            ["motherfucker"] = "profanity_strong",
-            ["asshole"] = "profanity_strong",
-            ["dick"] = "profanity_sexual",
-            ["cock"] = "profanity_sexual",
-            ["pussy"] = "profanity_sexual",
-            ["cunt"] = "profanity_sexual"
-        };
-
-    // Lambda's local first pass deliberately keeps high-recall cues for the
-    // non-sexual filters too. Mild/intense/death violence are excluded by policy;
-    // graphic/torture/child/animal violence remain filterable.
-    private static readonly IReadOnlyDictionary<string, Regex> CategoryCues =
-        new Dictionary<string, Regex>(StringComparer.Ordinal)
-        {
-            ["violence_graphic"] = Cue(@"\b(?:gore|blood(?:y)?|dismember(?:ed|ment)?|behead(?:ed|ing)?|guts|eviscerat(?:e|ed|ion)|corpse|graphic violence)\b"),
-            ["violence_torture"] = Cue(@"\b(?:torture|tortured|waterboarding|rack(?:ed|ing)?|electrocute(?:d|ion)?)\b"),
-            ["violence_children"] = Cue(@"\b(?:child|children|kid|infant|baby)\b.{0,50}\b(?:killed|murdered|abused|tortured|stabbed|shot|beaten)\b"),
-            ["violence_animals"] = Cue(@"\b(?:dog|cat|horse|animal|puppy|kitten)\b.{0,50}\b(?:killed|murdered|abused|tortured|stabbed|shot|beaten)\b"),
-            ["substance_alcohol_use"] = Cue(@"\b(?:drink|drank|drinking|whiskey|whisky|vodka|beer|wine|bourbon|tequila|rum|alcohol)\b"),
-            ["substance_intoxication"] = Cue(@"\b(?:drunk|intoxicated|blacked out|hungover|high)\b"),
-            ["substance_drug_reference"] = Cue(@"\b(?:cocaine|heroin|meth|methamphetamine|fentanyl|opioid|marijuana|weed|pot|drug|drugs)\b"),
-            ["substance_drug_use"] = Cue(@"\b(?:snort(?:ed|ing)?|inject(?:ed|ing)?|smoke|smoked|shoot up|take drugs|used cocaine|used heroin)\b"),
-            ["substance_abuse_overdose"] = Cue(@"\b(?:overdose|overdosed|poison(?:ed|ing)?)\b"),
-            ["blasphemy_religious_profanity"] = Cue(@"\b(?:goddamn|god damn|dammit|damn it|jesus christ)\b"),
-            ["blasphemy_statement"] = Cue(@"\b(?:there is no god|god is dead|curse god|blasphem(?:e|y|ous))\b"),
-            ["self_harm_reference"] = Cue(@"\b(?:self[- ]harm|cut myself|hurt myself|suicid(?:e|al)|kill myself)\b"),
-            ["self_harm_suicidal_thoughts"] = Cue(@"\b(?:want to die|don't want to live|do not want to live|ending my life)\b"),
-            ["self_harm_suicide_attempt"] = Cue(@"\b(?:attempted suicide|suicide attempt|tried to kill myself)\b"),
-            ["self_harm_depiction"] = Cue(@"\b(?:cut her wrists|cut his wrists|cut my wrists|hanging himself|hanging herself|overdosed intentionally)\b")
-        };
-
-    /// <summary>
-    /// Exact profane words, matched literally.
-    /// </summary>
-    /// <remarks>
-    /// Reported at full confidence because there is no judgement involved: the word is
-    /// either present or it is not. This is also what lets the apps group every occurrence
-    /// of one word under a single switch, which needs the word itself rather than a
-    /// model's paraphrase of it.
-    /// </remarks>
-    public static IReadOnlyList<DeterministicDetection> DetectProfanity(
-        IReadOnlyList<TranscriptSegment> segments)
-    {
-        var detections = new List<DeterministicDetection>();
-        foreach (var segment in segments)
-        {
-            // Each spoken word is consumed at most once, so two of the same word in a segment
-            // get two timings rather than both pointing at the first.
-            var claimed = new HashSet<int>();
-            foreach (Match match in WordRegex().Matches(segment.Text))
-            {
-                var word = match.Value.ToLowerInvariant();
-                if (!ProfanityLabels.TryGetValue(word, out var label)) continue;
-
-                // The word's own timing when the transcriber gave one, otherwise the segment.
-                //
-                // This is the difference between removing a word and removing the sentence around
-                // it. A segment runs five to ten seconds; one "damn" was taking all of it, several
-                // thousand times across a library. Falls back to the segment for a transcript
-                // stored before word timings existed, which is every transcript already saved.
-                var spoken = FindWord(segment.Words, word, claimed);
-                detections.Add(new(
-                    label,
-                    spoken?.StartTime ?? segment.StartTime,
-                    spoken?.EndTime ?? segment.EndTime,
-                    1,
-                    "Profanity detected",
-                    word));
-            }
-        }
-        return detections;
-    }
-
-    /// <summary>
-    /// The spoken word matching <paramref name="word"/> that has not been used yet.
-    /// </summary>
-    /// <remarks>
-    /// Delegates to <see cref="TranscriptWordLocator.FindUnclaimedWord"/>, which generalizes
-    /// this exact matching rule -- word list rather than position, because the transcriber's
-    /// word list and a regex over the segment text do not always split identically -- to every
-    /// content category, not only profanity.
-    ///
-    /// Returns null when there is no confident match, and the caller then keeps the segment's own
-    /// range. A wrong word's timing would remove the wrong moment and leave the profanity audible,
-    /// which is worse than removing too much.
-    /// </remarks>
-    private static TranscriptWord? FindWord(
-        IReadOnlyList<TranscriptWord>? words,
-        string word,
-        ISet<int> claimed) =>
-        TranscriptWordLocator.FindUnclaimedWord(words, word, claimed);
-
-    /// <summary>
-    /// Cheap keyword cues, for deciding what deserves model review.
-    /// </summary>
-    /// <remarks>
-    /// These are guesses, not findings, and they are wrong constantly: "high above the
-    /// wall" matches intoxication, "a pot of coffee" matches a drug reference, and a single
-    /// "bloody" matches graphic violence. They were previously emitted as user-facing
-    /// events at 0.35 confidence, which nothing downstream ever checked, so a listener saw
-    /// "Graphic violence described" on the strength of one word — and Luna's careful
-    /// instruction to ignore ordinary conflict was bypassed entirely.
-    ///
-    /// They are only a defensible source of events where nothing else looks at the passage,
-    /// which is the Lambda-first mode. Whenever Luna reads the whole transcript, its
-    /// judgement supersedes these outright.
-    /// </remarks>
-    public static IReadOnlyList<DeterministicDetection> DetectCategoryCues(
-        IReadOnlyList<TranscriptSegment> segments)
-    {
-        var detections = new List<DeterministicDetection>();
-        foreach (var segment in segments)
-        {
-            foreach (var cue in CategoryCues)
-            {
-                if (!cue.Value.IsMatch(segment.Text)) continue;
-                detections.Add(new(
-                    cue.Key,
-                    segment.StartTime,
-                    segment.EndTime,
-                    .35,
-                    "Local Lambda content cue",
-                    null));
-            }
-        }
-        return detections;
-    }
-
-    private static Regex Cue(string pattern) => new(
-        pattern,
-        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.Compiled);
+    // Profanity word-matching and the Lambda-first category-cue regexes (violence, substance
+    // use, blasphemy, self-harm) were removed when this deployment was permanently narrowed
+    // to sexual content only (see ContentTaxonomy.EnforcedLabels remarks) -- nothing calls
+    // DetectProfanity/DetectCategoryCues any more, so the word lists and regexes that only
+    // existed to support them were removed too rather than kept as dead data. The sexual-
+    // content candidate-window scan below is unaffected: it is a real, active part of the
+    // pipeline (OpenAIContentAnalysisProvider.AddUncoveredSexualCandidates) and stays.
 
     public static bool ContainsObviousContent(IReadOnlyList<TranscriptSegment> segments) =>
         segments.Any(segment => ObviousContentRegex().IsMatch(segment.Text));
@@ -191,18 +55,22 @@ public static partial class DeterministicContentDetector
         return merged;
     }
 
+    // Narrowed to sexual-content terms only; the violence/self-harm words this regex used to
+    // also match (stabbed, shot, killed, murdered, blood, torture, suicide, overdose) were
+    // removed along with those categories, so this assertion no longer fires on a book that
+    // is violent but has no sexual content, which it otherwise would once nothing classifies
+    // violence any more.
     [GeneratedRegex(
-        @"\b(?:damn|hell|crap|ass|bastard|bitch|shit|fuck|fucking|motherfucker|asshole|dick|cock|pussy|cunt)\b",
-        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
-    private static partial Regex WordRegex();
-
-    [GeneratedRegex(
-        @"\b(?:damn|bastard|bitch|shit|fuck|fucking|motherfucker|asshole|naked|nude|sex|sexual|orgasm|rape|stabbed|shot|killed|murdered|blood|torture|suicide|overdose|opening\s+(?:my|his|her|their)\s+legs|opened\s+(?:my|his|her|their)\s+legs|spreading\s+(?:my|his|her|their)\s+legs|spread\s+(?:my|his|her|their)\s+legs)\b",
+        @"\b(?:naked|nude|sex|sexual|orgasm|rape|opening\s+(?:my|his|her|their)\s+legs|opened\s+(?:my|his|her|their)\s+legs|spreading\s+(?:my|his|her|their)\s+legs|spread\s+(?:my|his|her|their)\s+legs)\b",
         RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
     private static partial Regex ObviousContentRegex();
 
+    // Narrowed to sexual-content terms only, for the same reason as ObviousContentRegex above
+    // -- this decides which transcript windows get sent to the model as sexual-content
+    // candidates, and a violence/self-harm cue here would just waste a model call on content
+    // this deployment never classifies.
     [GeneratedRegex(
-        @"\b(?:naked|nude|undress(?:ed|ing)?|sex(?:ual|ually)?|orgasm|climax|penetrat(?:e|ed|ing|ion)|thrust(?:ed|ing)?|moan(?:ed|ing)?|kiss(?:ed|ing)?|breast|nipples?|genitals?|erect(?:ion)?|masturbat(?:e|ed|ing|ion)|rape|assault(?:ed|ing)?|stab(?:bed|bing)?|shoot(?:ing|s)?|murder(?:ed|ing)?|blood(?:y)?|torture|suicide|overdose|opening\s+(?:my|his|her|their)\s+legs|opened\s+(?:my|his|her|their)\s+legs|spreading\s+(?:my|his|her|their)\s+legs|spread\s+(?:my|his|her|their)\s+legs|between\s+(?:her|his|their)\s+thighs?)\b",
+        @"\b(?:naked|nude|undress(?:ed|ing)?|sex(?:ual|ually)?|orgasm|climax|penetrat(?:e|ed|ing|ion)|thrust(?:ed|ing)?|moan(?:ed|ing)?|kiss(?:ed|ing)?|breast|nipples?|genitals?|erect(?:ion)?|masturbat(?:e|ed|ing|ion)|rape|assault(?:ed|ing)?|opening\s+(?:my|his|her|their)\s+legs|opened\s+(?:my|his|her|their)\s+legs|spreading\s+(?:my|his|her|their)\s+legs|spread\s+(?:my|his|her|their)\s+legs|between\s+(?:her|his|their)\s+thighs?)\b",
         RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
     private static partial Regex SceneCueRegex();
 }

@@ -14,43 +14,17 @@ public static class UserFacingEventPostProcessor
 
     public static IReadOnlyList<ScanEvent> Process(IReadOnlyList<ScanEvent> events)
     {
-        var alcoholIDs = new[] { "substance_alcohol_use", "substance_intoxication" }
-            .Select(label => ContentTaxonomy.Mappings[label].EventID).ToHashSet();
-        var drugIDs = new[]
-        {
-            "substance_drug_reference", "substance_drug_use", "substance_abuse_overdose"
-        }.Select(label => ContentTaxonomy.Mappings[label].EventID).ToHashSet();
-        var alcoholGroup = ContentTaxonomy.Mappings["substance_alcohol_use"].GroupID;
-        var drugGroup = ContentTaxonomy.Mappings["substance_drug_use"].GroupID;
-        var alcoholKey = Hash("control|substance|alcohol");
-        var drugKey = Hash("control|substance|drugs");
+        // Substance-aggregation (alcohol/drug sub-events merged into one control) and the
+        // profanity/substance category exclusion below both only ever mattered for
+        // categories that are now permanently out of scope (see
+        // ContentTaxonomy.EnforcedLabels remarks) -- this deployment filters sexual content
+        // only, so a fresh scan can never produce a profanity_*/substance_* event for either
+        // step to act on. Removed rather than left as dead branches that only fire on an
+        // old scan's legacy events, which this method does not otherwise special-case.
+        var deduplicated = Deduplicate(events);
 
-        var normalized = events.Select(item =>
-            alcoholIDs.Contains(item.EventID)
-                ? item with
-                {
-                    GroupID = alcoholGroup,
-                    AggregateKey = alcoholKey,
-                    AggregateDisplay = "Alcohol use"
-                }
-                : drugIDs.Contains(item.EventID)
-                    ? item with
-                    {
-                        GroupID = drugGroup,
-                        AggregateKey = drugKey,
-                        AggregateDisplay = "Drug use"
-                    }
-                    : item).ToArray();
-
-        var deduplicated = Deduplicate(normalized);
-
-        var profanityCategory = ContentTaxonomy.Mappings["profanity_mild"].CategoryID;
-        var substanceCategory = ContentTaxonomy.Mappings["substance_alcohol_use"].CategoryID;
         var replacements = new Dictionary<Guid, ScanEvent>();
-        foreach (var group in deduplicated
-                     .Where(item => item.CategoryID != profanityCategory &&
-                                    item.CategoryID != substanceCategory)
-                     .GroupBy(item => item.CategoryID))
+        foreach (var group in deduplicated.GroupBy(item => item.CategoryID))
         {
             var ordered = group.OrderBy(item => item.StartTime).ToArray();
             var cluster = new List<ScanEvent>();
@@ -128,18 +102,10 @@ public static class UserFacingEventPostProcessor
             .First())
         .ToArray();
 
-    private static string ClusterDisplay(Guid categoryID, IReadOnlyList<ScanEvent> cluster)
-    {
-        if (categoryID == ContentTaxonomy.Mappings["sexual_references"].CategoryID)
-            return SexualClusterDisplay(cluster);
-        if (categoryID == ContentTaxonomy.Mappings["violence_graphic"].CategoryID)
-            return "A continuous scene of serious violence is described";
-        if (categoryID == ContentTaxonomy.Mappings["blasphemy_statement"].CategoryID)
-            return "A continuous passage includes blasphemous content";
-        if (categoryID == ContentTaxonomy.Mappings["self_harm_reference"].CategoryID)
-            return "A continuous passage includes self-harm content";
-        return "Several related content events occur in one passage";
-    }
+    private static string ClusterDisplay(Guid categoryID, IReadOnlyList<ScanEvent> cluster) =>
+        categoryID == ContentTaxonomy.Mappings["sexual_references"].CategoryID
+            ? SexualClusterDisplay(cluster)
+            : "Several related content events occur in one passage";
 
     private static string SexualClusterDisplay(IReadOnlyList<ScanEvent> cluster)
     {

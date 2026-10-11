@@ -74,27 +74,24 @@ public static class ContentTaxonomy
     /// label could be added to one and not the others -- and a label a detector emits that
     /// the taxonomy does not know is dropped, previously without a word in the log.
     ///
-    /// Excludes the three broad violence labels. They exist as mappings so scans made before
-    /// the narrow-violence policy still resolve, but nothing must produce new ones: the
-    /// Violence switch is reserved for graphic material, torture, and violence involving
-    /// children or animals.
-    ///
-    /// Includes the four profanity labels, because the app's profanity switches must keep
-    /// working -- see <see cref="ModelEmittableLabels"/> for the separate, narrower question
-    /// of which of these labels Luna itself may propose.
+    /// Narrowed to sexual_* only, at the owner's explicit, permanent request: this deployment
+    /// serves two accounts who only ever cared about sexual content, and profanity, violence,
+    /// substance use, blasphemy, and self-harm are not filtered at all going forward -- not
+    /// "deprioritized," genuinely removed. Every label that used to be enforced here moved to
+    /// <see cref="LegacyLabels"/> instead of being deleted outright, so a scan result written
+    /// before this change still resolves to a description rather than being dropped or
+    /// crashing anything that looks the label up; nothing new is ever produced under them.
     /// </remarks>
+    // "sexual_violence" (rape / sexual assault) belongs here and must never be removed by a
+    // future edit that is really only trying to remove the separate, non-sexual violence_*
+    // category below -- it is explicitly a sexual-content label (category 1, same as every
+    // other sexual_* entry), not a violence label that happens to share a word. Anything that
+    // falls under the sexual-content umbrella, including rape/sexual assault, stays enforced.
     public static readonly IReadOnlyList<string> EnforcedLabels =
     [
         "sexual_suggestive_dialogue", "sexual_references", "sexual_nudity",
         "sexual_implied_activity", "sexual_explicit_activity", "sexual_complete_scene",
-        "sexual_violence", "sexual_kissing",
-        "profanity_mild", "profanity_strong", "profanity_sexual", "profanity_slur",
-        "violence_graphic", "violence_torture", "violence_children", "violence_animals",
-        "substance_alcohol_use", "substance_intoxication", "substance_drug_reference",
-        "substance_drug_use", "substance_abuse_overdose",
-        "blasphemy_religious_profanity", "blasphemy_statement",
-        "self_harm_reference", "self_harm_suicidal_thoughts",
-        "self_harm_suicide_attempt", "self_harm_depiction"
+        "sexual_violence", "sexual_kissing"
     ];
 
     /// <summary>
@@ -102,25 +99,34 @@ public static class ContentTaxonomy
     /// actually propose.
     /// </summary>
     /// <remarks>
-    /// Excludes the four profanity labels. Profanity is matched deterministically, by exact
-    /// word, against the transcript's own text -- see
-    /// <see cref="DeterministicContentDetector.DetectProfanity"/> -- and always has been. A
-    /// model guessing at a literal word it either does or does not say is strictly worse than
-    /// exact matching, and every profanity event Luna could produce duplicated a detection
-    /// the deterministic pass already made at full confidence, at Luna's own model cost with
-    /// no benefit: the app's profanity switches (see <see cref="EnforcedLabels"/>, unchanged)
-    /// are populated by the deterministic pass regardless of whether Luna is ever asked about
-    /// them.
+    /// Identical to <see cref="EnforcedLabels"/> now that profanity, violence, substance,
+    /// blasphemy, and self-harm are no longer enforced at all -- the historical distinction
+    /// (profanity matched deterministically rather than model-proposed) no longer has
+    /// anything on the non-sexual side left to apply to. Kept as a separate list rather than
+    /// collapsed into a direct alias so a future category added to <see cref="EnforcedLabels"/>
+    /// that again needs the same deterministic-vs-model split has somewhere to express that.
     /// </remarks>
-    public static readonly IReadOnlyList<string> ModelEmittableLabels = EnforcedLabels
-        .Where(label => !label.StartsWith("profanity_", StringComparison.Ordinal))
-        .ToArray();
+    public static readonly IReadOnlyList<string> ModelEmittableLabels = EnforcedLabels;
 
     /// <summary>Labels kept only so older scans still resolve; never emitted.</summary>
+    /// <remarks>
+    /// Everything in the previously-enforced profanity, violence, substance, blasphemy, and
+    /// self-harm categories lives here now, alongside the pre-existing legacy entries, for the
+    /// same reason: a scan made before this change may still have events under these labels,
+    /// and those must keep resolving to a <see cref="CanonicalDescription"/> rather than being
+    /// silently dropped. Nothing may ever emit a new event under any of these.
+    /// </remarks>
     public static readonly IReadOnlyList<string> LegacyLabels =
     [
         "violence_mild", "violence_intense", "violence_death",
-        "sexual_explicit", "sexual_implied", "profanity", "graphic_violence", "self_harm"
+        "sexual_explicit", "sexual_implied", "profanity", "graphic_violence", "self_harm",
+        "profanity_mild", "profanity_strong", "profanity_sexual", "profanity_slur",
+        "violence_graphic", "violence_torture", "violence_children", "violence_animals",
+        "substance_alcohol_use", "substance_intoxication", "substance_drug_reference",
+        "substance_drug_use", "substance_abuse_overdose",
+        "blasphemy_religious_profanity", "blasphemy_statement",
+        "self_harm_reference", "self_harm_suicidal_thoughts",
+        "self_harm_suicide_attempt", "self_harm_depiction"
     ];
 
     /// <summary>

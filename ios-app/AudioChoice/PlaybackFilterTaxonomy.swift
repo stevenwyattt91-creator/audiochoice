@@ -55,6 +55,12 @@ enum PlaybackFilterTaxonomy {
         "\(category)1000000-0000-0000-0000-" + String(format: "%012d", group)
     }
 
+    // Sexual content only, permanently -- see the backend's ContentTaxonomy.EnforcedLabels
+    // remarks. Profanity, Violence, Drugs & Alcohol, Blasphemy, and Self-Harm & Suicide are
+    // removed here too, not just left to stop appearing on their own: a book scanned before
+    // this change may still carry old events in those groups, and this makes sure none of
+    // them render a switch even for those, matching the backend's own permanent removal and
+    // the Android client's identical change to its own copy of this table.
     private static let definitions: [String: Definition] = {
         var values: [String: Definition] = [:]
 
@@ -70,36 +76,11 @@ enum PlaybackFilterTaxonomy {
             "Implied sexual activity", "Explicit sexual activity", "Complete sex scenes",
             "Sexual violence (rape / sexual assault)", "Kissing"
         ])
-        add(2, "Profanity", [
-            "Mild profanity", "Strong profanity", "Sexual profanity", "Slurs / derogatory language"
-        ])
-        // Violence is deliberately not a contiguous run. The scanner also emits lower
-        // severity violence groups, and those are absent here so that neither the screen
-        // nor playback treats an ordinary scuffle as something to remove. Anything with
-        // no definition is dropped from the hierarchy, which is what keeps the visible
-        // controls and the enforced events describing the same set.
-        values[groupID(category: 3, group: 3)] = Definition(parentLabel: "Violence", childLabel: "Graphic violence / gore")
-        values[groupID(category: 3, group: 4)] = Definition(parentLabel: "Violence", childLabel: "Torture")
-        values[groupID(category: 3, group: 6)] = Definition(parentLabel: "Violence", childLabel: "Violence involving children")
-        values[groupID(category: 3, group: 7)] = Definition(parentLabel: "Violence", childLabel: "Violence involving animals")
-        add(4, "Drugs & Alcohol", [
-            "Alcohol use", "Intoxication", "Drug references", "Drug use", "Drug abuse / overdose"
-        ])
-        add(5, "Blasphemy", ["Religious profanity", "Blasphemous statements"])
-        add(6, "Self-Harm & Suicide", [
-            "Self-harm references", "Suicidal thoughts", "Suicide attempt",
-            "Depiction of self-harm / suicide"
-        ])
         return values
     }()
 
     private static let icons: [String: String] = [
-        "Sexual Content": "heart.slash",
-        "Profanity": "text.badge.checkmark",
-        "Violence": "shield",
-        "Drugs & Alcohol": "pills",
-        "Blasphemy": "quote.bubble",
-        "Self-Harm & Suicide": "cross.case"
+        "Sexual Content": "heart.slash"
     ]
 
     /// Whether playback removes this event at all, before the listener's choices apply.

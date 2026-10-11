@@ -121,14 +121,18 @@ print("Scan results stored beside the library")
 // of the library decoded every event of every book. They now live in their own files; what
 // matters is that moving them cannot lose them.
 func scan(_ eventCount: Int) -> ScanResult {
+    // The category used here is incidental to what this file tests (library storage of a
+    // scan result is agnostic to which category its events carry) -- using sexual content
+    // rather than the old profanity placeholder since that category is permanently out of
+    // scope (see the backend's ContentTaxonomy.EnforcedLabels remarks).
     ScanResult(
         events: (0..<eventCount).map { index in
             ScanEvent(
                 id: UUID(), startTime: Double(index) * 10, endTime: Double(index) * 10 + 2,
-                categoryID: UUID(uuidString: "20000000-0000-0000-0000-000000000001")!,
-                groupID: UUID(uuidString: "21000000-0000-0000-0000-000000000002")!,
+                categoryID: UUID(uuidString: "10000000-0000-0000-0000-000000000001")!,
+                groupID: UUID(uuidString: "11000000-0000-0000-0000-000000000002")!,
                 eventID: UUID(), confidence: 0.9, stableKey: "key-\(index)",
-                safeDescription: "Strong language", aggregateKey: nil, aggregateDisplay: nil
+                safeDescription: "A sexual reference is made", aggregateKey: nil, aggregateDisplay: nil
             )
         },
         scanDate: Date(),
@@ -149,7 +153,7 @@ check("the scan is on disk by itself",
 // The point of the change: the blob must no longer carry the events.
 let blob = UserDefaults.standard.data(forKey: "audiobookLibrary.v1") ?? Data()
 let blobText = String(data: blob, encoding: .utf8) ?? ""
-check("the library index does not contain scan events", !blobText.contains("Strong language"))
+check("the library index does not contain scan events", !blobText.contains("A sexual reference is made"))
 // Expressed against the scan's own size rather than a fixed number of bytes, so the check
 // says what it means regardless of how many books happen to be stored.
 let scanBytes = (try? Data(

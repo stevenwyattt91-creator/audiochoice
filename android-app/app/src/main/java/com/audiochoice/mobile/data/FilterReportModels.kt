@@ -72,21 +72,20 @@ data class FilterReportRequest(
 data class FilterReportAcknowledgement(val id: String)
 
 /**
- * The taxonomy's six top-level categories, for a report's own category picker.
+ * The taxonomy's top-level categories, for a report's own category picker.
  *
  * Independent of [PlaybackFilterTaxonomy][com.audiochoice.mobile.player.PlaybackFilterTaxonomy],
  * which only lists categories a book's own scan actually produced. A report's picker has to
  * offer every category regardless of what this book was found to contain -- the whole point
  * is telling triage about something the scan missed. Mirrors iOS's IOSContentTaxonomy so the
- * two apps' pickers name the same six things with the same identifiers.
+ * two apps' pickers name the same thing with the same identifier.
+ *
+ * Sexual content only, permanently: this deployment never scans for profanity, violence,
+ * substance use, blasphemy, or self-harm, so there is nothing for a report about any of them
+ * to do -- see the backend's ContentTaxonomy.EnforcedLabels remarks.
  */
 enum class FilterReportCategory(val categoryID: String, val label: String) {
     SEXUAL_CONTENT("10000000-0000-0000-0000-000000000001", "Sexual Content"),
-    PROFANITY("20000000-0000-0000-0000-000000000001", "Profanity"),
-    VIOLENCE("30000000-0000-0000-0000-000000000001", "Violence"),
-    DRUGS_AND_ALCOHOL("40000000-0000-0000-0000-000000000001", "Drugs & Alcohol"),
-    BLASPHEMY("50000000-0000-0000-0000-000000000001", "Blasphemy"),
-    SELF_HARM("60000000-0000-0000-0000-000000000001", "Self-Harm & Suicide"),
 }
 
 /**

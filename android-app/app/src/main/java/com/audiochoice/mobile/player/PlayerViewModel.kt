@@ -564,7 +564,7 @@ class PlayerViewModel(
             // because the request has not failed yet and claiming filters are off while they are
             // still being fetched is the one thing worse than waiting.
             val cachedPlayback = localAudio.offlinePlayback(book.fingerprint.sha256)
-            val cachedEvents = cachedPlayback.events.filterNot(::isExcludedViolenceEvent)
+            val cachedEvents = cachedPlayback.events.filterNot(::isOutOfScopeLegacyEvent)
             val cachedDisabledGroups = cachedPlayback.disabledGroupIDs.ifEmpty {
                 localAudio.disabledFilters(book.fingerprint.sha256).toList()
             }
@@ -609,7 +609,7 @@ class PlayerViewModel(
                 runCatching { api.bookFilterSettings(accessToken, book.id) }.getOrNull()
             }
             val scan = scanRequest.await()
-            val events = (scan?.result?.events ?: cachedPlayback.events).filterNot(::isExcludedViolenceEvent)
+            val events = (scan?.result?.events ?: cachedPlayback.events).filterNot(::isOutOfScopeLegacyEvent)
             // A scan that was previously saved always carries a scanner version,
             // so this distinguishes "cached clean book" from "no scan at all".
             val hasCachedScan = cachedPlayback.scannerVersion != null
@@ -764,11 +764,18 @@ class PlayerViewModel(
         }
     }
 
-    private fun isExcludedViolenceEvent(event: com.audiochoice.contracts.ScanEvent): Boolean {
+    /**
+     * Filters out every non-sexual category entirely, not just the three broad violence
+     * sub-labels this used to exclude on its own. This deployment is permanently sexual
+     * content only (see the backend's ContentTaxonomy.EnforcedLabels remarks); a cached or
+     * previously-saved scan may still carry violence/profanity/substance/blasphemy/self-harm
+     * events from before that change, and this is what keeps those from ever reaching
+     * playback or a filter switch on this client, matching PlaybackFilterTaxonomy's own
+     * removal of their switches.
+     */
+    private fun isOutOfScopeLegacyEvent(event: com.audiochoice.contracts.ScanEvent): Boolean {
         val category = event.categoryID.lowercase()
-        val group = event.groupID.lowercase()
-        return category.startsWith("30000000-") &&
-            (group.endsWith("-000000000001") || group.endsWith("-000000000002") || group.endsWith("-000000000005"))
+        return !category.startsWith("10000000-")
     }
 
     fun attachEpub(uri: Uri) {

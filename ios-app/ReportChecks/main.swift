@@ -24,12 +24,16 @@ let fingerprint = BookFingerprint(
 )
 
 func event(start: Double, end: Double) -> ScanEvent {
+    // The category used here is incidental to what this file tests (report composition is
+    // agnostic to which category a report names) -- using sexual content rather than the old
+    // profanity placeholder since that category is permanently out of scope (see the
+    // backend's ContentTaxonomy.EnforcedLabels remarks).
     ScanEvent(
         id: UUID(), startTime: start, endTime: end,
-        categoryID: UUID(uuidString: "20000000-0000-0000-0000-000000000001")!,
-        groupID: UUID(uuidString: "21000000-0000-0000-0000-000000000002")!,
+        categoryID: UUID(uuidString: "10000000-0000-0000-0000-000000000001")!,
+        groupID: UUID(uuidString: "11000000-0000-0000-0000-000000000002")!,
         eventID: UUID(), confidence: 0.9, stableKey: "key-1",
-        safeDescription: "Strong language", aggregateKey: nil, aggregateDisplay: nil
+        safeDescription: "A sexual reference is made", aggregateKey: nil, aggregateDisplay: nil
     )
 }
 
@@ -48,7 +52,7 @@ check("no event is claimed, because none fired", report.scanEventID == nil)
 check("no category is invented", report.categoryID == nil)
 
 print("Refining a report afterwards")
-let categoryID = UUID(uuidString: "20000000-0000-0000-0000-000000000001")!
+let categoryID = UUID(uuidString: "10000000-0000-0000-0000-000000000001")!
 report = FilterReportComposer.missedContent(
     fingerprint: fingerprint, position: 10, scannerVersion: nil, categoryID: categoryID
 )
@@ -100,7 +104,7 @@ let allowed: Set<String> = [
 ]
 check("it carries only the agreed fields", Set(json.keys).isSubset(of: allowed))
 let text = String(data: encoded, encoding: .utf8) ?? ""
-check("the safe description is not sent", !text.contains("Strong language"))
+check("the safe description is not sent", !text.contains("A sexual reference is made"))
 check("no transcript or word field appears",
       !text.lowercased().contains("transcript") && !text.lowercased().contains("\"words\""))
 

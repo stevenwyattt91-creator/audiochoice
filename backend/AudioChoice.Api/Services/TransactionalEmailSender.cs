@@ -341,6 +341,12 @@ public sealed class ResendTransactionalEmailSender(
     /// audit portal's own <c>audit_filter_categories</c> table so this class, which otherwise
     /// only formats text, does not gain a database dependency for six names that never change.
     /// </summary>
+    /// <remarks>
+    /// Kept at all six entries even though this deployment now scans sexual content only
+    /// (see ContentTaxonomy.EnforcedLabels remarks): a listener's "wrongly filtered" report
+    /// email can still reference a non-sexual category on a scan made before that change, and
+    /// this must keep naming it rather than printing a raw GUID.
+    /// </remarks>
     private static readonly IReadOnlyDictionary<Guid, string> CategoryNames = new Dictionary<Guid, string>
     {
         [Guid.Parse("10000000-0000-0000-0000-000000000001")] = "Sexual Content",

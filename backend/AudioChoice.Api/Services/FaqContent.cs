@@ -189,8 +189,10 @@ public static class FaqContent
         {
             new FaqEntry(
                 "What can be filtered?",
-                "Profanity, sexual content, violence, drugs and alcohol, self-harm, and blasphemy. " +
-                "You can also add your own words or phrases to remove."),
+                "Sexual content only: suggestive dialogue and innuendo, kissing, sexual references, " +
+                "nudity, implied and explicit sexual activity, complete sex scenes, and sexual " +
+                "violence (rape or sexual assault). Profanity, non-sexual violence, substance use, " +
+                "and self-harm are not scanned or filtered."),
             new FaqEntry(
                 "What is the difference between a category, a subfilter, and an event?",
                 "A category is the broad kind, like sexual content. Inside it are subfilters that say " +

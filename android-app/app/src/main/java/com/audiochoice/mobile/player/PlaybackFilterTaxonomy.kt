@@ -27,19 +27,16 @@ object PlaybackFilterTaxonomy {
     private fun group(category: Int, group: Int) =
         "${category}1000000-0000-0000-0000-${group.toString().padStart(12, '0')}"
 
+    // Sexual content only, permanently -- see the backend's ContentTaxonomy.EnforcedLabels
+    // remarks. Profanity, Violence, Drugs & Alcohol, Blasphemy, and Self-Harm & Suicide are
+    // removed here too, not just left to stop appearing on their own: a book scanned before
+    // this change may still carry old events in those groups, and this makes sure none of
+    // them render a switch even for those, matching the backend's own permanent removal.
     private val definitions = buildMap {
         fun add(c: Int, labels: List<String>, parent: String) = labels.forEachIndexed { index, label ->
             put(group(c, index + 1), Definition(parent, label))
         }
         add(1, listOf("Suggestive dialogue", "Sexual references", "Nudity", "Implied sexual activity", "Explicit sexual activity", "Complete sex scenes", "Sexual violence (rape / sexual assault)", "Kissing"), "Sexual Content")
-        add(2, listOf("Mild profanity", "Strong profanity", "Sexual profanity", "Slurs / derogatory language"), "Profanity")
-        put(group(3, 3), Definition("Violence", "Graphic violence / gore"))
-        put(group(3, 4), Definition("Violence", "Torture"))
-        put(group(3, 6), Definition("Violence", "Violence involving children"))
-        put(group(3, 7), Definition("Violence", "Violence involving animals"))
-        add(4, listOf("Alcohol use", "Intoxication", "Drug references", "Drug use", "Drug abuse / overdose"), "Drugs & Alcohol")
-        add(5, listOf("Religious profanity", "Blasphemous statements"), "Blasphemy")
-        add(6, listOf("Self-harm references", "Suicidal thoughts", "Suicide attempt", "Depiction of self-harm / suicide"), "Self-Harm & Suicide")
     }
 
     fun available(events: List<ScanEvent>): List<PlaybackFilterParent> {

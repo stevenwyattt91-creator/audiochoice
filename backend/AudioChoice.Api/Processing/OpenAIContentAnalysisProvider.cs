@@ -153,7 +153,19 @@ public sealed class OpenAIContentAnalysisProvider(
     // that says nothing more about her body or what anyone wants from her. A scan made under the
     // prior version held a woman to the same bar as everything else on this rung and would miss
     // milder instances of exactly what this change targets.
-    private const string BaseAnalysisPromptVersion = "6.5-women-lower-bar-extended";
+    //
+    // Bumped again together with ScannerVersion, at the owner's explicit, permanent request:
+    // this deployment now filters sexual content only. Removed the violence_graphic/torture/
+    // children/animals rubric and the self-harm rubric from the prompt entirely, removed the
+    // profanity-specific closing instructions, and fixed every place the prompt cross-referenced
+    // a now-out-of-scope category (sexual_violence no longer compares itself to violence_graphic;
+    // the anatomy carve-out no longer says "the same applies to violence"). sexual_violence
+    // (rape/sexual assault) itself is unaffected and keeps its full definition -- it is a sexual
+    // label, not a violence label, and stays enforced; see ContentTaxonomy.EnforcedLabels's own
+    // remarks for the explicit guard against ever confusing the two. A scan made under the prior
+    // version was produced by a model that could still read, and occasionally act on, instructions
+    // for categories this deployment no longer reports under any circumstance.
+    private const string BaseAnalysisPromptVersion = "6.6-sexual-content-only";
     // Bumped for the keyword safety net's lane isolation fix: a candidate whose window
     // happens to match a checkpoint cached under the prior version may have been built
     // before a safety-net seed's own lane existed, when it could still get coalesced into a
@@ -250,32 +262,17 @@ public sealed class OpenAIContentAnalysisProvider(
         CancellationToken cancellationToken)
     {
         var events = new List<ScanEvent>();
-        // Exact profane words always count: there is no judgement in matching a literal
-        // word, and the apps need the word itself to group its occurrences under one switch.
-        var deterministic = DeterministicContentDetector.DetectProfanity(segments).ToList();
-
-        // Keyword cues are only a source of events where nothing else reads the passage.
-        // With Luna reading the whole transcript, adding them produced events its own
-        // instructions rule out -- a single "bloody" reported as graphic violence, "high"
-        // as intoxication, "pot" as a drug reference -- at a confidence nothing checked.
-        if (options.LambdaFirstPassEnabled)
-        {
-            deterministic.AddRange(DeterministicContentDetector.DetectCategoryCues(segments));
-        }
-
-        for (var index = 0; index < deterministic.Count; index += 1)
-        {
-            var item = deterministic[index];
-            AddEvent(events, item.Label, item.StartTime, item.EndTime,
-                item.Confidence, item.SafeDescription, item.ProfanityWord,
-                item.StartTime, item.EndTime, $"deterministic-{index}");
-        }
+        // Profanity and the Lambda-first category cues are both out of scope for this
+        // deployment (see ContentTaxonomy.EnforcedLabels remarks): this filters sexual
+        // content only, permanently, so neither deterministic source runs at all. Both
+        // detectors still exist in DeterministicContentDetector purely so a scan made before
+        // this change still resolves (its events reference ContentTaxonomy.Mappings entries
+        // kept for exactly that), but nothing calls them to produce a new one.
+        var deterministic = new List<DeterministicDetection>();
         logger.LogInformation(
-            "Deterministic analysis found {EventCount} events in {SegmentCount} transcript segments " +
-            "(category cues {CueMode}).",
-            deterministic.Count,
-            segments.Count,
-            options.LambdaFirstPassEnabled ? "included" : "used for review selection only");
+            "Deterministic analysis skipped (profanity/category cues are out of scope for " +
+            "this deployment); {SegmentCount} transcript segments go straight to the model.",
+            segments.Count);
 
         if (options.LambdaFirstPassEnabled)
         {
@@ -368,11 +365,9 @@ public sealed class OpenAIContentAnalysisProvider(
             .Select(group => group.OrderByDescending(item => item.Confidence).First())
             .OrderBy(item => item.StartTime)
             .ToArray();
-        // Do not allow broad/ordinary violence categories into a new filter profile.
-        // The app's Violence switch is intentionally reserved for graphic material,
-        // torture, violence involving children or animals, and suicide/self-harm.
-        uniqueEvents = ApplyNarrowViolencePolicy(uniqueEvents);
-        uniqueEvents = await VerifyGraphicViolence(uniqueEvents, segments, cancellationToken);
+        // Violence is out of scope for this deployment entirely (see ContentTaxonomy's
+        // EnforcedLabels remarks), so Luna's response schema cannot propose a violence_* label
+        // in the first place -- there is nothing left here to narrow or verify.
         var (supplementedEvents, keywordSafetyNetSeedIDs) =
             AddUncoveredSexualCandidates(uniqueEvents, segments);
         uniqueEvents = supplementedEvents.ToArray();
@@ -567,15 +562,6 @@ public sealed class OpenAIContentAnalysisProvider(
             return new ContentBatchResult(index, batch, classified);
         }
         finally { gate.Release(); }
-    }
-
-    private static ScanEvent[] ApplyNarrowViolencePolicy(IReadOnlyList<ScanEvent> events)
-    {
-        var excludedLabels = new[] { "violence_mild", "violence_intense", "violence_death" };
-        var excludedEventIds = excludedLabels
-            .Select(label => ContentTaxonomy.Mappings[label].EventID)
-            .ToHashSet();
-        return events.Where(item => !excludedEventIds.Contains(item.EventID)).ToArray();
     }
 
     /// <summary>
@@ -1156,166 +1142,6 @@ public sealed class OpenAIContentAnalysisProvider(
         NumberHandling = JsonNumberHandling.AllowReadingFromString,
         PropertyNameCaseInsensitive = true
     };
-
-    private async Task<ScanEvent[]> VerifyGraphicViolence(
-        IReadOnlyList<ScanEvent> events,
-        IReadOnlyList<TranscriptSegment> segments,
-        CancellationToken cancellationToken)
-    {
-        var graphic = ContentTaxonomy.Mappings["violence_graphic"].EventID;
-        var torture = ContentTaxonomy.Mappings["violence_torture"].EventID;
-        var subject = events
-            .Where(item => item.EventID == graphic || item.EventID == torture)
-            .OrderBy(item => item.StartTime)
-            .ToArray();
-        if (subject.Length == 0) return events.ToArray();
-
-        var kept = events
-            .Where(item => item.EventID != graphic && item.EventID != torture)
-            .ToList();
-
-        // Several candidates per request. One each would multiply a busy book's request count by
-        // the very thing being measured, and Bedrock's rate limit is already the tightest
-        // constraint on a long book.
-        var batches = subject.Chunk(ViolenceVerificationBatchSize).ToArray();
-        if (batches.Length > options.MaximumSceneVerificationRequestsPerJob)
-        {
-            logger.LogWarning(
-                "Graphic-violence verification would need {BatchCount} requests, above the " +
-                "{Limit} limit. Proposed violence is kept unverified for this job.",
-                batches.Length, options.MaximumSceneVerificationRequestsPerJob);
-            return events.ToArray();
-        }
-
-        var confirmed = new HashSet<string>(StringComparer.Ordinal);
-        using var gate = new SemaphoreSlim(Math.Max(1, options.SceneVerificationConcurrency));
-        var decisions = await Task.WhenAll(batches.Select(async batch =>
-        {
-            await gate.WaitAsync(cancellationToken);
-            try
-            {
-                return await VerifyViolenceBatch(batch, segments, cancellationToken);
-            }
-            finally { gate.Release(); }
-        }));
-        foreach (var key in decisions.SelectMany(item => item)) confirmed.Add(key);
-
-        var survivors = subject.Where(item => confirmed.Contains(item.StableKey)).ToArray();
-        logger.LogInformation(
-            "Graphic-violence verification kept {Kept} of {Proposed} proposed events across " +
-            "{Requests} requests.",
-            survivors.Length, subject.Length, batches.Length);
-
-        kept.AddRange(survivors);
-        return kept.OrderBy(item => item.StartTime).ToArray();
-    }
-
-    /// <returns>The stable keys the verifier confirmed as describing injury.</returns>
-    private async Task<IReadOnlyList<string>> VerifyViolenceBatch(
-        IReadOnlyList<ScanEvent> batch,
-        IReadOnlyList<TranscriptSegment> segments,
-        CancellationToken cancellationToken)
-    {
-        var candidates = batch.Select(item => new
-        {
-            candidateKey = item.StableKey,
-            startTime = item.StartTime,
-            endTime = item.EndTime,
-            // A little either side, because a description of a wound often begins in the line
-            // before the one that named the act.
-            segments = segments
-                .Where(segment => segment.EndTime >= item.StartTime - 10 &&
-                    segment.StartTime <= item.EndTime + 10)
-                .ToArray()
-        }).ToArray();
-
-        var input = """
-Decide, for each candidate, whether the narration dwells on the physical detail of a body being
-damaged. That is the only question.
-
-Confirm it when the passage describes flesh being cut, torn or opened; blood flowing or pooling;
-bones breaking; organs, entrails or brain matter; a limb or head severed; or a wound described
-closely enough that a listener pictures the injury itself.
-
-Do not confirm an act of violence stated without that detail. A punch, a slap, a shove, a
-slammed door, a stabbing or shooting reported without describing the wound, a battle or duel, a
-threat, someone being hurt or killed, a body discovered, bruises, scars, blood mentioned in
-passing, medical treatment, pain, an injury's aftermath, grief, or fantasy peril are all not
-confirmed. Captivity and beating are not confirmed either, however unpleasant: a character tied
-to a chair and punched does not qualify.
-
-Most fight scenes are not confirmed. If you are weighing whether the description is detailed
-enough, it is not. Answer for every candidateKey.
-
-Candidates:
-""" + JsonSerializer.Serialize(candidates);
-
-        var schema = new JsonObject
-        {
-            ["type"] = "object",
-            ["required"] = new JsonArray("candidates"),
-            ["properties"] = new JsonObject
-            {
-                ["candidates"] = new JsonObject
-                {
-                    ["type"] = "array",
-                    ["items"] = new JsonObject
-                    {
-                        ["type"] = "object",
-                        ["required"] = new JsonArray(
-                            "candidateKey", "dwellsOnPhysicalDamage", "confidence"),
-                        ["properties"] = new JsonObject
-                        {
-                            ["candidateKey"] = new JsonObject { ["type"] = "string" },
-                            ["dwellsOnPhysicalDamage"] = new JsonObject { ["type"] = "boolean" },
-                            ["confidence"] = new JsonObject
-                            {
-                                ["type"] = "number", ["minimum"] = 0, ["maximum"] = 1
-                            }
-                        }
-                    }
-                }
-            }
-        };
-
-        try
-        {
-            var response = await modelClient.CompleteJson(
-                options.EffectiveViolenceVerificationModel, input,
-                "audiochoice_violence_verification", schema, cancellationToken);
-            RecordUsage(options.EffectiveViolenceVerificationModel, response);
-            var payload = ReadPayload<ViolenceVerificationPayload>(response.Json, "Violence verification");
-            return payload?.Candidates
-                .Where(item => item.DwellsOnPhysicalDamage &&
-                    item.Confidence >= options.MinimumEventConfidence)
-                .Select(item => item.CandidateKey)
-                .ToArray() ?? [];
-        }
-        catch (Exception error) when (error is not OperationCanceledException)
-        {
-            // A verifier that cannot answer must not silently delete a listener's protection.
-            // Keeping the batch means over-filtering for this book, which is recoverable by
-            // rescanning; dropping it means content plays that somebody asked to remove.
-            logger.LogError(
-                error,
-                "Graphic-violence verification failed for {Count} candidates; keeping them " +
-                "unverified rather than discarding protection.",
-                batch.Count);
-            return batch.Select(item => item.StableKey).ToArray();
-        }
-    }
-
-    /// <summary>Candidates per verification request, balancing cost against rate limits.</summary>
-    private const int ViolenceVerificationBatchSize = 8;
-
-    private sealed record ViolenceVerificationPayload(
-        [property: JsonPropertyName("candidates")]
-        IReadOnlyList<ViolenceVerificationDecision> Candidates);
-
-    private sealed record ViolenceVerificationDecision(
-        [property: JsonPropertyName("candidateKey")] string CandidateKey,
-        [property: JsonPropertyName("dwellsOnPhysicalDamage")] bool DwellsOnPhysicalDamage,
-        [property: JsonPropertyName("confidence")] double Confidence);
 
     /// <summary>
     /// A safety net for Luna's own recall on sexual content: runs the same high-recall
@@ -2506,33 +2332,9 @@ Candidates:
 
         return """
 Act as an audiobook content-preference classifier. Identify only events that are explicitly
-supported by the supplied transcript.
-
-violence_graphic has one test, and it is a high one: the narration must dwell on the physical
-detail of a body being damaged. Flesh being cut, torn or opened; blood flowing or pooling;
-bones breaking; organs, entrails or brain matter; a limb or head being severed; a wound
-described closely enough that a listener pictures the injury rather than the act. It is the
-lingering physical description that qualifies, not the violence itself.
-
-An act of violence stated without that physical detail is NOT violence_graphic. Do not flag: a
-punch, a slap, a shove, a slammed door, a stabbing or shooting reported without describing the
-wound, a battle or duel, a threat, a character being hurt or killed, a body being found,
-bruises, scars, a mention of blood in passing, medical treatment, pain, an injury's aftermath,
-grief, or fantasy peril. Most fight scenes are not graphic. If you are weighing whether the
-description is detailed enough, it is not: omit it.
-
-Return violence_graphic for perhaps a handful of moments in an entire book, and none at all in
-most books. A count in the dozens means the test above is being applied too loosely.
-
-violence_torture holds to the same physical-detail test as violence_graphic. Deliberate,
-sustained cruelty whose injuries the narration describes closely: wounds opened, flesh burned or
-cut, bones broken, blood. Captivity and beating on their own are not torture for this purpose --
-a character tied to a chair and punched is not filtered, however unpleasant the scene is. If the
-narration does not dwell on the physical damage, omit it.
-
-violence_children and violence_animals are judged on what happens rather than how it is
-described, because who it happens to is the point of those two. Self-harm and suicide are their
-own category and are unchanged.
+supported by the supplied transcript. This deployment filters sexual content only -- profanity,
+violence, substance use, blasphemy, and self-harm are not in scope and must never be reported,
+no matter how prominent they are in a passage.
 
 For isolated events, return the narrowest supported timestamps. A short reference is a short
 event: if three words carry it, the range should cover those three words and not the sentence
@@ -2663,17 +2465,17 @@ above: a passage is sexual_violence or it is a consensual sexual_suggestive_dial
 sexual_kissing / sexual_references / sexual_nudity / sexual_implied_activity /
 sexual_explicit_activity / sexual_complete_scene, never both. Do not emit sexual_complete_scene for a passage reported as
 sexual_violence, and do not emit sexual_violence for a passage that is ordinary threat, assault,
-or violence with no sexual element -- that remains a violence label if it qualifies for one.
-Treat this with at least the same care as violence_graphic: report it when the passage actually
-depicts or credibly implies it, and do not infer it from a menacing tone, a violent scene that
-happens to involve two characters, or a relationship's power imbalance on its own.
+or violence with no sexual element -- that is not reported at all, since violence is out of
+scope. Report it when the passage actually depicts or credibly implies a sexual act or its
+credible immediate threat imposed without consent, and do not infer it from a menacing tone, a
+violent scene that happens to involve two characters, or a relationship's power imbalance on
+its own.
 
 No word is sexual content by itself. A body part named in passing is anatomy, not a sexual
 reference: a hand on a chest during first aid, a breast wound in battle, a character washing, a
 mother nursing, a medical examination, a badge or pin fastened at her breast, armour such as a
-breastplate. Judge the passage by what is happening in it, never by the presence of a word. The
-same applies to violence and every other category -- a word is evidence only in the sense the
-passage actually uses it.
+breastplate. Judge the passage by what is happening in it, never by the presence of a word --
+a word is evidence only in the sense the passage actually uses it.
 
 Being named in passing and being described exposed are not the same thing, and this distinction
 decides the two cases most often got wrong in opposite directions. Intimate anatomy stated as
@@ -2689,22 +2491,6 @@ The reverse still holds and is not softened: clothed contact, a part named as a 
 injury, bathing, nursing, or medical description is not nudity however intimate the part named.
 "The badge pinned to her breast" is anatomy. "Her bare breast" is nudity. The difference is
 whether the passage describes the body uncovered, not which word it used.
-
-The self-harm labels are about a character, not about the subject. This is the one group with no
-second verification pass, so a first-pass mistake here is final.
-self_harm_depiction -- the act shown as it happens: cutting, burning, an overdose being taken.
-self_harm_suicide_attempt -- a character attempting or actively preparing their own suicide,
-including preparation that is interrupted.
-self_harm_suicidal_thoughts -- a character's own wish to die or to end their life.
-self_harm_reference -- a character's own past self-harm or suicide attempt recalled or discussed,
-including clinically.
-None of them apply to suicide or self-injury as a subject rather than something a character does.
-Deaths in war or history, a group or faction's casualties, soldiers or prisoners using suicide
-capsules, a cause someone died for, a method named in the abstract, a threat to kill someone else,
-or a figure of speech such as "I could have died" are not self-harm content. Neither is self-hatred,
-shame, worthlessness or despair with no self-injury and no wish to die, however bleak the passage.
-A listener filtering self-harm is asking not to hear it depicted or dwelt on, not asking the book
-to avoid the fact that people die.
 
 ALWAYS emit sexual_complete_scene alongside sexual_implied_activity or sexual_explicit_activity
 for a CONSENSUAL scene, every time, including a brief encounter and one whose description is
@@ -2743,17 +2529,15 @@ aftermath. Do not extend a scene across a clear topic, location, time, or chapte
 Allowed labels:
 """ + AllowedLabelList + """
 For safeDescription, write a neutral, discreet, non-graphic summary of at most 80 characters.
-It must still tell a parent why they might choose to skip: name the high-level situation, not
+It must still tell a listener why they might choose to skip: name the high-level situation, not
 the mechanics. For example: "A character removes clothing and is described without clothing",
 "Characters are in bed together during an intimate encounter", "Suggestive dialogue includes
-an invitation to bed", or "A serious violent encounter causes an injury". Never name intimate
+an invitation to bed", or "A non-consensual sexual encounter is described". Never name intimate
 anatomy or describe touching, squeezing, positions, or mechanics. Do not use vague filler such
 as "related sexual content", "continuous passage", "sexual activity described", or
 "intimate positioning is described".
-Never describe gore, wounds, removed body parts, or the method used for self-harm or suicide.
-Use clean wording such as "Graphic violence is described", "Torture is described",
-"Self-harm is depicted", or "Suicidal thoughts are described". The description itself must
-not expose a listener to the unwanted graphic or explicit material they are trying to avoid.
+The description itself must not expose a listener to the unwanted explicit material they are
+trying to avoid.
 For every event, also return quote: the exact consecutive words from the supplied transcript
 text that support this event, copied verbatim from a single segment's text field, not
 paraphrased, summarized, or combined across segments. This is not shown to any listener; it is
@@ -2763,11 +2547,7 @@ sentence around them. A longer scene's quote should be the clearest single suppo
 or clause inside it, near where you believe the scene most clearly qualifies; it does not need
 to span the whole scene, and the server uses startTime and endTime for the outer boundary. If
 you cannot point to specific words that justify an event, do not report the event.
-For profanity labels only, return the exact single profane word in profanityWord so the server
-can censor and count it; otherwise return null. The profane word should also be the quote.
-For profanity, emit one event for every occurrence so playback can skip each timestamp; the
-app will group all occurrences of the same word under one switch. For longer sexual, violent, substance,
-or self-harm scenes, emit one event spanning the complete supported scene rather than one
+For longer sexual scenes, emit one event spanning the complete supported scene rather than one
 event per sentence. Do not invent content or identifiers. Omit events below 0.45 confidence.
 A subtler or implied cue -- innuendo, euphemism, an unstated-but-clear undertone -- is not a
 reason to lower your confidence on its own: judge confidence by how clearly the passage supports

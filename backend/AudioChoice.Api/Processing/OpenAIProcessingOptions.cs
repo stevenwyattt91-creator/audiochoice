@@ -350,7 +350,19 @@ public sealed class OpenAIProcessingOptions
     // sexual_suggestive_dialogue or higher even when mild, while plain stated admiration with
     // nothing more said about her body stays unflagged. A scan made under the prior version
     // would miss milder instances of exactly this pattern.
-    public string ScannerVersion { get; init; } = "7.6-women-lower-bar-extended";
+    //
+    // Bumped again together with BaseAnalysisPromptVersion, at the owner's explicit, permanent
+    // request: this deployment now scans for sexual content only. ContentTaxonomy.EnforcedLabels
+    // narrowed to the eight sexual_* labels (profanity, violence, substance use, blasphemy, and
+    // self-harm moved to LegacyLabels so an old scan's events still resolve, but nothing new is
+    // ever produced under them), the prompt's non-sexual rubric sections were removed, the
+    // graphic-violence second-pass verifier was deleted outright, and the deterministic
+    // profanity/category-cue detectors were stopped from running. sexual_violence (rape/sexual
+    // assault) is unaffected -- it is one of the eight sexual_* labels, not a violence label, and
+    // stays fully enforced. A scan made under the prior version may carry events in categories
+    // this deployment no longer reports at all, and must not be presented as though a fresh scan
+    // under this version would report the same thing.
+    public string ScannerVersion { get; init; } = "7.7-sexual-content-only";
     /// <summary>Only jobs in this lane may be claimed by this worker instance.</summary>
     public string ProcessingLane { get; init; } = ScanProcessingLanes.AzureOpenAI;
     /// <summary>

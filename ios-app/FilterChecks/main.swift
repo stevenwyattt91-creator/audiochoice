@@ -50,61 +50,67 @@ func event(
     )
 }
 
-let strongProfanity = event(category: 2, group: 2, stableKey: "profanity-strong-1")
-let gore = event(category: 3, group: 3, start: 40, end: 44, stableKey: "gore-1")
+// Sexual content is the only enforced category any more (see the backend's
+// ContentTaxonomy.EnforcedLabels remarks), so the two "normal, filterable" fixtures below
+// use two of its groups (sexual_references, sexual_nudity) where this file used to use
+// profanity and graphic violence to exercise the same generic category/group/control
+// cascade logic. Mild violence stays as the "not filterable" example -- that category is
+// still unenforced, which is exactly the behavior this checks.
+let sexualReference = event(category: 1, group: 2, stableKey: "sexual-ref-1")
+let sexualNudity = event(category: 1, group: 3, start: 40, end: 44, stableKey: "nudity-1")
 let mildViolence = event(category: 3, group: 1, start: 60, end: 62, stableKey: "mild-1")
 
 print("Defaults")
 // Everything the scan found is removed until the listener says otherwise. The opposite
 // default would turn a book nobody has opened into unfiltered playback.
 check("empty settings filter a detected event",
-      BookFilterPredicate.shouldSkip(strongProfanity, settings: .everythingFiltered))
+      BookFilterPredicate.shouldSkip(sexualReference, settings: .everythingFiltered))
 check("empty settings report no exceptions", !BookFilterSettings.everythingFiltered.hasExceptions)
 
 print("Taxonomy coverage")
-check("graphic violence is filterable", PlaybackFilterTaxonomy.isFilterable(gore))
-check("torture is filterable", PlaybackFilterTaxonomy.isFilterable(event(category: 3, group: 4)))
-check("violence involving children is filterable",
-      PlaybackFilterTaxonomy.isFilterable(event(category: 3, group: 6)))
-check("violence involving animals is filterable",
-      PlaybackFilterTaxonomy.isFilterable(event(category: 3, group: 7)))
-// Lower-severity violence has no switch anywhere, so removing it would take content away
-// with nothing to turn it back on. This is the complaint about "the slightest things".
+check("sexual nudity is filterable", PlaybackFilterTaxonomy.isFilterable(sexualNudity))
+check("sexual violence is filterable", PlaybackFilterTaxonomy.isFilterable(event(category: 1, group: 7)))
+check("kissing is filterable",
+      PlaybackFilterTaxonomy.isFilterable(event(category: 1, group: 8)))
+check("complete sex scenes is filterable",
+      PlaybackFilterTaxonomy.isFilterable(event(category: 1, group: 6)))
+// Mild violence has no switch anywhere -- this deployment is permanently sexual content
+// only, so removing it would take content away with nothing to turn it back on.
 check("mild violence is not filterable", !PlaybackFilterTaxonomy.isFilterable(mildViolence))
 check("mild violence is never skipped",
       !BookFilterPredicate.shouldSkip(mildViolence, settings: .everythingFiltered))
 check("every filterable event has a control",
-      PlaybackFilterTaxonomy.available([gore]).first?.groups.first?.controls.count == 1)
+      PlaybackFilterTaxonomy.available([sexualNudity]).first?.groups.first?.controls.count == 1)
 
 print("Switching a category off")
-var hierarchy = PlaybackFilterTaxonomy.available([strongProfanity, gore])
+var hierarchy = PlaybackFilterTaxonomy.available([sexualReference, sexualNudity])
 var settings = BookFilterEditor.setCategory(
-    categoryID(2).uuidString.lowercased(), enabled: false,
+    categoryID(1).uuidString.lowercased(), enabled: false,
     in: .everythingFiltered, hierarchy: hierarchy
 )
 check("its events stop being filtered",
-      !BookFilterPredicate.shouldSkip(strongProfanity, settings: settings))
-check("another category keeps filtering", BookFilterPredicate.shouldSkip(gore, settings: settings))
+      !BookFilterPredicate.shouldSkip(sexualReference, settings: settings))
+check("another group keeps filtering", BookFilterPredicate.shouldSkip(sexualNudity, settings: settings))
 check("the cascade reaches the group",
-      settings.disabledGroupIDs.contains(groupID(2, 2).uuidString.lowercased()))
-check("the cascade reaches the control", settings.disabledEventKeys.contains("profanity-strong-1"))
+      settings.disabledGroupIDs.contains(groupID(1, 2).uuidString.lowercased()))
+check("the cascade reaches the control", settings.disabledEventKeys.contains("sexual-ref-1"))
 
 print("Switching a group back on inside a disabled category")
 // The category entry would otherwise keep overriding the group, so the switch would
 // appear to do nothing at all.
 settings = BookFilterEditor.setGroup(
-    groupID(2, 2).uuidString.lowercased(), enabled: true, in: settings, hierarchy: hierarchy
+    groupID(1, 2).uuidString.lowercased(), enabled: true, in: settings, hierarchy: hierarchy
 )
-check("the group filters again", BookFilterPredicate.shouldSkip(strongProfanity, settings: settings))
+check("the group filters again", BookFilterPredicate.shouldSkip(sexualReference, settings: settings))
 check("the enclosing category is lifted",
-      !settings.disabledCategoryIDs.contains(categoryID(2).uuidString.lowercased()))
+      !settings.disabledCategoryIDs.contains(categoryID(1).uuidString.lowercased()))
 
 print("Aggregate controls")
 let repeated: [ScanEvent] = (0..<5).map { index in
     let start = 100.0 + Double(index) * 10.0
     return event(
-        category: 2, group: 2, start: start, end: start + 1.0,
-        aggregateKey: "word-damn", aggregateDisplay: "d**n"
+        category: 1, group: 2, start: start, end: start + 1.0,
+        aggregateKey: "passage-1", aggregateDisplay: "Related sexual content in a continuous passage"
     )
 }
 hierarchy = PlaybackFilterTaxonomy.available(repeated)
@@ -124,8 +130,8 @@ print("An aggregate spanning several groups")
 // One word can be classified into more than one subgroup. It should appear once, while
 // playback still removes every range.
 let spanning = [
-    event(category: 2, group: 2, start: 10, end: 11, aggregateKey: "word-x", aggregateDisplay: "x**"),
-    event(category: 2, group: 3, start: 20, end: 21, aggregateKey: "word-x", aggregateDisplay: "x**")
+    event(category: 1, group: 2, start: 10, end: 11, aggregateKey: "passage-x", aggregateDisplay: "A charged passage"),
+    event(category: 1, group: 3, start: 20, end: 21, aggregateKey: "passage-x", aggregateDisplay: "A charged passage")
 ]
 check("it is listed once", PlaybackFilterTaxonomy.controlCount(spanning) == 1)
 let spanningHierarchy = PlaybackFilterTaxonomy.available(spanning)
@@ -140,31 +146,31 @@ print("Disabled controls stay visible")
 // If a switched-off control disappeared from the list there would be no way to switch it
 // back on, which would make the choice permanent by accident.
 let everythingOff = BookFilterEditor.setCategory(
-    categoryID(2).uuidString.lowercased(), enabled: false,
+    categoryID(1).uuidString.lowercased(), enabled: false,
     in: .everythingFiltered,
-    hierarchy: PlaybackFilterTaxonomy.available([strongProfanity, gore])
+    hierarchy: PlaybackFilterTaxonomy.available([sexualReference, sexualNudity])
 )
-let listed = PlaybackFilterTaxonomy.available([strongProfanity, gore])
+let listed = PlaybackFilterTaxonomy.available([sexualReference, sexualNudity])
 check("the switched-off category is still listed",
-      listed.contains { $0.id == categoryID(2).uuidString.lowercased() })
+      listed.contains { $0.id == categoryID(1).uuidString.lowercased() })
 check("its control is still listed and is the one that was switched off",
       listed
-        .first { $0.id == categoryID(2).uuidString.lowercased() }?
+        .first { $0.id == categoryID(1).uuidString.lowercased() }?
         .groups.first?.controls.contains { everythingOff.disabledEventKeys.contains($0.key) } == true)
 check("that control does report itself as off",
-      everythingOff.disabledEventKeys.contains("profanity-strong-1"))
+      everythingOff.disabledEventKeys.contains("sexual-ref-1"))
 
 print("Keys agree with the Android client")
 // A GUID reaches the server lowercased; Swift's uuidString is uppercase. Using it
 // unchanged would mean a control switched off on Android stayed on here.
-let noStableKey = event(category: 2, group: 2, stableKey: nil)
+let noStableKey = event(category: 1, group: 2, stableKey: nil)
 check("the fallback key is lowercased",
       BookFilterSettings.eventKey(for: noStableKey) == noStableKey.id.uuidString.lowercased())
 check("a stable key is used verbatim",
-      BookFilterSettings.eventKey(for: strongProfanity) == "profanity-strong-1")
+      BookFilterSettings.eventKey(for: sexualReference) == "sexual-ref-1")
 check("a blank aggregate key is not treated as an aggregate",
       BookFilterPredicate.shouldSkip(
-        event(category: 2, group: 2, aggregateKey: ""),
+        event(category: 1, group: 2, aggregateKey: ""),
         settings: BookFilterSettings(
             disabledCategoryIDs: [], disabledGroupIDs: [],
             disabledEventKeys: [], disabledAggregateKeys: [""]
@@ -174,15 +180,15 @@ check("a blank aggregate key is not treated as an aggregate",
 print("Individual controls")
 let individualOff = BookFilterEditor.setControl(
     PlaybackFilterControl(
-        key: "gore-1", label: "A described moment", occurrences: 1, startTime: 40, isAggregate: false
+        key: "nudity-1", label: "A described moment", occurrences: 1, startTime: 40, isAggregate: false
     ),
     enabled: false, in: .everythingFiltered,
-    hierarchy: PlaybackFilterTaxonomy.available([gore])
+    hierarchy: PlaybackFilterTaxonomy.available([sexualNudity])
 )
 check("one moment can be allowed through",
-      !BookFilterPredicate.shouldSkip(gore, settings: individualOff))
+      !BookFilterPredicate.shouldSkip(sexualNudity, settings: individualOff))
 check("its neighbours keep filtering",
-      BookFilterPredicate.shouldSkip(strongProfanity, settings: individualOff))
+      BookFilterPredicate.shouldSkip(sexualReference, settings: individualOff))
 
 print("Round trip through storage")
 let bookID = UUID()

@@ -17,9 +17,14 @@ func check(_ description: String, _ condition: @autoclosure () -> Bool) {
     }
 }
 
-let profanityCategory = "20000000-0000-0000-0000-000000000001"
-let strongProfanityGroup = "21000000-0000-0000-0000-000000000002"
-let violenceCategory = "30000000-0000-0000-0000-000000000001"
+// Sexual content is the only category this app knows about any more (see the backend's
+// ContentTaxonomy.EnforcedLabels remarks), so the category-level checks below exercise the
+// one real category this app has, and the group-level checks use two of its groups
+// (sexual_references, sexual_nudity) where the old test used a second, now-unknown category
+// to stand in for "something else."
+let sexualContentCategory = "10000000-0000-0000-0000-000000000001"
+let sexualReferencesGroup = "11000000-0000-0000-0000-000000000002"
+let sexualNudityGroup = "11000000-0000-0000-0000-000000000003"
 let taxonomy = FilterProfileMapping.knownTaxonomy()
 
 func profile(_ rules: [FilterRule], name: String = "Mine", active: Bool = true) -> FilterProfile {
@@ -30,21 +35,22 @@ func profile(_ rules: [FilterRule], name: String = "Mine", active: Bool = true) 
 }
 
 print("The taxonomy a profile is checked against")
-check("categories are known", taxonomy.category.contains(profanityCategory))
-check("groups are known", taxonomy.group.contains(strongProfanityGroup))
-check("violence is a known category", taxonomy.category.contains(violenceCategory))
-// Derived from the group identifiers, so the two lists cannot drift apart.
-check("there is a category for every category with groups", taxonomy.category.count == 6)
+check("categories are known", taxonomy.category.contains(sexualContentCategory))
+check("groups are known", taxonomy.group.contains(sexualReferencesGroup))
+check("there is a second known group", taxonomy.group.contains(sexualNudityGroup))
+// Derived from the group identifiers, so the two lists cannot drift apart. This deployment
+// has exactly one enforced category (sexual content only).
+check("there is a category for every category with groups", taxonomy.category.count == 1)
 
 print("Turning a profile into a book's starting choices")
 var settings = FilterProfileMapping.settings(
-    from: profile([.disabled(profanityCategory), .disabled(strongProfanityGroup)]),
+    from: profile([.disabled(sexualContentCategory), .disabled(sexualReferencesGroup)]),
     taxonomy: taxonomy
 )
 check("a category key lands in the categories",
-      settings.disabledCategoryIDs.contains(profanityCategory))
+      settings.disabledCategoryIDs.contains(sexualContentCategory))
 check("a group key lands in the groups",
-      settings.disabledGroupIDs.contains(strongProfanityGroup))
+      settings.disabledGroupIDs.contains(sexualReferencesGroup))
 // Nothing else may be switched off by implication.
 check("nothing else is switched off",
       settings.disabledCategoryIDs.count == 1 && settings.disabledGroupIDs.count == 1)
@@ -54,15 +60,15 @@ check("no aggregate keys are invented", settings.disabledAggregateKeys.isEmpty)
 print("Rules that are still on")
 settings = FilterProfileMapping.settings(
     from: profile([
-        FilterRule(key: profanityCategory, enabled: true, action: "skip", severity: "all"),
-        .disabled(violenceCategory)
+        FilterRule(key: sexualReferencesGroup, enabled: true, action: "skip", severity: "all"),
+        .disabled(sexualNudityGroup)
     ]),
     taxonomy: taxonomy
 )
 check("an enabled rule does not switch anything off",
-      !settings.disabledCategoryIDs.contains(profanityCategory))
+      !settings.disabledGroupIDs.contains(sexualReferencesGroup))
 check("a disabled rule alongside it still applies",
-      settings.disabledCategoryIDs.contains(violenceCategory))
+      settings.disabledGroupIDs.contains(sexualNudityGroup))
 
 print("Keys the app does not recognise")
 // A profile from a newer build, or a taxonomy that has moved on. Ignoring the key is the only
@@ -82,16 +88,16 @@ check("a book-specific key is ignored", !settings.hasExceptions)
 
 print("Casing")
 settings = FilterProfileMapping.settings(
-    from: profile([.disabled(profanityCategory.uppercased())]),
+    from: profile([.disabled(sexualContentCategory.uppercased())]),
     taxonomy: taxonomy
 )
 check("an uppercased key still matches",
-      settings.disabledCategoryIDs.contains(profanityCategory))
+      settings.disabledCategoryIDs.contains(sexualContentCategory))
 
 print("Saving a book's choices as a profile")
 var book = BookFilterSettings.everythingFiltered
-book.disabledCategoryIDs = [profanityCategory]
-book.disabledGroupIDs = [strongProfanityGroup]
+book.disabledCategoryIDs = [sexualContentCategory]
+book.disabledGroupIDs = [sexualReferencesGroup]
 book.disabledEventKeys = ["one-line-in-this-book"]
 book.disabledAggregateKeys = ["one-word-in-this-book"]
 let rules = FilterProfileMapping.rules(from: book)

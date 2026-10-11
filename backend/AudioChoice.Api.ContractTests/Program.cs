@@ -58,9 +58,17 @@ var condensedControls = UserFacingEventPostProcessor.Process([
         sexualNudityMapping.GroupID, sexualNudityMapping.EventID, 1)
 ]);
 Assert(condensedControls.Count == 7, "User-facing aggregation discarded raw event ranges.");
+// Substance-specific aggregation (merging alcohol and drug sub-events into two separate
+// controls) was removed when this deployment was permanently narrowed to sexual content only
+// (see ContentTaxonomy.EnforcedLabels and UserFacingEventPostProcessor's own remarks).
+// Legacy substance_* events from a scan made before that change still exist and still share
+// one category, so the generic nearby-event clustering below now groups all three into a
+// single control instead of two type-specific ones -- that is current, intended behavior,
+// not a regression, and this still exercises that an old scan's legacy events cluster
+// sensibly rather than crashing or being dropped.
 Assert(condensedControls.Where(item => item.CategoryID == alcoholMapping.CategoryID)
-    .Select(item => item.AggregateKey).Distinct().Count() == 2,
-    "Alcohol and drug events were not reduced to two aggregate controls.");
+    .Select(item => item.AggregateKey).Distinct().Count() == 1,
+    "Nearby legacy substance events were not grouped into one control.");
 Assert(condensedControls.Where(item => item.CategoryID == graphicViolenceMapping.CategoryID)
     .Select(item => item.AggregateKey).Distinct().Count() == 1,
     "Nearby violence events were not grouped into one control.");
@@ -1558,17 +1566,20 @@ Assert(retainedSceneEvents.Count == 1,
 
         var e2eResult = await e2eProvider.Analyze(e2eSegments, null, CancellationToken.None);
 
-        var profanityEvent = e2eResult.SingleOrDefault(
-            item => item.EventID == ContentTaxonomy.Mappings["profanity_mild"].EventID);
+        // Profanity detection and the graphic-violence verifier were both removed when this
+        // deployment was permanently narrowed to sexual content only (see
+        // ContentTaxonomy.EnforcedLabels remarks) -- the transcript still contains the same
+        // profane word and ordinary-conflict sentence it always has, specifically so this
+        // asserts neither one is ever reported now, not just that violence stays unverified.
         Assert(
-            profanityEvent is not null && Math.Abs(profanityEvent.StartTime - 0.2) < 0.001 &&
-                Math.Abs(profanityEvent.EndTime - 0.6) < 0.001,
-            "The end-to-end pipeline did not detect the deterministic profanity word at its " +
-            "own word-level timing.");
+            !e2eResult.Any(item => item.EventID == ContentTaxonomy.Mappings["profanity_mild"].EventID),
+            "The end-to-end pipeline reported profanity, which is out of scope for this " +
+            "deployment.");
 
         Assert(
             !e2eResult.Any(item => item.EventID == ContentTaxonomy.Mappings["violence_graphic"].EventID),
-            "The end-to-end pipeline reported graphic violence for an ordinary argument.");
+            "The end-to-end pipeline reported graphic violence, which is out of scope for " +
+            "this deployment.");
 
         var sceneEvent = e2eResult.SingleOrDefault(
             item => item.EventID == ContentTaxonomy.Mappings["sexual_complete_scene"].EventID);
@@ -2802,14 +2813,16 @@ foreach (var excluded in new[] { "violence_mild", "violence_intense", "violence_
 }
 
 // The prompt lists the labels Luna itself may emit. It is generated from the same source as
-// the response schema, and this is what proves the generation still covers everything --
-// narrower than the full enforced set, since profanity is excluded from what Luna may
-// propose even though the app still offers its switches.
+// the response schema, and this is what proves the generation still covers everything.
+// ModelEmittableLabels used to be narrower than EnforcedLabels (profanity was enforced for
+// the app's switches but excluded from what Luna could propose, since it was matched
+// deterministically instead) -- now that profanity itself is out of scope entirely (see
+// ContentTaxonomy.EnforcedLabels remarks), the two lists are identical.
 Assert(
-    ContentTaxonomy.ModelEmittableLabels.Count == ContentTaxonomy.EnforcedLabels.Count - 4 &&
+    ContentTaxonomy.ModelEmittableLabels.SequenceEqual(ContentTaxonomy.EnforcedLabels) &&
         !ContentTaxonomy.ModelEmittableLabels.Any(label => label.StartsWith("profanity_")),
-    "ModelEmittableLabels no longer excludes exactly the four profanity labels from the " +
-    "enforced set.");
+    "ModelEmittableLabels no longer matches EnforcedLabels exactly, or contains a profanity " +
+    "label, which must never be model-emittable.");
 foreach (var label in ContentTaxonomy.ModelEmittableLabels)
 {
     Assert(OpenAIContentAnalysisProvider.AllowedLabelList.Contains(label, StringComparison.Ordinal),
@@ -2817,18 +2830,46 @@ foreach (var label in ContentTaxonomy.ModelEmittableLabels)
 }
 Assert(!OpenAIContentAnalysisProvider.AllowedLabelList.Contains("violence_mild", StringComparison.Ordinal),
     "The analysis prompt offers the model a label the policy excludes.");
-foreach (var profanityLabel in new[]
-    { "profanity_mild", "profanity_strong", "profanity_sexual", "profanity_slur" })
+
+// This deployment is permanently narrowed to sexual content only (see
+// ContentTaxonomy.EnforcedLabels remarks): every non-sexual label -- not just the three
+// broad violence ones above -- must be absent from both the prompt and EnforcedLabels, and
+// still present in Mappings so an old scan's events keep resolving.
+foreach (var outOfScope in new[]
+{
+    "profanity_mild", "profanity_strong", "profanity_sexual", "profanity_slur",
+    "violence_graphic", "violence_torture", "violence_children", "violence_animals",
+    "substance_alcohol_use", "substance_intoxication", "substance_drug_reference",
+    "substance_drug_use", "substance_abuse_overdose",
+    "blasphemy_religious_profanity", "blasphemy_statement",
+    "self_harm_reference", "self_harm_suicidal_thoughts",
+    "self_harm_suicide_attempt", "self_harm_depiction"
+})
 {
     Assert(
-        !OpenAIContentAnalysisProvider.AllowedLabelList.Contains(profanityLabel, StringComparison.Ordinal),
-        $"The analysis prompt still offers Luna the profanity label {profanityLabel}, which " +
-        "should be deterministic-only.");
+        !OpenAIContentAnalysisProvider.AllowedLabelList.Contains(outOfScope, StringComparison.Ordinal),
+        $"The analysis prompt still offers Luna the out-of-scope label {outOfScope}.");
     Assert(
-        ContentTaxonomy.EnforcedLabels.Contains(profanityLabel, StringComparer.Ordinal),
-        $"{profanityLabel} was removed from EnforcedLabels, which would remove its switch " +
-        "from the app even though profanity detection itself is unaffected.");
+        !ContentTaxonomy.EnforcedLabels.Contains(outOfScope, StringComparer.Ordinal),
+        $"{outOfScope} is still in EnforcedLabels, which keeps its switch in the app even " +
+        "though this deployment never scans for it.");
+    Assert(
+        ContentTaxonomy.LegacyLabels.Contains(outOfScope, StringComparer.Ordinal),
+        $"{outOfScope} is not in LegacyLabels, so a scan made before this change may fail " +
+        "to resolve it.");
+    Assert(
+        ContentTaxonomy.Mappings.ContainsKey(outOfScope),
+        $"{outOfScope} lost its taxonomy mapping entirely, so an old scan's events under " +
+        "it would be discarded rather than resolved.");
 }
+
+// sexual_violence (rape / sexual assault) must never be swept up by the above: it is a
+// sexual-content label, not a violence label, and the owner was explicit that it stays.
+Assert(
+    ContentTaxonomy.EnforcedLabels.Contains("sexual_violence", StringComparer.Ordinal) &&
+        OpenAIContentAnalysisProvider.AllowedLabelList.Contains("sexual_violence", StringComparison.Ordinal),
+    "sexual_violence was removed from the enforced/emittable set -- it must stay, since it " +
+    "is sexual content (rape / sexual assault), not the separate violence category.");
 
 // Listener reports that filtering was wrong. The only route by which a missed passage
 // becomes something anyone can act on, so what it accepts and refuses matters.
@@ -3458,42 +3499,11 @@ Assert(
         inner.Count == 1 && inner[0]!["candidateKey"]!.GetValue<string>() == "abc",
     "The double-encoded reply shape this repair exists for is no longer what it was.");
 
-// A single word must cost a single word. A segment runs five to ten seconds and one profanity was
-// taking all of it, thousands of times across a library, which is the largest avoidable source of
-// removed narration in the app.
-var spokenSegment = new TranscriptSegment(100, 108, "Damn it, he said, slamming the door.", new[]
-{
-    new TranscriptWord("Damn", 100.2, 100.6),
-    new TranscriptWord("it,", 100.6, 100.8),
-    new TranscriptWord("he", 101.0, 101.2),
-    new TranscriptWord("said,", 101.2, 101.6)
-});
-var wordScoped = DeterministicContentDetector.DetectProfanity([spokenSegment]);
-Assert(wordScoped.Count == 1, "The profanity in a segment with word timings was not detected.");
-Assert(
-    Math.Abs(wordScoped[0].StartTime - 100.2) < 0.001 &&
-        Math.Abs(wordScoped[0].EndTime - 100.6) < 0.001,
-    "Profanity with word timings available still removed the whole segment rather than the word.");
-
-// Every transcript saved before word timings existed has none, and those books must keep working.
-var withoutWords = new TranscriptSegment(100, 108, "Damn it, he said.");
-var segmentScoped = DeterministicContentDetector.DetectProfanity([withoutWords]);
-Assert(
-    segmentScoped.Count == 1 && segmentScoped[0].StartTime == 100 && segmentScoped[0].EndTime == 108,
-    "A transcript without word timings did not fall back to the segment's own range.");
-
-// Two of the same word must get two timings, not both the first one.
-var twice = new TranscriptSegment(200, 210, "Damn, damn.", new[]
-{
-    new TranscriptWord("Damn,", 200.5, 200.9),
-    new TranscriptWord("damn.", 201.5, 201.9)
-});
-var repeated = DeterministicContentDetector.DetectProfanity([twice]);
-Assert(repeated.Count == 2, "Two occurrences of one word were not both detected.");
-Assert(
-    Math.Abs(repeated[0].StartTime - 200.5) < 0.001 &&
-        Math.Abs(repeated[1].StartTime - 201.5) < 0.001,
-    "A repeated word reused the first occurrence's timing for both.");
+// Profanity detection and its word-level timing tests were removed along with
+// DeterministicContentDetector.DetectProfanity when this deployment was permanently narrowed
+// to sexual content only (see ContentTaxonomy.EnforcedLabels remarks). Word-level re-anchoring
+// itself is still exercised below, since that machinery is shared with every model-driven
+// category and remains very much in use.
 
 // Word-level re-anchoring for every model-driven category, not only profanity. This is what
 // stops a real event's timing from landing on an unrelated nearby sentence: a model proposes
