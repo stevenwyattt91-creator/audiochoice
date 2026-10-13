@@ -1,0 +1,28 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RootNamespace>AudioChoice.LocalScanner</RootNamespace>
+    <AssemblyName>AudioChoiceLocalScanner</AssemblyName>
+    <!-- Not self-contained: AudioChoice.Api is itself an executable (ASP.NET's Web SDK always
+         produces one), and .NET's build tooling refuses to let a self-contained exe reference
+         another exe project directly (NETSDK1150). Framework-dependent instead, which needs
+         the .NET 8 runtime installed on the OptiPlex. setup.ps1 installs that the same way it
+         installs Python and faster-whisper, so no dependency has to be bundled into one file. -->
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <SelfContained>false</SelfContained>
+    <InvariantGlobalization>true</InvariantGlobalization>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Reuses the backend's own scan pipeline, taxonomy, prompt, and model routing code
+         directly rather than reimplementing any of it a second time. This is what keeps a
+         fix made to OpenAIContentAnalysisProvider's classification policy, or to the
+         taxonomy, automatically correct here too, with nothing to keep in sync by hand. -->
+    <ProjectReference Include="../../backend/AudioChoice.Api/AudioChoice.Api.csproj" />
+  </ItemGroup>
+
+</Project>

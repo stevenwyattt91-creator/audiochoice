@@ -1,0 +1,28 @@
+{
+  "AudioChoice": {
+    "OpenAI": {
+      "_comment_tiers": "Luna (broad first pass, runs on the whole book) should be the cheapest model you trust; Terra (verifies Luna's candidates) and Sol (resolves the ambiguous/borderline ones) should be stronger, since those decide what actually gets reported. See the project's own planning notes for the full reasoning behind this split.",
+      "AnalysisModel": "gemini-2.5-flash-lite",
+      "SceneVerificationModel": "gemini-2.5-flash",
+      "SceneEscalationModel": "deepinfra/Qwen/Qwen3.8-27B-Instruct",
+
+      "_comment_keys": "Fill in whichever of these you actually use above. A key is only required for a provider a tier actually names -- you do not need both.",
+      "GeminiApiKey": "",
+      "DeepInfraApiKey": "",
+
+      "_comment_cost_control": "Same safety ceilings the cloud backend uses, kept here so a single run cannot runaway-spend against your own API keys.",
+      "MaximumSceneVerificationRequestsPerJob": 300,
+      "MaximumSceneEscalationRequestsPerJob": 300,
+      "MaximumAudioDurationSeconds": 180000
+    },
+    "Ffmpeg": {
+      "_comment": "Leave these as plain 'ffmpeg'/'ffprobe' if setup.ps1 installed them to PATH. Only set a full path here if you installed ffmpeg somewhere setup.ps1 did not add to PATH.",
+      "FfmpegPath": "ffmpeg",
+      "FfprobePath": "ffprobe"
+    },
+    "Whisper": {
+      "_comment": "Leave PythonExecutable unset to use the virtual environment setup.ps1 created automatically. Model is whichever faster-whisper model name you warmed up with setup.ps1 -- large-v3-turbo by default.",
+      "Model": "large-v3-turbo"
+    }
+  }
+}

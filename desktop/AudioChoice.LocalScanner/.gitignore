@@ -1,0 +1,9 @@
+bin/
+obj/
+publish/
+whisper-venv/
+scans/
+
+# Contains real API keys once filled in -- never committed. appsettings.local.json.example
+# is the tracked template.
+appsettings.local.json
