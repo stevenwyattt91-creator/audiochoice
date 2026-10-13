@@ -47,6 +47,17 @@ public sealed class OpenAIProcessingOptions
     public string FasterWhisperModel { get; init; } = "large-v3-turbo";
     public string FasterWhisperFallbackModel { get; init; } = "large-v3";
     /// <summary>
+    /// API key for Google's OpenAI-compatible Gemini endpoint. See
+    /// <see cref="GeminiModelClient"/> for why that endpoint is used instead of Gemini's
+    /// native API.
+    /// </summary>
+    public string GeminiApiKey { get; init; } = string.Empty;
+    public string GeminiBaseURL { get; init; } =
+        "https://generativelanguage.googleapis.com/v1beta/openai/";
+    /// <summary>API key for DeepInfra's OpenAI-compatible chat completions API.</summary>
+    public string DeepInfraApiKey { get; init; } = string.Empty;
+    public string DeepInfraBaseURL { get; init; } = "https://api.deepinfra.com/v1/";
+    /// <summary>
     /// Uses cheap local transcript cues to select the narrative windows sent to Luna.
     /// Keep disabled for established production workers until the isolated lane has
     /// completed its comparison run.

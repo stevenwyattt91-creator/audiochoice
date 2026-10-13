@@ -32,6 +32,8 @@ public sealed class RoutingAnalysisModelClient(
     IAnalysisModelClient? bedrock,
     IAnalysisModelClient? openAI,
     IAnalysisModelClient? vllm,
+    IAnalysisModelClient? gemini,
+    IAnalysisModelClient? deepInfra,
     ILogger<RoutingAnalysisModelClient> logger) : IAnalysisModelClient
 {
     public string ProviderName => "routed";
@@ -74,6 +76,30 @@ public sealed class RoutingAnalysisModelClient(
         model.Contains("qwen", StringComparison.OrdinalIgnoreCase) ||
         model.Contains("vllm", StringComparison.OrdinalIgnoreCase);
 
+    /// <summary>Whether a model name belongs to Google's Gemini family.</summary>
+    /// <remarks>
+    /// Checked before <see cref="IsDeepInfraModel"/>: DeepInfra also hosts some of these
+    /// model families under its own naming, so Gemini's own unambiguous "gemini-" prefix is
+    /// matched first rather than relying on DeepInfra's check to exclude it correctly.
+    /// </remarks>
+    internal static bool IsGeminiModel(string model) =>
+        model.StartsWith("gemini-", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Whether a model name belongs to a model hosted on DeepInfra.
+    /// </summary>
+    /// <remarks>
+    /// DeepInfra has no single vendor-assigned prefix the way Bedrock's "amazon." or Gemini's
+    /// "gemini-" do, since it hosts many open-weight model families under their own upstream
+    /// names. Matched on the "deepinfra/" prefix this pipeline's own configuration is expected
+    /// to use for every DeepInfra-routed tier (e.g. "deepinfra/Qwen/Qwen3.8-27B-Instruct"),
+    /// rather than trying to recognize every family DeepInfra might ever host -- an unprefixed
+    /// name that happens to also be a real DeepInfra model id would otherwise be
+    /// indistinguishable from one meant for the self-hosted vLLM server.
+    /// </remarks>
+    internal static bool IsDeepInfraModel(string model) =>
+        model.StartsWith("deepinfra/", StringComparison.OrdinalIgnoreCase);
+
     public Task<AnalysisModelResponse> CompleteJson(
         string model,
         string input,
@@ -98,6 +124,25 @@ public sealed class RoutingAnalysisModelClient(
                 $"Model '{model}' names a local vLLM model, but no vLLM client was configured. " +
                 "Set AudioChoice:OpenAI:VllmEndpoint or check AnalysisProvider.");
         }
+        else if (IsGeminiModel(model))
+        {
+            chosen = gemini ?? throw new InvalidOperationException(
+                $"Model '{model}' names a Gemini model, but no Gemini client was configured. " +
+                "Set AudioChoice:OpenAI:GeminiApiKey.");
+        }
+        else if (IsDeepInfraModel(model))
+        {
+            chosen = deepInfra ?? throw new InvalidOperationException(
+                $"Model '{model}' names a DeepInfra-hosted model, but no DeepInfra client was " +
+                "configured. Set AudioChoice:OpenAI:DeepInfraApiKey.");
+            // The "deepinfra/" prefix is this pipeline's own routing convention (see
+            // IsDeepInfraModel's remarks), not part of DeepInfra's real model id -- it must be
+            // stripped before the name reaches the actual API call.
+            logger.LogDebug("{SchemaName} routed to {Provider} for {Model}.",
+                schemaName, chosen.ProviderName, model);
+            return chosen.CompleteJson(
+                model["deepinfra/".Length..], input, schemaName, schema, cancellationToken);
+        }
         else
         {
             // Deliberately fatal. A misspelled model name that quietly fell through to one
@@ -105,8 +150,9 @@ public sealed class RoutingAnalysisModelClient(
             // would look ordinary.
             throw new InvalidOperationException(
                 $"Cannot tell which service hosts the model '{model}'. Bedrock names contain a " +
-                "provider prefix such as 'amazon.'; OpenAI names begin with 'gpt'; a local " +
-                "vLLM model name contains 'qwen' or 'vllm'.");
+                "provider prefix such as 'amazon.'; OpenAI names begin with 'gpt'; Gemini names " +
+                "begin with 'gemini-'; a DeepInfra-hosted model name begins with 'deepinfra/'; " +
+                "a local vLLM model name contains 'qwen' or 'vllm'.");
         }
 
         logger.LogDebug("{SchemaName} routed to {Provider} for {Model}.",

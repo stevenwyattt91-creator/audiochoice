@@ -436,6 +436,28 @@ if (openAIOptions.WorkerEnabled)
         openAIOptions.AnalysisProvider, "bedrock", StringComparison.OrdinalIgnoreCase);
     var usesVllmAnalysis = string.Equals(
         openAIOptions.AnalysisProvider, "vllm", StringComparison.OrdinalIgnoreCase);
+    // Not provider-selected the way Bedrock/vLLM are: a Gemini or DeepInfra tier is named
+    // directly in AnalysisModel/SceneVerificationModel/SceneEscalationModel (see
+    // RoutingAnalysisModelClient.IsGeminiModel/IsDeepInfraModel), the same way an OpenAI tier
+    // can be named even while AnalysisProvider is "bedrock" or "vllm". Checked here, rather
+    // than only inside RoutingAnalysisModelClient, so the clients below are only constructed
+    // -- and only demand their own API key -- when a tier actually names that provider.
+    var anyTierUsesGemini = new[]
+        {
+            openAIOptions.AnalysisModel,
+            openAIOptions.SceneVerificationModel,
+            openAIOptions.SceneEscalationModel
+        }
+            .Append(openAIOptions.EffectiveViolenceVerificationModel)
+        .Any(RoutingAnalysisModelClient.IsGeminiModel);
+    var anyTierUsesDeepInfra = new[]
+        {
+            openAIOptions.AnalysisModel,
+            openAIOptions.SceneVerificationModel,
+            openAIOptions.SceneEscalationModel
+        }
+            .Append(openAIOptions.EffectiveViolenceVerificationModel)
+        .Any(RoutingAnalysisModelClient.IsDeepInfraModel);
     var usesOpenAITranscription = !string.Equals(
         openAIOptions.TranscriptionProvider, "faster-whisper", StringComparison.OrdinalIgnoreCase);
     // Required only by whatever actually calls OpenAI. A worker transcribing on the local GPU
@@ -460,6 +482,18 @@ if (openAIOptions.WorkerEnabled)
         throw new InvalidOperationException(
             "AudioChoice:OpenAI:ApiKey is required when the scan worker uses OpenAI for " +
             "transcription or content analysis.");
+    }
+
+    if (anyTierUsesGemini && string.IsNullOrWhiteSpace(openAIOptions.GeminiApiKey))
+    {
+        throw new InvalidOperationException(
+            "AudioChoice:OpenAI:GeminiApiKey is required when a tier names a Gemini model.");
+    }
+
+    if (anyTierUsesDeepInfra && string.IsNullOrWhiteSpace(openAIOptions.DeepInfraApiKey))
+    {
+        throw new InvalidOperationException(
+            "AudioChoice:OpenAI:DeepInfraApiKey is required when a tier names a DeepInfra-hosted model.");
     }
 
     if (openAIOptions.MaximumRetries < 0 ||
@@ -500,6 +534,25 @@ if (openAIOptions.WorkerEnabled)
                 Math.Max(30, openAIOptions.AnalysisRequestTimeoutSeconds));
         });
 
+    // Same timeout reasoning as OpenAIProcessing above, applied to the two hosted providers a
+    // tier can now also name directly (see GeminiModelClient/DeepInfraModelClient remarks).
+    builder.Services.AddHttpClient(
+        "GeminiProcessing",
+        client =>
+        {
+            client.BaseAddress = new Uri(openAIOptions.GeminiBaseURL);
+            client.Timeout = TimeSpan.FromSeconds(
+                Math.Max(30, openAIOptions.AnalysisRequestTimeoutSeconds));
+        });
+    builder.Services.AddHttpClient(
+        "DeepInfraProcessing",
+        client =>
+        {
+            client.BaseAddress = new Uri(openAIOptions.DeepInfraBaseURL);
+            client.Timeout = TimeSpan.FromSeconds(
+                Math.Max(30, openAIOptions.AnalysisRequestTimeoutSeconds));
+        });
+
     builder.Services.AddSingleton<ITranscriptionProvider>(services =>
         string.Equals(openAIOptions.TranscriptionProvider, "faster-whisper", StringComparison.OrdinalIgnoreCase)
             ? new FasterWhisperTranscriptionProvider(
@@ -529,7 +582,7 @@ if (openAIOptions.WorkerEnabled)
     // original OpenAI-only path in the same codebase, so reverting to OpenAI if the local
     // model does not hold up in production is a configuration change -- the three model
     // names plus AnalysisProvider -- not a code change or a redeploy of anything else.
-    if (usesBedrockAnalysis || usesVllmAnalysis)
+    if (usesBedrockAnalysis || usesVllmAnalysis || anyTierUsesGemini || anyTierUsesDeepInfra)
     {
         if (usesBedrockAnalysis)
         {
@@ -542,7 +595,8 @@ if (openAIOptions.WorkerEnabled)
 
         // Routed rather than chosen once. Which service a tier uses is decided by the model
         // it names, so moving one later -- OpenAI to Bedrock, OpenAI to a local vLLM model,
-        // or back -- is a configuration change, never a code change.
+        // OpenAI to a hosted Gemini or DeepInfra model, or back -- is a configuration change,
+        // never a code change.
         builder.Services.AddSingleton<IAnalysisModelClient>(services =>
             new RoutingAnalysisModelClient(
                 bedrock: usesBedrockAnalysis
@@ -561,6 +615,20 @@ if (openAIOptions.WorkerEnabled)
                         .CreateClient("VllmProcessing"),
                     openAIOptions,
                     services.GetRequiredService<ILogger<VllmModelClient>>()),
+                gemini: anyTierUsesGemini
+                    ? new GeminiModelClient(
+                        services.GetRequiredService<IHttpClientFactory>()
+                            .CreateClient("GeminiProcessing"),
+                        openAIOptions,
+                        services.GetRequiredService<ILogger<GeminiModelClient>>())
+                    : null,
+                deepInfra: anyTierUsesDeepInfra
+                    ? new DeepInfraModelClient(
+                        services.GetRequiredService<IHttpClientFactory>()
+                            .CreateClient("DeepInfraProcessing"),
+                        openAIOptions,
+                        services.GetRequiredService<ILogger<DeepInfraModelClient>>())
+                    : null,
                 services.GetRequiredService<ILogger<RoutingAnalysisModelClient>>()));
     }
     else
