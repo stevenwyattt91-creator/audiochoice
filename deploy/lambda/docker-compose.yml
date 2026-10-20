@@ -260,8 +260,16 @@ services:
       # candidates still pass through Terra and then Sol; mild/intense/death
       # violence remains excluded by the scanner policy.
       AudioChoice__OpenAI__LambdaFirstPassEnabled: "false"
-      AudioChoice__OpenAI__MaximumSceneVerificationRequestsPerJob: "300"
-      AudioChoice__OpenAI__MaximumSceneEscalationRequestsPerJob: "300"
+      # Raised from 300 after the keyword safety net's deliberate widening (see
+      # DeterministicContentDetector.SceneCueRegex's own remarks -- erring heavily toward
+      # recall at the owner's explicit request) pushed a real book (Stephen King's IT) to
+      # 348 Terra review windows, above the prior 300 cap, which stopped the job outright
+      # rather than silently scanning only part of the book. 600 leaves real margin above
+      # that measured figure for this book and other long, dense ones, while still being a
+      # finite ceiling -- this is a real cost-control guard against unbounded spending, not
+      # something to remove outright just because one book needed more room under it.
+      AudioChoice__OpenAI__MaximumSceneVerificationRequestsPerJob: "600"
+      AudioChoice__OpenAI__MaximumSceneEscalationRequestsPerJob: "600"
       # The audiobook length ceiling, 50 hours. Stated here rather than left to the image's
       # own appsettings.json, for the same reason the concurrency values above are: this
       # container is where the limit is actually enforced, and a value that lives only in the
