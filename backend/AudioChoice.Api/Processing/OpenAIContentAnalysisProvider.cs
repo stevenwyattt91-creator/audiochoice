@@ -165,7 +165,17 @@ public sealed class OpenAIContentAnalysisProvider(
     // remarks for the explicit guard against ever confusing the two. A scan made under the prior
     // version was produced by a model that could still read, and occasionally act on, instructions
     // for categories this deployment no longer reports under any circumstance.
-    private const string BaseAnalysisPromptVersion = "6.6-sexual-content-only";
+    // Bumped together with ScannerVersion and SceneCueRegex (DeterministicContentDetector.cs):
+    // a completed scan (Stephen King's IT) reported no event for a passage using "blowjob"/
+    // "blow job" and "clit", a real recall miss on exactly the kind of explicit, unambiguous
+    // term the ladder's own instructions already say should be reported. Named both terms (and
+    // the other common names for oral sex -- fellatio, cunnilingus, going down on) explicitly
+    // in sexual_explicit_activity's own definition, and added the same terms to the keyword
+    // safety net regex so a future miss on this specific wording is still caught even if the
+    // model itself misses it again. A scan made under the prior version may be missing an
+    // event for this exact wording and must not be presented as though this fix had already
+    // applied to it.
+    private const string BaseAnalysisPromptVersion = "6.7-sexual-content-only";
     // Bumped for the keyword safety net's lane isolation fix: a candidate whose window
     // happens to match a checkpoint cached under the prior version may have been built
     // before a safety-net seed's own lane existed, when it could still get coalesced into a
@@ -2443,9 +2453,14 @@ away, or resumes afterwards: "later, tangled in the sheets". The act is certain,
 is absent.
 
 sexual_explicit_activity -- a sexual act described as it happens. Intercourse, oral sex, or
-equivalent, narrated in the moment. Euphemism still counts when the act is unmistakable. Kissing,
-undressing, or a hand on a thigh do not reach this rung on their own; the passage has to convey
-that a sexual act is taking place.
+equivalent, narrated in the moment. Euphemism still counts when the act is unmistakable. This
+includes oral sex under any of its names -- a blow job/blowjob, fellatio, cunnilingus, going down
+on someone -- and explicit anatomical terms used in the act itself, such as the clitoris/clit,
+regardless of how casual or vulgar the specific word choice is. A vulgar or slang term for an act
+or body part is not by itself a reason to withhold this label; judge the passage by what is
+happening, the same way a clinical term would be judged. Kissing, undressing, or a hand on a
+thigh do not reach this rung on their own; the passage has to convey that a sexual act is taking
+place.
 
 sexual_complete_scene -- the whole span of a scene containing implied or explicit activity, from
 its clear lead-in to the point where the story returns to non-sexual action or conversation.

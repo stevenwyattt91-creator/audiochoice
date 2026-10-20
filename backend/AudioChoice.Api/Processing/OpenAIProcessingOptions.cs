@@ -373,7 +373,13 @@ public sealed class OpenAIProcessingOptions
     // stays fully enforced. A scan made under the prior version may carry events in categories
     // this deployment no longer reports at all, and must not be presented as though a fresh scan
     // under this version would report the same thing.
-    public string ScannerVersion { get; init; } = "7.7-sexual-content-only";
+    //
+    // Bumped again together with BaseAnalysisPromptVersion and the keyword safety net's own
+    // SceneCueRegex (DeterministicContentDetector.cs): a real completed scan (Stephen King's
+    // IT) missed a passage naming "blowjob"/"blow job" and "clit" outright. See
+    // BaseAnalysisPromptVersion's own remarks for the full fix. A scan made under the prior
+    // version must be re-scanned to pick this up -- it is not retroactive.
+    public string ScannerVersion { get; init; } = "7.8-sexual-content-only";
     /// <summary>Only jobs in this lane may be claimed by this worker instance.</summary>
     public string ProcessingLane { get; init; } = ScanProcessingLanes.AzureOpenAI;
     /// <summary>

@@ -69,8 +69,19 @@ public static partial class DeterministicContentDetector
     // -- this decides which transcript windows get sent to the model as sexual-content
     // candidates, and a violence/self-harm cue here would just waste a model call on content
     // this deployment never classifies.
+    //
+    // Extended after a real miss: a completed scan (Stephen King's IT) reported no event for
+    // a passage using "blowjob"/"blow job" and "clit", neither of which this list named, so
+    // AddUncoveredSexualCandidates' keyword safety net (the one thing that is supposed to
+    // catch a passage Luna's own model pass missed) had no cue to seed a Terra candidate from
+    // either. Added the missing anatomy term (clit/clitoris/clitoral) and the missing oral-
+    // sex act terms (blowjob/blow job, fellatio, cunnilingus, going down on) explicitly,
+    // rather than only trusting Luna's prompt-level instruction that "euphemism still counts
+    // when the act is unmistakable" -- a prompt instruction is exactly as reliable as the
+    // model's own recall on a given passage, and this regex exists specifically as the
+    // fallback for the passages where that recall fails.
     [GeneratedRegex(
-        @"\b(?:naked|nude|undress(?:ed|ing)?|sex(?:ual|ually)?|orgasm|climax|penetrat(?:e|ed|ing|ion)|thrust(?:ed|ing)?|moan(?:ed|ing)?|kiss(?:ed|ing)?|breast|nipples?|genitals?|erect(?:ion)?|masturbat(?:e|ed|ing|ion)|rape|assault(?:ed|ing)?|opening\s+(?:my|his|her|their)\s+legs|opened\s+(?:my|his|her|their)\s+legs|spreading\s+(?:my|his|her|their)\s+legs|spread\s+(?:my|his|her|their)\s+legs|between\s+(?:her|his|their)\s+thighs?)\b",
+        @"\b(?:naked|nude|undress(?:ed|ing)?|sex(?:ual|ually)?|orgasm|climax|penetrat(?:e|ed|ing|ion)|thrust(?:ed|ing)?|moan(?:ed|ing)?|kiss(?:ed|ing)?|breast|nipples?|genitals?|erect(?:ion)?|masturbat(?:e|ed|ing|ion)|rape|assault(?:ed|ing)?|opening\s+(?:my|his|her|their)\s+legs|opened\s+(?:my|his|her|their)\s+legs|spreading\s+(?:my|his|her|their)\s+legs|spread\s+(?:my|his|her|their)\s+legs|between\s+(?:her|his|their)\s+thighs?|clit(?:oris|oral)?|blow[\s-]?job|fellatio|cunnilingus|going\s+down\s+on|oral\s+sex|fuck(?:ed|ing)?|cock|pussy|dick|cum(?:med|ming)?|orgasm(?:ed|ing)?|vagina|penis|anus|anal\s+sex)\b",
         RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
     private static partial Regex SceneCueRegex();
 }
