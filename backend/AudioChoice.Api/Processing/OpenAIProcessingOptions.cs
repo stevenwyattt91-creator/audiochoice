@@ -379,7 +379,12 @@ public sealed class OpenAIProcessingOptions
     // IT) missed a passage naming "blowjob"/"blow job" and "clit" outright. See
     // BaseAnalysisPromptVersion's own remarks for the full fix. A scan made under the prior
     // version must be re-scanned to pick this up -- it is not retroactive.
-    public string ScannerVersion { get; init; } = "7.8-sexual-content-only";
+    //
+    // Bumped again for SceneCueRegex's substantial widening (anatomy slang, every common
+    // name for oral/anal sex, arousal/foreplay language, literary fade-to-sex phrasing) --
+    // the keyword safety net is a real part of what this scanner version covers, and a wider
+    // net on this rescan can surface a candidate a narrower net's version never would have.
+    public string ScannerVersion { get; init; } = "7.9-sexual-content-only";
     /// <summary>Only jobs in this lane may be claimed by this worker instance.</summary>
     public string ProcessingLane { get; init; } = ScanProcessingLanes.AzureOpenAI;
     /// <summary>

@@ -74,14 +74,101 @@ public static partial class DeterministicContentDetector
     // a passage using "blowjob"/"blow job" and "clit", neither of which this list named, so
     // AddUncoveredSexualCandidates' keyword safety net (the one thing that is supposed to
     // catch a passage Luna's own model pass missed) had no cue to seed a Terra candidate from
-    // either. Added the missing anatomy term (clit/clitoris/clitoral) and the missing oral-
-    // sex act terms (blowjob/blow job, fellatio, cunnilingus, going down on) explicitly,
-    // rather than only trusting Luna's prompt-level instruction that "euphemism still counts
-    // when the act is unmistakable" -- a prompt instruction is exactly as reliable as the
-    // model's own recall on a given passage, and this regex exists specifically as the
-    // fallback for the passages where that recall fails.
+    // either. This is deliberately a high-recall net, not a classifier: a false-positive
+    // candidate here costs one extra Terra call and is rejected there, while a false
+    // negative costs a real miss reaching a listener, so the list below errs heavily toward
+    // over-inclusion -- anatomy slang, act euphemisms, arousal/foreplay language, and common
+    // literary fade-to-sex phrasing, on top of the clinical terms already present. Not
+    // trusting Luna's prompt-level instruction that "euphemism still counts when the act is
+    // unmistakable" alone: a prompt instruction is exactly as reliable as the model's own
+    // recall on a given passage, and this regex exists specifically as the fallback for the
+    // passages where that recall fails.
     [GeneratedRegex(
-        @"\b(?:naked|nude|undress(?:ed|ing)?|sex(?:ual|ually)?|orgasm|climax|penetrat(?:e|ed|ing|ion)|thrust(?:ed|ing)?|moan(?:ed|ing)?|kiss(?:ed|ing)?|breast|nipples?|genitals?|erect(?:ion)?|masturbat(?:e|ed|ing|ion)|rape|assault(?:ed|ing)?|opening\s+(?:my|his|her|their)\s+legs|opened\s+(?:my|his|her|their)\s+legs|spreading\s+(?:my|his|her|their)\s+legs|spread\s+(?:my|his|her|their)\s+legs|between\s+(?:her|his|their)\s+thighs?|clit(?:oris|oral)?|blow[\s-]?job|fellatio|cunnilingus|going\s+down\s+on|oral\s+sex|fuck(?:ed|ing)?|cock|pussy|dick|cum(?:med|ming)?|orgasm(?:ed|ing)?|vagina|penis|anus|anal\s+sex)\b",
+        @"\b(?:" +
+            // Nudity / undressing.
+            @"naked|nude|nudity|undress(?:ed|ing)?|strip(?:ped|ping)?|disrobe(?:d|ing)?|" +
+            @"unbutton(?:ed|ing)?|unzip(?:ped|ping)?|unhook(?:ed|ing)?|unclasp(?:ed|ing)?|" +
+            // General sexual terms.
+            @"sex(?:ual|ually)?|orgasm(?:ed|ing)?|climax(?:ed|ing)?|" +
+            @"intercourse|fornicat(?:e|ed|ing|ion)|copulat(?:e|ed|ing|ion)|" +
+            // Acts.
+            @"penetrat(?:e|ed|ing|ion)|thrust(?:ed|ing)?|grind(?:ing)?|ride|riding|" +
+            @"moan(?:ed|ing)?|gasp(?:ed|ing)?|whimper(?:ed|ing)?|writh(?:e|ed|ing)?|" +
+            @"kiss(?:ed|ing)?|lick(?:ed|ing)?|suck(?:ed|ing)?|nibbl(?:e|ed|ing)?|" +
+            @"caress(?:ed|ing)?|fondl(?:e|ed|ing)?|grop(?:e|ed|ing)?|stroke[ds]?|strok(?:ed|ing)?|" +
+            @"squeez(?:e|ed|ing)?|grip(?:ped|ping)?|grab(?:bed|bing)?|" +
+            // Anatomy, clinical and slang.
+            @"breasts?|nipples?|genitals?|groin|crotch|erect(?:ion)?|aroused?|arousal|" +
+            @"wet(?:ness)?|hard(?:ness)?|throbbing|clit(?:oris|oral)?|vagina(?:l)?|penis|" +
+            @"cock|dick|member|shaft|pussy|cunt|folds?|labia|testicles?|balls|scrotum|" +
+            @"anus|anal|buttocks|ass(?:cheeks)?|rear\s+end|" +
+            // Oral sex, every common name.
+            @"oral\s+sex|blow[\s-]?job|blowing\s+him|fellatio|cunnilingus|" +
+            @"going\s+down\s+on|head\s+(?:from|to)|" +
+            // Anal sex.
+            @"anal\s+sex|sodomy|sodomiz(?:e|ed|ing)|" +
+            // Masturbation.
+            @"masturbat(?:e|ed|ing|ion)|touch(?:ed|ing)?\s+herself|touch(?:ed|ing)?\s+himself|" +
+            @"pleasur(?:e|ed|ing)\s+(?:herself|himself|themselves)|" +
+            // Climax / ejaculation.
+            @"cum(?:med|ming|shot)?|ejaculat(?:e|ed|ing|ion)|came\s+(?:inside|hard|undone)|" +
+            @"release[ds]?\s+(?:himself|herself|inside)|" +
+            // Assault.
+            @"rape[ds]?|raping|assault(?:ed|ing)?|molest(?:ed|ing|ation)?|" +
+            @"forced\s+himself|forced\s+herself|" +
+            // Positioning / escalation cues.
+            @"opening\s+(?:my|his|her|their)\s+legs|opened\s+(?:my|his|her|their)\s+legs|" +
+            @"spreading\s+(?:my|his|her|their)\s+legs|spread\s+(?:my|his|her|their)\s+legs|" +
+            @"between\s+(?:her|his|their)\s+(?:thighs?|legs)|straddl(?:e|ed|ing)|" +
+            @"on\s+top\s+of\s+(?:him|her)|pinned\s+(?:him|her|them)|" +
+            @"entered\s+her|entered\s+him|inside\s+her|inside\s+him|" +
+            // Common literary fade-to-sex / aftermath phrasing.
+            @"tangled\s+in\s+the\s+sheets|tangled\s+sheets|" +
+            @"made\s+love|lovemaking|" +
+            @"bed(?:room)?\s+that\s+night|rest\s+of\s+the\s+night\s+together|" +
+            @"collapsed\s+(?:beside|next\s+to|on\s+top\s+of)\s+(?:him|her)|" +
+            @"breathless(?:ly)?\s+(?:beside|against)|" +
+            // Kissing, beyond a bare "kiss" -- the taxonomy's own sexual_kissing rung is
+            // specifically about sustained/passionate kissing, which these phrases name
+            // more precisely than the verb alone.
+            @"passionate(?:ly)?\s+kiss(?:ed|ing)?|deepen(?:ed|ing)?\s+the\s+kiss|" +
+            @"tongue(?:s)?\s+(?:met|tangled|danced)|" +
+            // Suggestive dialogue / innuendo / references -- the rung the prompt's own
+            // remarks call hardest to catch, since it is explicitly about what is implied
+            // rather than stated. A keyword net cannot recognize true innuendo (that needs
+            // judgment), but it can catch the stock phrases and body-language cues this
+            // genre leans on most often to signal it.
+            @"flirt(?:ed|ing|atious(?:ly)?)?|seduct(?:ive|ion)|seduc(?:e|ed|ing|tive)|" +
+            @"undress(?:ed|ing)?\s+(?:him|her)\s+with\s+(?:his|her|their)\s+eyes|" +
+            @"bit\s+(?:her|his)\s+lip|biting\s+(?:her|his)\s+lip|lip\s+bite|" +
+            @"wanted\s+him|wanted\s+her|want(?:ed|ing)\s+each\s+other|" +
+            @"desire\s+(?:burn|pool|ache)|desire\s+for\s+(?:him|her)|" +
+            @"charged\s+(?:silence|moment|air)|sexual\s+tension|" +
+            @"lingering\s+(?:touch|gaze|look)|" +
+            @"warm\s+up\s+the\s+bed|see\s+what.{0,10}sheets\s+look\s+like|" +
+            @"show\s+you\s+my\s+etchings|" +
+            @"past\s+encounter|slept\s+together|spent\s+the\s+night\s+together|" +
+            // Nudity-specific phrasing beyond "naked"/"nude" -- a body described as bare,
+            // uncovered, or exposed is its own taxonomy rung (sexual_nudity) even with no
+            // act and no reaction, which is exactly the omission this net exists to prevent.
+            @"bare(?:ly)?\s+(?:skin|body|chest|breasts?)|" +
+            @"expos(?:e|ed|ing)\s+(?:her|his|their)|" +
+            @"uncover(?:ed|ing)\s+(?:her|his|their)|" +
+            @"clothing\s+(?:fell|slipped|dropped|pooled)|" +
+            @"shirt\s+(?:torn|ripped|came)\s+open|" +
+            @"spilling\s+free|hardening\s+nipples?|" +
+            // Consent / coercion language for sexual_violence, since that label's own
+            // definition is judged specifically on what the passage establishes about
+            // consent -- these are the phrases a passage most often uses to establish it.
+            @"did(?:n't| not)\s+consent|without\s+(?:her|his|their)\s+consent|" +
+            @"against\s+(?:her|his|their)\s+will|" +
+            @"forced\s+(?:her|him|them)\s+(?:down|onto|against)|" +
+            @"held\s+(?:her|him)\s+down|pinned\s+(?:her|him)\s+down|" +
+            @"begged\s+him\s+to\s+stop|begged\s+her\s+to\s+stop|told\s+him\s+to\s+stop|" +
+            @"tried\s+to\s+(?:push|fight|struggle)\s+(?:him|her)\s+(?:off|away)|" +
+            @"couldn't\s+move|couldn't\s+fight\s+back|too\s+weak\s+to\s+resist|" +
+            @"too\s+drunk\s+to\s+(?:consent|resist|stop\s+him|stop\s+her)" +
+        @")\b",
         RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
     private static partial Regex SceneCueRegex();
 }
