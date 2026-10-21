@@ -2062,9 +2062,7 @@ Assert(retainedSceneEvents.Count == 1,
 
 // Keyword safety net, Sol second opinion: a safety-net candidate Terra rejects outright must
 // still reach Sol for a second, independent look -- and if Sol accepts it, the event must be
-// produced despite Terra's own "no". An ordinary (non-safety-net) Terra rejection must NOT
-// reach Sol at all, so this also proves the second-opinion rule is scoped to the safety net
-// specifically, not a general "always double-check a rejection" change.
+// produced despite Terra's own "no".
 {
     var solSecondOpinionRoot = Path.Combine(
         Path.GetTempPath(), $"audiochoice-safety-net-sol-second-opinion-{Guid.NewGuid():N}");
@@ -2138,6 +2136,82 @@ Assert(retainedSceneEvents.Count == 1,
     finally
     {
         if (Directory.Exists(solSecondOpinionRoot)) Directory.Delete(solSecondOpinionRoot, true);
+    }
+}
+
+// Keyword safety net fallback: a safety-net candidate that Terra AND both Sol votes reject
+// for the scene bar must not simply vanish -- Luna's own first pass never proposed any event
+// for this window at all, so a flat rejection here means the one thing the keyword scan
+// exists to catch would otherwise disappear completely. The candidate must instead be
+// reported at the lighter rung Terra/Sol's own evidence booleans support.
+{
+    var fallbackRoot = Path.Combine(
+        Path.GetTempPath(), $"audiochoice-safety-net-fallback-{Guid.NewGuid():N}");
+    try
+    {
+        var fallbackOptions = new OpenAIProcessingOptions
+        {
+            AnalysisModel = "gpt-5.6-luna",
+            SceneVerificationModel = "gpt-5.6-terra",
+            SceneEscalationModel = "gpt-5.6-sol",
+            ViolenceVerificationModel = "gpt-5.6-terra",
+            SolEscalationConfidenceThreshold = .95,
+            MinimumEventConfidence = .55,
+        };
+
+        // Luna's fixture answer here is "no events at all" -- "flirted" only trips the
+        // keyword scan's own cue regex, exactly the safety net's intended gap-filling case.
+        // Terra and both Sol votes reject the scene claim (no direct act, nothing sustained),
+        // which is also a realistic verdict for a passage that is flirtation, not an act.
+        var fallbackSegments = new[]
+        {
+            new TranscriptSegment(0, 5, "Morning came quietly at first."),
+            new TranscriptSegment(
+                10, 20, "She flirted with him all through dinner, teasing and smiling.", new[]
+                {
+                    new TranscriptWord("She", 10.0, 10.2),
+                    new TranscriptWord("flirted", 10.2, 10.6),
+                    new TranscriptWord("with", 10.6, 10.8),
+                    new TranscriptWord("him", 10.8, 11.0),
+                    new TranscriptWord("all", 11.0, 11.2),
+                    new TranscriptWord("through", 11.2, 11.5),
+                    new TranscriptWord("dinner,", 11.5, 11.9),
+                    new TranscriptWord("teasing", 11.9, 12.3),
+                    new TranscriptWord("and", 12.3, 12.4),
+                    new TranscriptWord("smiling.", 12.4, 12.9),
+                }),
+            new TranscriptSegment(30, 40, "Morning came, and with it the ordinary day."),
+        };
+
+        var fallbackModelClient = new KeywordSafetyNetRejectedFixtureModelClient();
+        var fallbackDataPaths = new AudioChoiceDataPaths(
+            new FakeWebHostEnvironment(fallbackRoot),
+            new ConfigurationBuilder().Build());
+        var fallbackProvider = new OpenAIContentAnalysisProvider(
+            fallbackModelClient, fallbackOptions, fallbackDataPaths,
+            NullLogger<OpenAIContentAnalysisProvider>.Instance);
+
+        var fallbackResult = await fallbackProvider.Analyze(
+            fallbackSegments, null, CancellationToken.None);
+
+        Assert(
+            !fallbackResult.Any(
+                item => item.EventID == ContentTaxonomy.Mappings["sexual_complete_scene"].EventID),
+            "A keyword-safety-net candidate Terra and Sol both rejected for the scene bar " +
+            "was still reported as a sexual_complete_scene.");
+        Assert(
+            fallbackResult.Any(
+                item => item.EventID ==
+                    ContentTaxonomy.Mappings["sexual_suggestive_dialogue"].EventID),
+            "A keyword-safety-net candidate rejected for the scene bar (no direct act " +
+            "evidence) vanished entirely instead of falling back to " +
+            "sexual_suggestive_dialogue -- the exact real content the keyword scan was " +
+            "seeded to catch (Luna's own first pass proposed nothing for this window at " +
+            "all) was lost with no event reported.");
+    }
+    finally
+    {
+        if (Directory.Exists(fallbackRoot)) Directory.Delete(fallbackRoot, true);
     }
 }
 
@@ -4549,6 +4623,55 @@ sealed class SolSecondOpinionFixtureModelClient : IAnalysisModelClient
         var valueStart = candidateKeyStart + "\"candidateKey\":\"".Length;
         var valueEnd = input.IndexOf('"', valueStart);
         return valueEnd > valueStart ? input[valueStart..valueEnd] : "unknown";
+    }
+}
+
+/// <summary>
+/// Luna always returns no events at all (so a candidate can only ever come from the keyword
+/// safety net), and Terra/Sol always reject the resulting scene claim outright with
+/// directSexualActEvidence=false -- exercising the keyword-safety-net fallback path rather
+/// than the majority-vote override <see cref="SolSecondOpinionFixtureModelClient"/> makes for
+/// its own, differently-shaped test.
+/// </summary>
+sealed class KeywordSafetyNetRejectedFixtureModelClient : IAnalysisModelClient
+{
+    public string ProviderName => "fixture";
+
+    public Task<AnalysisModelResponse> CompleteJson(
+        string model,
+        string input,
+        string schemaName,
+        System.Text.Json.Nodes.JsonObject schema,
+        CancellationToken cancellationToken)
+    {
+        var json = schemaName switch
+        {
+            "audiochoice_scan_events" => """{"events":[]}""",
+            "audiochoice_violence_verification" => """{"candidates":[]}""",
+            "audiochoice_scene_verification" => RespondToSceneVerification(input),
+            _ => throw new InvalidOperationException($"Unexpected schema {schemaName}."),
+        };
+        return Task.FromResult(new AnalysisModelResponse(json));
+    }
+
+    private static string RespondToSceneVerification(string input)
+    {
+        var candidateKeyStart = input.IndexOf("\"candidateKey\":\"", StringComparison.Ordinal);
+        var candidateKey = "unknown";
+        if (candidateKeyStart >= 0)
+        {
+            var valueStart = candidateKeyStart + "\"candidateKey\":\"".Length;
+            var valueEnd = input.IndexOf('"', valueStart);
+            if (valueEnd > valueStart) candidateKey = input[valueStart..valueEnd];
+        }
+        return $$"""
+        {"candidates":[
+          {"candidateKey":"{{candidateKey}}","accepted":false,"needsEscalation":false,
+           "directSexualActEvidence":false,"sustainedBeyondKissing":false,
+           "nonconsensualEvidence":false,"startTime":10,"endTime":13,"confidence":0.4,
+           "safeDescription":"Rejected","quote":""}
+        ]}
+        """;
     }
 }
 

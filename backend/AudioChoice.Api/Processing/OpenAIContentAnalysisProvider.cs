@@ -198,7 +198,26 @@ public sealed class OpenAIContentAnalysisProvider(
     // safety-net seed's. A checkpoint cached under the prior version was filtered and
     // escalated under the old, narrower rules and must not be presented as though it had
     // already had the wider recall applied.
-    private const string BaseAnalysisPromptVersion = "6.8-sexual-content-only";
+    //
+    // Bumped again for two more fixes targeting the lighter sexual_* rungs specifically
+    // (references, suggestive_dialogue, nudity, kissing, implied_activity), which -- unlike
+    // sexual_complete_scene and sexual_violence -- get no Terra/Sol second opinion at all;
+    // Luna's single first-pass call is final for them. First, sexual_references' own
+    // definition was one sentence that directly overlapped sexual_suggestive_dialogue's own
+    // worked examples (both named "a past encounter recalled" and "a comment on someone's
+    // history" as their own), leaving the model no real way to choose between them on a
+    // genuinely common case; it now states the actual distinguishing test (flat fact vs.
+    // charged/suggestive tone) with a worked contrasting pair, and resolves a genuine tie
+    // toward sexual_suggestive_dialogue specifically because that rung has no downstream
+    // second check either way the ambiguity is resolved. Second, and more structurally: a
+    // keyword-safety-net candidate that failed Terra/Sol's scene bar used to be discarded
+    // outright with no event reported at all, even though Luna's own first pass had not
+    // proposed anything for that window either -- the one gap this safety net exists to
+    // close. It now falls back to sexual_implied_activity, sexual_nudity, or
+    // sexual_suggestive_dialogue, chosen from Terra/Sol's own evidence booleans, rather than
+    // vanishing. A scan made under the prior version applied the old rules and may be
+    // missing events this version would now report.
+    private const string BaseAnalysisPromptVersion = "6.9-sexual-content-only";
     // Bumped for the keyword safety net's lane isolation fix: a candidate whose window
     // happens to match a checkpoint cached under the prior version may have been built
     // before a safety-net seed's own lane existed, when it could still get coalesced into a
@@ -1458,7 +1477,23 @@ public sealed class OpenAIContentAnalysisProvider(
                 continue;
 
             var outcome = ResolveSceneOutcome(sourceCandidate.FirstPassLane, verification);
-            if (outcome is null) continue;
+            if (outcome is null)
+            {
+                // A keyword-safety-net seed that fails the scene bar is not nothing -- Luna's
+                // own first pass never proposed ANY event for this window at all (that is
+                // the entire reason the keyword scan seeded it), so simply discarding it
+                // when it falls short of a full scene throws away the one thing this method
+                // was seeded to catch: real sexual content Luna missed outright. A real
+                // Luna-proposed candidate that fails this same bar already has its own
+                // correctly-labeled lighter event sitting in `retained` from the top of this
+                // method and needs nothing more; a keyword seed has no such fallback unless
+                // one is added here.
+                if (sourceCandidate.FirstPassLane == "sexual_keyword_safety_net")
+                {
+                    AddKeywordSafetyNetFallback(retained, verification, sourceCandidate);
+                }
+                continue;
+            }
             var (label, mapping) = outcome.Value;
 
             // The refined start is a model-invented number, one call further from the
@@ -1700,6 +1735,83 @@ public sealed class OpenAIContentAnalysisProvider(
         }
 
         return ("sexual_complete_scene", ContentTaxonomy.Mappings["sexual_complete_scene"]);
+    }
+
+    /// <summary>
+    /// The lighter sexual-content label a rejected keyword-safety-net candidate still
+    /// deserves, chosen from Terra/Sol's own evidence booleans.
+    /// </summary>
+    /// <remarks>
+    /// Terra/Sol already independently judged whether an actual sexual act occurred
+    /// (<c>directSexualActEvidence</c>) and whether nudity-only evidence was present
+    /// (<c>sustainedBeyondKissing</c> false but some evidence still true) when deciding the
+    /// candidate did not clear the scene bar -- that is real information this method already
+    /// paid for and previously discarded outright. It cannot recover which exact rung among
+    /// suggestive_dialogue/references/nudity/kissing/implied_activity the original keyword
+    /// cue actually was (the keyword window, not Terra's schema, is the only thing that ever
+    /// looked at the cue word itself), so this intentionally reports the single rung that is
+    /// correct regardless of which specific cue fired: sexual_implied_activity when there is
+    /// real but not-sustained act evidence, sexual_nudity when the candidate's own window
+    /// matched a nudity-shaped keyword cue, and sexual_suggestive_dialogue otherwise -- the
+    /// ladder's lowest rung, safe to report for anything that triggered the keyword scan at
+    /// all without overclaiming what Terra/Sol actually found.
+    /// </remarks>
+    /// <summary>
+    /// A narrow subset of nudity-specific wording, used only to decide which lighter label a
+    /// rejected keyword-safety-net candidate falls back to -- not a detector in its own
+    /// right. Deliberately much smaller than DeterministicContentDetector's own SceneCueRegex
+    /// (which exists to decide whether to seed a candidate at all, not which of several
+    /// lighter labels best fits one that already failed the scene bar).
+    /// </summary>
+    private static readonly System.Text.RegularExpressions.Regex KeywordFallbackNudityPattern =
+        new(
+            @"\b(?:naked|nude|nudity|undress(?:ed|ing)?|strip(?:ped|ping)?|disrobe(?:d|ing)?|" +
+            @"bare(?:ly)?\s+(?:skin|body|chest|breasts?)|expos(?:e|ed|ing)|uncover(?:ed|ing)|" +
+            @"clothing\s+(?:fell|slipped|dropped|pooled)|shirt\s+(?:torn|ripped|came)\s+open)\b",
+            System.Text.RegularExpressions.RegexOptions.IgnoreCase |
+            System.Text.RegularExpressions.RegexOptions.Compiled);
+
+    private static bool LooksLikeNudityCue(string text) => KeywordFallbackNudityPattern.IsMatch(text);
+
+    private void AddKeywordSafetyNetFallback(
+        List<ScanEvent> retained,
+        VerifiedSceneCandidate verification,
+        SceneVerificationCandidate sourceCandidate)
+    {
+        // Terra/Sol already rejected the scene outcome by the time this runs, but their
+        // evidence booleans about THIS SAME candidate are still informative about what rung
+        // (if any) the underlying passage actually supports.
+        var windowText = string.Join(" ", sourceCandidate.Segments
+            .Where(segment => segment.EndTime >= sourceCandidate.ProposedStartTime &&
+                segment.StartTime <= sourceCandidate.ProposedEndTime)
+            .Select(segment => segment.Text));
+        string label = verification.DirectSexualActEvidence
+            ? "sexual_implied_activity"
+            : LooksLikeNudityCue(windowText)
+                ? "sexual_nudity"
+                : "sexual_suggestive_dialogue";
+        var mapping = ContentTaxonomy.Mappings[label];
+
+        // No confirmed quote to anchor to -- Terra rejected the scene claim this quote was
+        // meant to support, so trusting that same quote for a different label's boundary
+        // would be trusting evidence the verifier itself did not accept. The keyword
+        // window's own bounds are the only range anything in this pipeline still stands
+        // behind for this candidate, so the fallback event uses that window directly rather
+        // than inventing a narrower one with no support at all.
+        var start = sourceCandidate.ProposedStartTime;
+        var end = sourceCandidate.ProposedEndTime;
+
+        // Reported at the keyword safety net's own long-standing confidence (see
+        // AddUncoveredSexualCandidates), not Terra/Sol's confidence in the scene claim they
+        // just rejected -- that confidence describes a different question (was this a full
+        // scene) than the one this fallback event is actually answering (is this rung's
+        // content present at all).
+        const double fallbackConfidence = .35;
+        retained.Add(new ScanEvent(
+            Guid.NewGuid(), start, end, mapping.CategoryID, mapping.GroupID,
+            mapping.EventID, fallbackConfidence,
+            Hash($"keyword-fallback|{mapping.EventID:N}|{start:F1}|{end:F1}|{verification.CandidateKey}"),
+            SafeDescriptionForEvent(label, null)));
     }
 
     /// <summary>
@@ -2473,8 +2585,30 @@ reasons. Kissing is NOT explicit activity at any intensity: however long or pass
 the mouth is described, it stays this rung unless the passage goes on to convey an actual sexual
 act beyond the kiss itself, in which case follow the escalation rule below.
 
-sexual_references -- sex spoken about rather than happening: a past encounter recalled, a crude
-joke, a comment on someone's history, an offer not taken up.
+sexual_references -- sex mentioned flatly, as a fact, with no charge, tension, or innuendo to
+it: a past encounter named without being dwelt on ("they had slept together once, years ago"),
+a crude joke with a sexual subject told purely for comedy rather than to arouse or tease, a
+plain statement of someone's sexual history or reputation, an offer made and declined, a
+clinical or matter-of-fact mention of sex as a topic of conversation. The test for this rung is
+whether the passage is simply naming or noting that sex happened, is being discussed, or is part
+of someone's history or situation -- not whether it is trying to be suggestive about it.
+
+sexual_references and sexual_suggestive_dialogue both cover sex "spoken about rather than
+happening," and the same subject matter -- a past encounter, someone's history, a crude joke --
+can appear in either one; the ladder's own earlier instruction to choose the highest rung a
+passage actually reaches applies directly to this choice. The deciding question is tone and
+intent, not topic: if the passage lingers on it, is phrased to tease or arouse, carries any
+charge, double meaning, or anticipation, or would read to an adult listener as flirtatious or
+suggestive rather than merely informative, it is sexual_suggestive_dialogue, not
+sexual_references, even though the underlying fact being discussed is identical. "They had a
+thing years ago, nothing serious" said in passing, with nothing more made of it, is
+sexual_references. The same fact raised with a smirk, a loaded pause, or as a tease ("you
+remember how that went, don't you?") is sexual_suggestive_dialogue. When genuinely unsure which
+of the two applies, resolve it as sexual_suggestive_dialogue -- the higher rung is the safer
+miss for a listener who filters at this level, since sexual_references is the one rung on this
+entire ladder with no independent second check behind Luna's own first-pass call, and a passage
+that actually carried a sexual undertone must not be the one case reported at the plainer,
+lower-scrutiny label purely because the distinction was close.
 
 sexual_nudity -- a body described unclothed, or clothing being removed, with no sexual act
 following in this passage. Undressing on its own is this rung, not explicit activity. Intimate

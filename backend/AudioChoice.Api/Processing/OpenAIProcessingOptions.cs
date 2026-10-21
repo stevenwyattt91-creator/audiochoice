@@ -391,7 +391,15 @@ public sealed class OpenAIProcessingOptions
     // net ones, now gets a Sol second opinion). See BaseAnalysisPromptVersion's own remarks
     // for the full reasoning. A scan made under the prior version applied the old, narrower
     // rules and must be re-scanned to pick this up.
-    public string ScannerVersion { get; init; } = "7.10-sexual-content-only";
+    //
+    // Bumped again together with BaseAnalysisPromptVersion: sexual_references' prompt
+    // definition was rewritten to actually distinguish itself from
+    // sexual_suggestive_dialogue, and a keyword-safety-net candidate that fails Terra/Sol's
+    // scene bar now falls back to a lighter label instead of vanishing with no event at all.
+    // See BaseAnalysisPromptVersion's own remarks for the full reasoning. A scan made under
+    // the prior version applied the old prompt wording and the old all-or-nothing scene
+    // outcome, and must be re-scanned to pick this up.
+    public string ScannerVersion { get; init; } = "7.11-sexual-content-only";
     /// <summary>Only jobs in this lane may be claimed by this worker instance.</summary>
     public string ProcessingLane { get; init; } = ScanProcessingLanes.AzureOpenAI;
     /// <summary>
