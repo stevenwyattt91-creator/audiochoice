@@ -185,7 +185,20 @@ public sealed class OpenAIContentAnalysisProvider(
     // exists because a wider net on a rescan can surface events a narrower net's version
     // would never have found, and those must not be presented as though the narrower
     // version had already covered them.
-    private const string BaseAnalysisPromptVersion = "6.7-sexual-content-only";
+    //
+    // Bumped again for two structural recall fixes requested directly (not a keyword
+    // change): ExcludeLoneWeakSingletons' dense-cluster threshold dropped from 3 to 2, so a
+    // book that stays subtle throughout and never produces three weak mentions close
+    // together no longer has every one of its real, separate flirtation/innuendo moments
+    // discarded as "noise" two at a time. And NeedsSolReview no longer treats an ordinary
+    // Terra rejection as final -- every rejection now gets one independent Sol second
+    // opinion, the same treatment only keyword-safety-net rejections used to get, since the
+    // sampling-variance risk that motivated that exception (this file's own ACOTAR Part 1
+    // incident) applies to a Luna-proposed candidate's rejection exactly as much as a
+    // safety-net seed's. A checkpoint cached under the prior version was filtered and
+    // escalated under the old, narrower rules and must not be presented as though it had
+    // already had the wider recall applied.
+    private const string BaseAnalysisPromptVersion = "6.8-sexual-content-only";
     // Bumped for the keyword safety net's lane isolation fix: a candidate whose window
     // happens to match a checkpoint cached under the prior version may have been built
     // before a safety-net seed's own lane existed, when it could still get coalesced into a
@@ -1363,17 +1376,15 @@ public sealed class OpenAIContentAnalysisProvider(
             .SelectMany(result => result.Payload.Candidates.Select(decision =>
                 (TerraIndex: result.Index, Decision: decision)))
             .ToArray();
-        // Only what is genuinely ambiguous or borderline reaches Sol: Terra's own
-        // needsEscalation flag, an accepted scene whose confidence fell short of
-        // SolEscalationConfidenceThreshold, or a rejection of a keyword-safety-net candidate
-        // (see NeedsSolReview's remarks for why that last case gets a second opinion rather
-        // than being final on Terra's single call). A confident accept is not re-paid-for at
-        // Sol -- that does not mean it goes unconfirmed, see NeedsSolReview's remarks.
+        // Reaches Sol for: Terra's own needsEscalation flag, an accepted scene whose
+        // confidence fell short of SolEscalationConfidenceThreshold, or any outright
+        // rejection at all -- see NeedsSolReview's remarks for why a rejection is no longer
+        // treated as final on a single Terra call, regardless of where the candidate came
+        // from. A confident accept is not re-paid-for at Sol -- that does not mean it goes
+        // unconfirmed, see NeedsSolReview's remarks.
         var escalationCandidates = terraDecisions
-            .Where(item => sourceCandidates.TryGetValue(
-                item.Decision.CandidateKey, out var candidateSource) &&
-                NeedsSolReview(
-                    item.Decision, candidateSource.FirstPassLane == "sexual_keyword_safety_net"))
+            .Where(item => sourceCandidates.ContainsKey(item.Decision.CandidateKey) &&
+                NeedsSolReview(item.Decision, options.SolEscalationConfidenceThreshold))
             .Select(item => sourceCandidates.TryGetValue(
                     item.Decision.CandidateKey, out var source)
                 ? new SolEscalationCandidate(item.TerraIndex, source)
@@ -1516,16 +1527,24 @@ public sealed class OpenAIContentAnalysisProvider(
     /// part of a dense cluster of such mentions or co-occurs with a stronger label.
     /// </summary>
     /// <remarks>
-    /// A single isolated <c>suggestive_dialogue</c> or <c>sexual_references</c> event -- a
-    /// passing flirtation, one crude joke -- is not a scene candidate and never becomes one no
-    /// matter what Terra says about it; spending a Terra call on it is pure waste. What does
-    /// still deserve review: three or more weak mentions clustered together with no complete
-    /// sentence of ordinary narrative between them (reusing the exact same sentence-boundary
-    /// test <see cref="SceneEventPostProcessor"/> uses to decide whether two scene candidates
-    /// are part of one continuous passage), since a dense run of suggestive lines can itself
-    /// be building toward a scene; and any weak mention that shares a passage with a stronger
-    /// label (nudity, implied or explicit activity, or an already-flagged complete scene) --
-    /// a passing reference next to real activity is context for that activity, not noise.
+    /// Only a genuinely solitary mention -- exactly one weak <c>suggestive_dialogue</c>,
+    /// <c>sexual_references</c>, or <c>sexual_kissing</c> event in the whole candidate set,
+    /// with nothing else like it anywhere in the book and nothing stronger nearby -- is
+    /// excluded as noise. Two or more weak mentions are each kept, even if a complete
+    /// sentence of ordinary narrative separates them into their own clusters: they are still
+    /// real, separate instances of exactly the content this rung exists to report, not two
+    /// unrelated false alarms. This used to require three or more mentions clustered
+    /// together with nothing separating them before any were kept, on the reasoning that two
+    /// was still too little to be worth a Terra call -- but a book that stays consistently
+    /// subtle (innuendo and flirtation that never escalates into nudity or activity) can
+    /// easily have exactly two genuinely distinct, real moments in the same chapter that
+    /// never reach three close together, and the old rule suppressed both of them every
+    /// time, with no way for that book to ever earn the exemption. At the owner's explicit
+    /// request to maximize recall for sexual content, the bar for being "noise" is now a
+    /// true singleton only. Any weak mention that shares a passage with a stronger label
+    /// (nudity, implied or explicit activity, or an already-flagged complete scene) was
+    /// already kept regardless, and still is -- a passing reference next to real activity is
+    /// context for that activity, not noise.
     /// </remarks>
     internal static IReadOnlyList<ScanEvent> ExcludeLoneWeakSingletons(
         IReadOnlyList<ScanEvent> candidates,
@@ -1568,20 +1587,27 @@ public sealed class OpenAIContentAnalysisProvider(
         }
         clusters.Add(currentCluster);
 
+        // Only a true singleton -- exactly one weak mention anywhere in this whole candidate
+        // set, with nothing else like it anywhere else in the book -- is noise. This is
+        // deliberately checked across every cluster together, not per cluster: two weak
+        // mentions separated by a complete sentence form two separate clusters of one each
+        // under the grouping above, but they are still two real, distinct instances of weak
+        // sexual content, not two unrelated false alarms, and both are kept. Only when
+        // weakIndices.Length itself is 1 is there truly nothing else to corroborate it.
         var excluded = new HashSet<int>();
-        foreach (var cluster in clusters)
+        if (weakIndices.Length == 1)
         {
-            if (cluster.Count >= 3) continue; // A dense cluster of weak mentions is kept.
+            var cluster = clusters[0];
 
             // A weak mention next to a stronger label anywhere in the same unbroken passage
-            // is kept as context for that activity, checked the same way a cluster's own
-            // members are: no complete sentence separating them.
+            // is kept as context for that activity.
             var coOccursWithStrongLabel = ordered.Any(other =>
                 strongEventIDs.Contains(other.EventID) &&
                 !SeparatedByClearSentence(ordered[cluster[0]], other, segments));
-            if (coOccursWithStrongLabel) continue;
-
-            foreach (var index in cluster) excluded.Add(index);
+            if (!coOccursWithStrongLabel)
+            {
+                foreach (var index in cluster) excluded.Add(index);
+            }
         }
 
         return ordered.Where((_, index) => !excluded.Contains(index)).ToArray();
@@ -1610,31 +1636,30 @@ public sealed class OpenAIContentAnalysisProvider(
     /// transcript's own words in <see cref="TryConfirmSceneBoundary"/> still runs for it,
     /// exactly as it does for a Sol-reviewed candidate, using Terra's own reported quote.
     ///
-    /// An ordinary rejected candidate (neither accepted nor flagged for escalation) needs
-    /// nothing further -- it was never going to produce a scene event either way, and
-    /// re-litigating every Terra "no" at Sol would multiply cost without changing an outcome
-    /// Terra was clear about.
-    ///
-    /// <paramref name="isKeywordSafetyNetCandidate"/> is the one exception: a rejection of a
-    /// candidate Luna's own first pass never proposed at all (see
-    /// <see cref="AddUncoveredSexualCandidates"/>) is not "Terra was clear about this" in the
-    /// same sense -- it is the pipeline's only chance to catch something Luna missed
-    /// entirely, decided by a single call with no seed/temperature control over the model's
-    /// own call-to-call variance. A rescan of ACOTAR Part 1 during this fix's own
-    /// verification showed the same passage accepted by Terra on one call and rejected on
-    /// another with nothing else in the pipeline changed. Giving Sol -- the stricter, final
-    /// arbiter tier -- one independent second opinion on a safety-net rejection costs one
-    /// extra call only on the rare passage the keyword scan actually flags as uncovered, not
-    /// on the whole book.
+    /// Every rejected candidate also gets Sol's second opinion, regardless of where the
+    /// candidate came from. This used to be final for an ordinary Luna-proposed rejection
+    /// (neither accepted nor flagged for escalation), on the reasoning that Terra was clear
+    /// about it and re-litigating every "no" would multiply cost without changing an outcome
+    /// Terra was confident in. That reasoning does not actually hold: this same file's own
+    /// evidence (the ACOTAR Part 1 rescan showing the same passage accepted by Terra on one
+    /// call and rejected on another, nothing else changed) is about a single call with no
+    /// seed/temperature control over sampling variance -- and that variance is a property of
+    /// the call, not of how the candidate was sourced. A Luna-proposed candidate's rejection
+    /// is exactly as capable of being the unlucky roll as a keyword-safety-net candidate's
+    /// is; there was never a real basis for trusting one single Terra "no" more than the
+    /// other. At the owner's explicit request to maximize recall for sexual content and
+    /// accept the added model cost, every rejection now gets the same one-independent-second-
+    /// opinion treatment the safety-net lane already had, rather than reserving it for
+    /// candidates that happened to also trip the keyword regex. The parameter that used to
+    /// distinguish the two is gone from the signature entirely now that every rejection takes
+    /// the same path -- there is no longer a second, narrower condition for it to select
+    /// between.
     /// </remarks>
     internal static bool NeedsSolReview(
-        VerifiedSceneCandidate decision, double confidenceThreshold, bool isKeywordSafetyNetCandidate) =>
+        VerifiedSceneCandidate decision, double confidenceThreshold) =>
         decision.NeedsEscalation ||
         (decision.Accepted && decision.Confidence < confidenceThreshold) ||
-        (isKeywordSafetyNetCandidate && !decision.Accepted);
-
-    private bool NeedsSolReview(VerifiedSceneCandidate decision, bool isKeywordSafetyNetCandidate) =>
-        NeedsSolReview(decision, options.SolEscalationConfidenceThreshold, isKeywordSafetyNetCandidate);
+        !decision.Accepted;
 
     /// <summary>
     /// The two lanes' finalized confidence floor. Kept at the pre-existing 0.85 rather than

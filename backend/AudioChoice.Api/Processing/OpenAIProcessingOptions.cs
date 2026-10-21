@@ -384,7 +384,14 @@ public sealed class OpenAIProcessingOptions
     // name for oral/anal sex, arousal/foreplay language, literary fade-to-sex phrasing) --
     // the keyword safety net is a real part of what this scanner version covers, and a wider
     // net on this rescan can surface a candidate a narrower net's version never would have.
-    public string ScannerVersion { get; init; } = "7.9-sexual-content-only";
+    //
+    // Bumped again together with BaseAnalysisPromptVersion: two structural recall fixes, not
+    // keyword changes -- ExcludeLoneWeakSingletons' dense-cluster threshold (3 to 2) and
+    // NeedsSolReview's rejection-escalation rule (every rejection, not only keyword-safety-
+    // net ones, now gets a Sol second opinion). See BaseAnalysisPromptVersion's own remarks
+    // for the full reasoning. A scan made under the prior version applied the old, narrower
+    // rules and must be re-scanned to pick this up.
+    public string ScannerVersion { get; init; } = "7.10-sexual-content-only";
     /// <summary>Only jobs in this lane may be claimed by this worker instance.</summary>
     public string ProcessingLane { get; init; } = ScanProcessingLanes.AzureOpenAI;
     /// <summary>
