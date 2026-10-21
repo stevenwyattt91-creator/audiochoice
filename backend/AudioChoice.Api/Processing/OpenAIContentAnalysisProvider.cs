@@ -175,6 +175,16 @@ public sealed class OpenAIContentAnalysisProvider(
     // model itself misses it again. A scan made under the prior version may be missing an
     // event for this exact wording and must not be presented as though this fix had already
     // applied to it.
+    //
+    // Bumped again together with ScannerVersion: the keyword safety net's SceneCueRegex was
+    // substantially widened (anatomy slang, every common name for oral/anal sex, arousal and
+    // foreplay language, and common literary fade-to-sex phrasing like "tangled in the
+    // sheets") at the owner's explicit request to catch as much as possible, deliberately
+    // erring toward high recall since this net only seeds a Terra candidate for review -- it
+    // never creates an event by itself. The prompt text itself is unchanged by this bump; it
+    // exists because a wider net on a rescan can surface events a narrower net's version
+    // would never have found, and those must not be presented as though the narrower
+    // version had already covered them.
     private const string BaseAnalysisPromptVersion = "6.7-sexual-content-only";
     // Bumped for the keyword safety net's lane isolation fix: a candidate whose window
     // happens to match a checkpoint cached under the prior version may have been built
