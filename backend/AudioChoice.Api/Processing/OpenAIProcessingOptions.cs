@@ -399,7 +399,13 @@ public sealed class OpenAIProcessingOptions
     // See BaseAnalysisPromptVersion's own remarks for the full reasoning. A scan made under
     // the prior version applied the old prompt wording and the old all-or-nothing scene
     // outcome, and must be re-scanned to pick this up.
-    public string ScannerVersion { get; init; } = "7.11-sexual-content-only";
+    //
+    // Bumped again together with BaseAnalysisPromptVersion: a real boundary bug in the
+    // keyword-safety-net fallback above, found on a live rescan of this deployment's own
+    // test book immediately after shipping it, produced dozens of multi-minute "suggestive
+    // dialogue" events for what was really one line each. A scan made under the prior
+    // version has these oversized events and must be re-scanned to correct them.
+    public string ScannerVersion { get; init; } = "7.12-sexual-content-only";
     /// <summary>Only jobs in this lane may be claimed by this worker instance.</summary>
     public string ProcessingLane { get; init; } = ScanProcessingLanes.AzureOpenAI;
     /// <summary>

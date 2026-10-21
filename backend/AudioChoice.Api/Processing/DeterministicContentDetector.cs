@@ -24,6 +24,26 @@ public static partial class DeterministicContentDetector
         segments.Any(segment => ObviousContentRegex().IsMatch(segment.Text));
 
     /// <summary>
+    /// The first segment within a <see cref="CandidateWindows"/> range that actually matches
+    /// the keyword cue, rather than the padded context around it.
+    /// </summary>
+    /// <remarks>
+    /// A candidate window spans up to <c>contextSegments</c> on each side of the segment
+    /// that matched -- several minutes on dense narration -- deliberately, since that
+    /// padding is what gives Terra enough surrounding text to judge whether a full scene is
+    /// happening. But a candidate that fails the scene bar and falls back to a lighter
+    /// label (see OpenAIContentAnalysisProvider's AddKeywordSafetyNetFallback) must not
+    /// inherit that same multi-minute span as its own boundary -- a short reference or one
+    /// suggestive line is a short event, exactly the same rule the model's own prompt states
+    /// for everything else it reports. This re-finds the one segment inside the window that
+    /// is actually responsible for the window existing at all, so a fallback event can anchor
+    /// to it instead of to the padding.
+    /// </remarks>
+    public static TranscriptSegment? FindMatchingCueSegment(
+        IReadOnlyList<TranscriptSegment> windowSegments) =>
+        windowSegments.FirstOrDefault(segment => SceneCueRegex().IsMatch(segment.Text));
+
+    /// <summary>
     /// Produces high-recall transcript windows for the inexpensive first stage of the
     /// scanner funnel. This only decides what needs model review; it never creates a
     /// scene event by itself, so explicit-scene decisions remain with Luna/Terra/Sol.

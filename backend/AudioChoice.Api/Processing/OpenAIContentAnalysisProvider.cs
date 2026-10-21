@@ -217,7 +217,19 @@ public sealed class OpenAIContentAnalysisProvider(
     // sexual_suggestive_dialogue, chosen from Terra/Sol's own evidence booleans, rather than
     // vanishing. A scan made under the prior version applied the old rules and may be
     // missing events this version would now report.
-    private const string BaseAnalysisPromptVersion = "6.9-sexual-content-only";
+    //
+    // Bumped again for a real boundary bug in that same fallback, caught on a live rescan of
+    // this deployment's own test book (Stephen King's IT) immediately after shipping it: the
+    // fallback used the keyword-seeded candidate's full review-window bounds (up to several
+    // minutes, the padding Terra needs to judge a full scene) as the reported event's own
+    // boundary, producing dozens of 70-300 second "suggestive dialogue" skips for what was
+    // really one line each -- a direct violation of this same prompt's own instruction that
+    // a short reference must stay a short event. The fallback now re-locates the one segment
+    // within that window that actually matched the keyword cue (see
+    // DeterministicContentDetector.FindMatchingCueSegment) and anchors to that segment alone.
+    // A scan made under the prior version has these oversized fallback events and must be
+    // re-scanned to correct them, not merely re-run for new coverage.
+    private const string BaseAnalysisPromptVersion = "6.10-sexual-content-only";
     // Bumped for the keyword safety net's lane isolation fix: a candidate whose window
     // happens to match a checkpoint cached under the prior version may have been built
     // before a safety-net seed's own lane existed, when it could still get coalesced into a
@@ -1795,11 +1807,21 @@ public sealed class OpenAIContentAnalysisProvider(
         // No confirmed quote to anchor to -- Terra rejected the scene claim this quote was
         // meant to support, so trusting that same quote for a different label's boundary
         // would be trusting evidence the verifier itself did not accept. The keyword
-        // window's own bounds are the only range anything in this pipeline still stands
-        // behind for this candidate, so the fallback event uses that window directly rather
-        // than inventing a narrower one with no support at all.
-        var start = sourceCandidate.ProposedStartTime;
-        var end = sourceCandidate.ProposedEndTime;
+        // window Terra reviewed is several minutes wide on dense narration (it exists to
+        // give Terra context to judge a full scene, not to be a listener-facing boundary by
+        // itself), so re-locate the one segment within it that actually matched the keyword
+        // cue and anchor the fallback event to that segment alone -- a short reference or a
+        // single suggestive line is a short event, the exact same rule the prompt states for
+        // everything else this pipeline reports. Falls back to the full window only in the
+        // extremely unlikely case the cue segment cannot be re-found (it was always found
+        // once already, to seed this very candidate).
+        var cueSegment = DeterministicContentDetector.FindMatchingCueSegment(
+            sourceCandidate.Segments
+                .Where(segment => segment.StartTime >= sourceCandidate.ProposedStartTime &&
+                    segment.EndTime <= sourceCandidate.ProposedEndTime)
+                .ToArray());
+        var start = cueSegment?.StartTime ?? sourceCandidate.ProposedStartTime;
+        var end = cueSegment?.EndTime ?? sourceCandidate.ProposedEndTime;
 
         // Reported at the keyword safety net's own long-standing confidence (see
         // AddUncoveredSexualCandidates), not Terra/Sol's confidence in the scene claim they

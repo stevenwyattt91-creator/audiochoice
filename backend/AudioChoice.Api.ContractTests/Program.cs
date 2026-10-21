@@ -2199,15 +2199,26 @@ Assert(retainedSceneEvents.Count == 1,
                 item => item.EventID == ContentTaxonomy.Mappings["sexual_complete_scene"].EventID),
             "A keyword-safety-net candidate Terra and Sol both rejected for the scene bar " +
             "was still reported as a sexual_complete_scene.");
+        var fallbackEvent = fallbackResult.FirstOrDefault(
+            item => item.EventID == ContentTaxonomy.Mappings["sexual_suggestive_dialogue"].EventID);
         Assert(
-            fallbackResult.Any(
-                item => item.EventID ==
-                    ContentTaxonomy.Mappings["sexual_suggestive_dialogue"].EventID),
+            fallbackEvent is not null,
             "A keyword-safety-net candidate rejected for the scene bar (no direct act " +
             "evidence) vanished entirely instead of falling back to " +
             "sexual_suggestive_dialogue -- the exact real content the keyword scan was " +
             "seeded to catch (Luna's own first pass proposed nothing for this window at " +
             "all) was lost with no event reported.");
+        // Narrowed to the one segment that actually matched the keyword cue (10 seconds,
+        // this fixture's own segment length), not the padded ±12-segment review window
+        // around it, which in this fixture spans the full 10-40 range (30 seconds) -- the
+        // real failure mode this guards against.
+        Assert(
+            fallbackEvent is not null && fallbackEvent.StartTime == 10 && fallbackEvent.EndTime == 20,
+            $"A keyword-safety-net fallback event's boundary was not narrowed to the cue " +
+            $"segment that actually matched -- it inherited the whole multi-segment review " +
+            $"window Terra was given for context instead (got " +
+            $"{(fallbackEvent is null ? "n/a" : $"{fallbackEvent.StartTime}-{fallbackEvent.EndTime}")}" +
+            ", expected 10-20; a short cue must stay a short event, not a multi-minute skip).");
     }
     finally
     {
