@@ -166,7 +166,7 @@ public static partial class DeterministicContentDetector
             @"held\s+(?:her|him)\s+down|pinned\s+(?:her|him)\s+down|" +
             @"begged\s+him\s+to\s+stop|begged\s+her\s+to\s+stop|told\s+him\s+to\s+stop|" +
             @"tried\s+to\s+(?:push|fight|struggle)\s+(?:him|her)\s+(?:off|away)|" +
-            @"couldn't\s+move|couldn't\s+fight\s+back|too\s+weak\s+to\s+resist|" +
+            @"could(?:n't| not)\s+move|could(?:n't| not)\s+fight\s+back|too\s+weak\s+to\s+resist|" +
             @"too\s+drunk\s+to\s+(?:consent|resist|stop\s+him|stop\s+her)" +
         @")\b",
         RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
