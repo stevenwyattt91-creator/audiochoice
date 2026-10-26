@@ -14,6 +14,18 @@ public static class ScanProcessingLanes
 {
     public const string AzureOpenAI = "azure-openai";
     public const string IOSBetaLambda = "ios-beta-lambda";
+
+    /// <summary>
+    /// A parallel test lane for evaluating Bedrock-hosted Qwen3-32B against the production
+    /// self-hosted Qwen3.6-27B lane (<see cref="IOSBetaLambda"/>) on real books, without
+    /// touching production scanning or requiring a full provider switch to find out whether
+    /// it holds up. A job only runs here when explicitly requeued into this lane; the
+    /// production worker never claims jobs tagged with it, and this worker never claims a job
+    /// tagged for the production lane -- the two never compete for or overwrite each other's
+    /// results, each requeue just adds one more scan_results row for the same edition under
+    /// a different scanner_version.
+    /// </summary>
+    public const string BedrockQwenTest = "bedrock-qwen-test";
 }
 
 public sealed record BookFingerprint(

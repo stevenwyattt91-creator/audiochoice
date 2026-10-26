@@ -412,6 +412,12 @@ public sealed class OpenAIProcessingOptions
     // to the matched transcript SEGMENT, not the matched WORDS within it. See
     // BaseAnalysisPromptVersion's own remarks for the full fix. A scan made under the prior
     // version has this boundary bug and must be re-scanned to correct it.
+    // Overridable via config (AudioChoice:OpenAI:ScannerVersion) so a parallel test worker
+    // (see ScanProcessingLanes.BedrockQwenTest's own remarks) can report a scanner_version
+    // that is obviously distinct from production's own default below -- comparing results
+    // across two scan_results rows for the same edition only works if their scanner_version
+    // values are not identical, and a hardcoded default here left no way to achieve that
+    // without hand-editing the shared default for a worker that will likely be torn down.
     public string ScannerVersion { get; init; } = "7.13-sexual-content-only";
     /// <summary>Only jobs in this lane may be claimed by this worker instance.</summary>
     public string ProcessingLane { get; init; } = ScanProcessingLanes.AzureOpenAI;

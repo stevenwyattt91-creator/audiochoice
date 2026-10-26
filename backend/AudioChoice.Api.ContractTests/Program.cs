@@ -3578,6 +3578,29 @@ Assert(
         !RoutingAnalysisModelClient.IsBedrockModel("nova-lite"),
     "A model name missing its provider prefix was claimed by a vendor rather than refused.");
 
+// Bedrock now hosts Qwen natively ("qwen.qwen3-32b-v1:0"), with the same vendor-prefix
+// convention as "amazon." etc. -- but IsVllmModel's own bare "qwen" substring match (for this
+// pipeline's self-hosted served name, "qwen3.6-27b") would also match that Bedrock model id,
+// since "qwen.qwen3-32b-v1:0" contains "qwen" too. A real production bug this exact confusion
+// would cause: naming a Bedrock Qwen model in configuration would silently route it to the
+// self-hosted vLLM server instead, which either fails outright (no vLLM endpoint reachable)
+// or, worse, succeeds against the wrong server with no error at all. IsBedrockModel must
+// recognize the Bedrock-hosted name, and CompleteJson's dispatch must check it before
+// IsVllmModel, so this ambiguity resolves to Bedrock every time.
+Assert(
+    RoutingAnalysisModelClient.IsBedrockModel("qwen.qwen3-32b-v1:0"),
+    "A Bedrock-hosted Qwen model name was not recognised as a Bedrock model.");
+Assert(
+    RoutingAnalysisModelClient.IsVllmModel("qwen.qwen3-32b-v1:0"),
+    "This model id also matching IsVllmModel's own bare substring check is the whole point " +
+    "of this test -- CompleteJson's dispatch order (Bedrock checked first), not this method " +
+    "alone, is what has to resolve the ambiguity correctly.");
+Assert(
+    RoutingAnalysisModelClient.IsVllmModel("qwen3.6-27b") &&
+        !RoutingAnalysisModelClient.IsBedrockModel("qwen3.6-27b"),
+    "This pipeline's own self-hosted served model name ('qwen3.6-27b', no vendor-prefixed " +
+    "dot) was not recognised as vLLM, or was wrongly claimed by Bedrock.");
+
 // The exact shape Nova returned that discarded four books' analysis: the list encoded as a
 // string inside a one-element list. Pinned because the repair is invisible when it works and
 // the failure is a byte offset inside text that reads like a correct answer.

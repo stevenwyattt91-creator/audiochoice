@@ -1,0 +1,87 @@
+services:
+  # A parallel, isolated test worker evaluating Bedrock-hosted Qwen3-32B against the real
+  # production self-hosted Qwen3.6-27B lane (see deploy/lambda/docker-compose.yml's own
+  # "qwen"/"scanner" services), without touching production scanning or requiring a full
+  # provider switch to find out whether it holds up on real books.
+  #
+  # This is NOT a replacement for the production scanner service. It is a second worker
+  # instance claiming jobs from its own queue lane (ScanProcessingLanes.BedrockQwenTest, see
+  # CloudContracts.cs's own remarks) that the production worker never touches. A job only
+  # runs here when explicitly requeued into this lane; requeuing adds one more scan_results
+  # row for the same edition under a different scanner_version, it never overwrites or
+  # competes with the production lane's own result.
+  #
+  # Run alongside the existing qwen/whisper/scanner services on this same host (not replacing
+  # them) so transcription reuses the already-running faster-whisper container over
+  # localhost, exactly as the production scanner does -- this test worker needs no GPU of
+  # its own at all, since Bedrock is the analysis transport, not something hosted here.
+  #
+  # Start with: sudo docker compose -f docker-compose.yml -f docker-compose.bedrock-test.yml
+  #   up -d --build bedrock-test-scanner
+  # Stop with:  sudo docker compose -f docker-compose.yml -f docker-compose.bedrock-test.yml
+  #   stop bedrock-test-scanner
+  bedrock-test-scanner:
+    image: audiochoice-bedrock-test-scanner:local
+    build:
+      context: ../..
+      dockerfile: deploy/lambda/Dockerfile
+    restart: unless-stopped
+    network_mode: host
+    volumes:
+      # Separate checkpoint directory from the production scanner's -- a Bedrock-answered
+      # batch must never be read back as though a vLLM/Qwen3.6-27B call had produced it, and
+      # vice versa. CheckpointPath already keys on the model name and BaseAnalysisPromptVersion
+      # (see OpenAIContentAnalysisProvider.cs's own remarks), which alone would prevent a
+      # collision, but a separate directory removes any need to rely on that alone working
+      # correctly for a test lane that should be trivially easy to tear down and re-run clean.
+      - /lambda/nfs/audiochoice-worker-state/bedrock-test-scanner-data:/data
+    env_file:
+      - lambda-bedrock-test.env
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+      AudioChoice__DataPath: /data
+      AudioChoice__OpenAI__WorkerEnabled: "true"
+      # The one piece of real isolation that matters: this worker only ever claims jobs
+      # explicitly requeued into this lane. It will never pick up a production job, and the
+      # production worker (processing lane ios-beta-lambda) will never pick up a job queued
+      # here, however both are left running on the same host at the same time.
+      AudioChoice__OpenAI__ProcessingLane: bedrock-qwen-test
+      AudioChoice__TemporaryAudioStorage__S3TranscriptEnabled: "true"
+      AudioChoice__TemporaryAudioStorage__TranscriptBucketName: audiochoice-transcripts-522895896460
+      AudioChoice__TemporaryAudioStorage__S3Region: us-east-1
+      AudioChoice__TemporaryAudioStorage__BlobTranscriptEnabled: "false"
+      # Reuses the already-running faster-whisper container (the "whisper" service in
+      # docker-compose.yml) over localhost -- this test lane is only swapping out the
+      # analysis transport, not transcription, so there is no reason to pay to transcribe
+      # the same book a second time just to compare analysis models on it.
+      AudioChoice__OpenAI__TranscriptionProvider: faster-whisper
+      AudioChoice__OpenAI__FasterWhisperEndpoint: http://127.0.0.1:8001/
+      AudioChoice__OpenAI__FasterWhisperTimeoutSeconds: "900"
+      # Analysis transport: Bedrock, with all three tiers naming the same Qwen3-32B model
+      # Bedrock hosts natively (qwen.qwen3-32b-v1:0) -- see RoutingAnalysisModelClient's own
+      # IsBedrockModel/IsVllmModel remarks for why the "qwen." prefix, not a bare "qwen",
+      # is what makes this resolve to Bedrock rather than the self-hosted vLLM client.
+      AudioChoice__OpenAI__AnalysisProvider: bedrock
+      AudioChoice__OpenAI__BedrockRegion: us-east-1
+      AudioChoice__OpenAI__AnalysisModel: qwen.qwen3-32b-v1:0
+      AudioChoice__OpenAI__SceneVerificationModel: qwen.qwen3-32b-v1:0
+      AudioChoice__OpenAI__SceneEscalationModel: qwen.qwen3-32b-v1:0
+      # Lower than the production vLLM lane's 6/6/6: Bedrock's own per-account on-demand
+      # throttling limits for a newly-used model are unknown and unmeasured here, and
+      # BedrockConverseModelClient already retries a ThrottlingException on its own patient
+      # budget (10 retries, exponential backoff up to 30s) rather than failing outright --
+      # starting conservative and raising it once a real throttling rate is observed in this
+      # test lane's own logs is safer than guessing a higher number up front for a provider
+      # this pipeline has never run production volume against.
+      AudioChoice__OpenAI__ContentAnalysisConcurrency: "3"
+      AudioChoice__OpenAI__SceneVerificationConcurrency: "3"
+      AudioChoice__OpenAI__SceneEscalationConcurrency: "3"
+      AudioChoice__OpenAI__MaximumSceneVerificationRequestsPerJob: "600"
+      AudioChoice__OpenAI__MaximumSceneEscalationRequestsPerJob: "600"
+      AudioChoice__Ffmpeg__MaximumInputDurationSeconds: "180000"
+      AudioChoice__OpenAI__MaximumAudioDurationSeconds: "180000"
+      AudioChoice__Database__ApplyMigrations: "false"
+      # Deliberately distinct from production's own default (7.13-sexual-content-only) so
+      # this test lane's results are never mistaken for a production scan, and so the two
+      # can be directly compared by scanner_version in the scan_results table.
+      AudioChoice__OpenAI__ScannerVersion: 7.13-bedrock-qwen32b-test

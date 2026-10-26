@@ -54,11 +54,21 @@ public sealed class RoutingAnalysisModelClient(
         model.StartsWith("o3", StringComparison.OrdinalIgnoreCase) ||
         model.StartsWith("chatgpt", StringComparison.OrdinalIgnoreCase);
 
+    /// <remarks>
+    /// Widened to include "qwen." -- Bedrock now hosts Qwen natively under model IDs like
+    /// "qwen.qwen3-32b-v1:0", with the same vendor-prefix convention as "amazon." etc. This
+    /// must be checked, and this method called, before <see cref="IsVllmModel"/>'s own bare
+    /// "qwen" substring match: without the trailing dot and without ordering, a Bedrock-hosted
+    /// Qwen model name would otherwise match vLLM's check first and be sent to the self-hosted
+    /// server instead of Bedrock -- silently misrouting a real config to the wrong service
+    /// with no error, exactly the failure mode this class's own remarks warn against.
+    /// </remarks>
     internal static bool IsBedrockModel(string model) =>
         model.Contains("amazon.", StringComparison.OrdinalIgnoreCase) ||
         model.Contains("anthropic.", StringComparison.OrdinalIgnoreCase) ||
         model.Contains("meta.", StringComparison.OrdinalIgnoreCase) ||
-        model.Contains("mistral.", StringComparison.OrdinalIgnoreCase);
+        model.Contains("mistral.", StringComparison.OrdinalIgnoreCase) ||
+        model.Contains("qwen.", StringComparison.OrdinalIgnoreCase);
 
     /// <summary>
     /// Whether a model name belongs to the self-hosted vLLM server rather than OpenAI or
@@ -67,10 +77,14 @@ public sealed class RoutingAnalysisModelClient(
     /// <remarks>
     /// vLLM model identifiers are whatever <c>--served-model-name</c> the server was started
     /// with (see deploy/lambda/vllm-eval/docker-compose.yml), so there is no vendor-assigned
-    /// naming convention to key on the way "gpt" or "amazon." are. Matched on "qwen" and
-    /// "vllm" as the two names this pipeline actually uses today; add a case here rather than
-    /// widening either check if a genuinely different local model name is ever configured, so
-    /// an unrecognized name still fails loudly instead of being silently misrouted.
+    /// naming convention to key on the way "gpt" or "amazon." are. Matched on "qwen" (bare,
+    /// no trailing dot -- this pipeline's own self-hosted served name is "qwen3.6-27b") and
+    /// "vllm" as the two names this pipeline actually uses today. Callers MUST check
+    /// <see cref="IsBedrockModel"/> first: a Bedrock-hosted Qwen model name ("qwen.qwen3-32b-
+    /// v1:0") also contains the bare substring "qwen" and would otherwise match here too.
+    /// Add a case here rather than widening either check if a genuinely different local model
+    /// name is ever configured, so an unrecognized name still fails loudly instead of being
+    /// silently misrouted.
     /// </remarks>
     internal static bool IsVllmModel(string model) =>
         model.Contains("qwen", StringComparison.OrdinalIgnoreCase) ||
@@ -113,6 +127,10 @@ public sealed class RoutingAnalysisModelClient(
             chosen = openAI ?? throw new InvalidOperationException(
                 $"Model '{model}' names an OpenAI model, but no OpenAI client was configured.");
         }
+        // Checked before IsVllmModel deliberately: a Bedrock-hosted Qwen model name (e.g.
+        // "qwen.qwen3-32b-v1:0") also contains the bare substring "qwen" that IsVllmModel
+        // matches on, and would be silently misrouted to the self-hosted vLLM server instead
+        // of Bedrock if that check ran first. See IsBedrockModel/IsVllmModel's own remarks.
         else if (IsBedrockModel(model))
         {
             chosen = bedrock ?? throw new InvalidOperationException(

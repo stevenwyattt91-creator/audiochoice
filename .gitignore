@@ -47,3 +47,10 @@ docs/email-templates/previews/
 
 # Python bytecode cache from the scripts/ helpers.
 __pycache__/
+
+# Worker secrets for the Lambda GPU host's own containers (RDS connection string, AWS keys,
+# OpenAI key, the app's own API token). Never committed -- these are created directly on the
+# host via SSH, the same way lambda-worker.env (this deployment's production env file) has
+# always been handled, outside git entirely.
+deploy/lambda/lambda-worker.env
+deploy/lambda/lambda-bedrock-test.env
