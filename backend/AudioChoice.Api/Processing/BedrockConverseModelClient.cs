@@ -102,14 +102,7 @@ public sealed class BedrockConverseModelClient(
                 continue;
             }
             catch (Exception error) when (
-                (error is ModelTimeoutException or
-                     Amazon.BedrockRuntime.Model.InternalServerException or
-                     // "Model produced invalid sequence as part of ToolUse". The request was
-                     // accepted; the model produced something unusable while sampling. Asking
-                     // again is the correct response and normally works. Left out at first
-                     // because it reads like a client error, which cost a book at 91% analysed.
-                     ModelErrorException) &&
-                attempt < options.MaximumRetries)
+                IsRetryableFault(error) && attempt < options.MaximumRetries)
             {
                 // Never repeat a rejected request: a malformed request repeated is rejected
                 // again, and paying three times only delays the error.
@@ -304,6 +297,39 @@ public sealed class BedrockConverseModelClient(
         }
     }
 
+
+    /// <summary>
+    /// Whether a fault is one worth asking again rather than failing the whole batch outright.
+    /// </summary>
+    /// <remarks>
+    /// <see cref="ModelTimeoutException"/>, <see cref="Amazon.BedrockRuntime.Model.InternalServerException"/>,
+    /// and <see cref="ModelErrorException"/> ("Model produced invalid sequence as part of
+    /// ToolUse" -- the request was accepted, the model produced something unusable while
+    /// sampling, and asking again normally works) are retried unconditionally.
+    ///
+    /// The <see cref="Amazon.BedrockRuntime.Model.ValidationException"/> case is narrower and
+    /// exists for one specific, confirmed, reproducible bug: a real production failure on
+    /// Carl's Doomsday Scenario claimed "your prompt contains at least 32769 input tokens"
+    /// immediately after a genuinely small, successful call (the preceding request logged
+    /// in=4991), on a candidate whose own real segment count and character length were
+    /// nowhere near large enough to produce that figure. The exact same number recurred
+    /// across three separate books and pipeline stages after two independent rounds of
+    /// shrinking every known real prompt-size knob (MaximumSegmentsPerAnalysisRequest,
+    /// MaximumContextExpansionSeconds) failed to change it at all -- ruling out a genuinely
+    /// oversized prompt as the cause, the same way an almost identical vLLM-side bug was
+    /// ruled out before (see VerifySceneBatchWithCheckpoint's own remarks on its
+    /// "context-overflow retries" catch). What remains is a bogus input-token count from the
+    /// provider side that a retry of the identical request reliably clears. Matched narrowly
+    /// on this exact claimed count, not on the error type alone, so a real, differently-sized
+    /// overflow elsewhere still fails loudly instead of being silently retried into eventually
+    /// exhausting the retry budget and failing anyway, just slower.
+    /// </remarks>
+    private static bool IsRetryableFault(Exception error) =>
+        error is ModelTimeoutException or
+            Amazon.BedrockRuntime.Model.InternalServerException or
+            ModelErrorException ||
+        (error is Amazon.BedrockRuntime.Model.ValidationException &&
+            error.Message.Contains("at least 32769 input tokens"));
 
     private static string ExtractToolInput(
         ConverseResponse response, string schemaName, JsonObject schema)
