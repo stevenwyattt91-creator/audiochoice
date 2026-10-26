@@ -89,6 +89,15 @@ services:
       # recompute (not just barely under it) so a second overflow on a different, denser
       # passage elsewhere in the book does not cost another full failed run.
       AudioChoice__OpenAI__MaximumSegmentsPerAnalysisRequest: "20"
+      # A real SECOND overflow, on the same 32,769-token error, during Terra scene
+      # verification rather than Luna's first pass: Terra builds its own context window
+      # independently via SentenceBoundedContext, expanding up to this many seconds each
+      # side of a candidate to the nearest sentence boundary -- a dense candidate's window
+      # still overflowed Qwen3-32B's context even with Luna's batches already shrunk above.
+      # Lowered from the production default (60) in roughly the same proportion as the Luna
+      # batch shrink (20/60) for the same reason: a smaller-context model needs every place
+      # a large prompt can form reduced together, not just the first one found.
+      AudioChoice__OpenAI__MaximumContextExpansionSeconds: "20"
       # Lower than the production vLLM lane's 6/6/6: Bedrock's own per-account on-demand
       # throttling limits for a newly-used model are unknown and unmeasured here, and
       # BedrockConverseModelClient already retries a ThrottlingException on its own patient
