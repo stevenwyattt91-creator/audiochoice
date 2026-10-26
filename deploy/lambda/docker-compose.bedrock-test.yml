@@ -81,23 +81,27 @@ services:
       AudioChoice__OpenAI__AnalysisModel: qwen.qwen3-32b-v1:0
       AudioChoice__OpenAI__SceneVerificationModel: qwen.qwen3-32b-v1:0
       AudioChoice__OpenAI__SceneEscalationModel: qwen.qwen3-32b-v1:0
-      # A real measured overflow: the production default (60 segments) produced a batch at
-      # 32,769 input tokens -- one over Qwen3-32B's 32,768 ceiling on Bedrock -- and failed
-      # the whole job. ~546 tokens/segment observed from that failure (32769/60), so 60
-      # segments was already right at the edge with the fixed fewer_thousand-token
-      # instruction prompt and output budget on top. Set well below even a conservative
-      # recompute (not just barely under it) so a second overflow on a different, denser
-      # passage elsewhere in the book does not cost another full failed run.
-      AudioChoice__OpenAI__MaximumSegmentsPerAnalysisRequest: "20"
-      # A real SECOND overflow, on the same 32,769-token error, during Terra scene
-      # verification rather than Luna's first pass: Terra builds its own context window
-      # independently via SentenceBoundedContext, expanding up to this many seconds each
-      # side of a candidate to the nearest sentence boundary -- a dense candidate's window
-      # still overflowed Qwen3-32B's context even with Luna's batches already shrunk above.
-      # Lowered from the production default (60) in roughly the same proportion as the Luna
-      # batch shrink (20/60) for the same reason: a smaller-context model needs every place
-      # a large prompt can form reduced together, not just the first one found.
-      AudioChoice__OpenAI__MaximumContextExpansionSeconds: "20"
+      # Raised from 20 back toward the production default (60) after finding the real cause
+      # of the original overflow: BuildInput's own prompt-building serialization was
+      # including full per-word timing (TranscriptSegment.Words) for every segment, never
+      # read by this first pass, which silently multiplied every batch's real token count far
+      # beyond what its segment text alone would suggest (see OpenAIContentAnalysisProvider's
+      # own remarks on BuildInput). That bug is now fixed; this was never really a "need a
+      # smaller batch size" problem, it was "stop sending data nobody reads." Shrinking the
+      # batch to 20 earlier also meaningfully hurt recall: Carl's Doomsday Scenario's Luna
+      # pass proposed only 108 real candidates here against production's 445 on the same
+      # book, because a narrower window gives the model less surrounding context per
+      # decision. 45 is a middle step, not an immediate jump straight back to 60, so this
+      # gets to be tested with real margin before trusting the original ceiling again.
+      AudioChoice__OpenAI__MaximumSegmentsPerAnalysisRequest: "45"
+      # Raised from 20 back toward the production default (60), same reasoning as
+      # MaximumSegmentsPerAnalysisRequest above: the real overflow cause was the Words
+      # per-word timing bloat in the prompt-building serialization (now fixed), not that
+      # Terra's own context window genuinely needed to be this narrow. A narrower window
+      # also means Terra sees less surrounding narrative per candidate, which plausibly
+      # affects its own accept/reject judgment the same way Luna's batch size affects
+      # recall. 45 as a matching middle step before trusting the original ceiling again.
+      AudioChoice__OpenAI__MaximumContextExpansionSeconds: "45"
       # Lower than the production vLLM lane's 6/6/6: Bedrock's own per-account on-demand
       # throttling limits for a newly-used model are unknown and unmeasured here, and
       # BedrockConverseModelClient already retries a ThrottlingException on its own patient
