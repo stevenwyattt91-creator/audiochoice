@@ -2570,7 +2570,17 @@ Candidates:
     internal static string BuildInput(
         IReadOnlyList<TranscriptSegment> segments)
     {
-        var transcript = JsonSerializer.Serialize(segments);
+        // Strips per-word timing before the prompt is built, the same real bug and fix as
+        // ToPromptCandidate's own remarks: TranscriptSegment's Words property (full per-word
+        // text and timing) is never read by this first pass, only by the later
+        // TranscriptWordLocator.FindPhrase call against the original in-memory segments, yet
+        // it was being serialized into the model's prompt on every single first-pass batch
+        // here too -- not just Terra/Sol's verification calls. This is the more significant
+        // instance of the same bug: every one of Luna's batches was carrying this cost, on
+        // every book, on both the Bedrock and self-hosted transports, for the lifetime of
+        // this pipeline.
+        var transcript = JsonSerializer.Serialize(
+            segments.Select(segment => segment with { Words = null }));
 
         return """
 Act as an audiobook content-preference classifier. Identify only events that are explicitly

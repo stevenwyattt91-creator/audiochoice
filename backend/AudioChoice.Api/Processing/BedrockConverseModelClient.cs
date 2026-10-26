@@ -387,6 +387,68 @@ public sealed class BedrockConverseModelClient(
     private static bool IsBogusContextOverflow(Amazon.BedrockRuntime.Model.ValidationException error) =>
         error.Message.Contains("at least 32769 input tokens");
 
+    /// <summary>
+    /// Finds the first schema-required field that is missing or explicitly null anywhere in
+    /// an answer, recursing into nested objects and array items the same way
+    /// <see cref="Conform"/> does. Returns null when every required field the schema actually
+    /// declares is present with a real value.
+    /// </summary>
+    /// <remarks>
+    /// Deliberately only checks presence/null-ness, not type or content -- a wrong type is
+    /// already a separate, louder failure elsewhere (deserialization), and this exists purely
+    /// to catch the one gap a forced tool_choice does not close: a field the schema marks
+    /// required can still come back null.
+    /// </remarks>
+    private static string? FindMissingRequiredField(JsonNode answer, JsonObject? schema)
+    {
+        if (answer is not JsonObject obj || schema is null) return null;
+
+        if (schema["required"] is JsonArray required)
+        {
+            foreach (var requiredField in required)
+            {
+                if (requiredField is not JsonValue nameValue ||
+                    !nameValue.TryGetValue(out string? name))
+                {
+                    continue;
+                }
+                if (obj[name] is null)
+                {
+                    return name;
+                }
+            }
+        }
+
+        if (schema["properties"] is not JsonObject properties) return null;
+        foreach (var property in properties)
+        {
+            var value = obj[property.Key];
+            if (value is null) continue;
+            var declared = property.Value as JsonObject;
+            var type = declared?["type"] is JsonValue declaredType &&
+                declaredType.TryGetValue(out string? single) ? single : null;
+
+            if (type == "object" && FindMissingRequiredField(value, declared) is { } nested)
+            {
+                return $"{property.Key}.{nested}";
+            }
+
+            if (type == "array" && value is JsonArray items)
+            {
+                foreach (var item in items)
+                {
+                    if (item is not null &&
+                        FindMissingRequiredField(item, declared?["items"] as JsonObject) is { } itemField)
+                    {
+                        return $"{property.Key}[].{itemField}";
+                    }
+                }
+            }
+        }
+
+        return null;
+    }
+
     private static string ExtractToolInput(
         ConverseResponse response, string schemaName, JsonObject schema)
     {
@@ -399,6 +461,26 @@ public sealed class BedrockConverseModelClient(
                     ?? throw new InvalidOperationException(
                         $"{schemaName} returned tool arguments that were not an object.");
                 Conform(answer, schema);
+                var missingField = FindMissingRequiredField(answer, schema);
+                if (missingField is not null)
+                {
+                    // A real production failure on Butcher's Masquerade: Bedrock's forced
+                    // tool_choice is enforced loosely enough to guarantee the right field
+                    // names and types exist in the schema, but not that the model actually
+                    // filled every field the schema marks required -- one of 251 real Terra
+                    // answers came back a syntactically valid tool call with a null
+                    // candidateKey, which crashed a plain dictionary lookup four stages later
+                    // with no indication of which call produced it. Treated as the same class
+                    // of failure as NoToolResultException (the tool was technically used, but
+                    // the answer still cannot be trusted or acted on) rather than a generic
+                    // fault, so CompleteJson's retry loop asks again instead of either
+                    // crashing deep in unrelated code or silently treating a null key as if
+                    // it were a real one.
+                    var answerJson = answer.ToJsonString();
+                    throw new NoToolResultException(
+                        schemaName, $"missing required field '{missingField}'",
+                        answerJson.Length > 400 ? answerJson[..400] : answerJson);
+                }
                 return answer.ToJsonString();
             }
         }
