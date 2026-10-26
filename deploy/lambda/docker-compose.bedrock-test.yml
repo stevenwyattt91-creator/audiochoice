@@ -62,22 +62,33 @@ services:
       # for why the "qwen." prefix, not a bare "qwen", is what makes this resolve to Bedrock
       # rather than the self-hosted vLLM client.
       #
-      # Switched from qwen.qwen3-32b-v1:0 to qwen.qwen3-next-80b-a3b after a real failure:
-      # Qwen3-32B's context window on Bedrock is only 32,768 tokens, half the self-hosted
-      # Qwen3.6-27B lane's 65,536, and a real production-sized batch (IT, Carl's Doomsday
-      # Scenario) overflowed it outright with a 400 from Bedrock. Qwen3-Next-80B-A3B has a
-      # 262,144-token context window on Bedrock (4x the self-hosted lane's own ceiling) at
-      # almost the same price ($0.15/M input, same as the 32B model; $1.20/M output vs.
-      # $0.60/M -- an extra ~$0.08 on a full IT-length book given this pipeline's own
-      # input-token-heavy usage pattern). Comfortably fits this pipeline's real batch sizes
-      # with no risk of a mid-scan context overflow, so MaximumSegmentsPerAnalysisRequest
-      # below is restored to production's own default rather than staying shrunk for the
-      # smaller model.
+      # Tried qwen.qwen3-next-80b-a3b (262,144-token context, no risk of the overflow below)
+      # as a fix for Qwen3-32B's small context window, but found a different, worse real
+      # failure: it does not reliably honor Bedrock's forced tool-choice the way Nova and
+      # Qwen3-32B both do -- on a batch with no sexual content, it answered in plain prose
+      # (stopReason "end_turn", not "tool_use") explaining why nothing qualified, which
+      # BedrockConverseModelClient's own ExtractToolInput correctly treats as a hard failure
+      # rather than silently guessing at an unstructured answer. This is a known class of
+      # Bedrock Converse issue on some models (forced tool_choice inconsistently honored),
+      # not something fixable from this app's own config. Reverted to qwen.qwen3-32b-v1:0,
+      # which has correctly honored the forced tool every time it has been tested here (the
+      # 35-case ground-truth eval, ad hoc single calls, and every real batch before it hit
+      # its own, separate, context-size problem) -- its only real issue is the smaller
+      # 32,768-token window, fixed below by shrinking the batch size instead of switching
+      # models again.
       AudioChoice__OpenAI__AnalysisProvider: bedrock
       AudioChoice__OpenAI__BedrockRegion: us-east-1
-      AudioChoice__OpenAI__AnalysisModel: qwen.qwen3-next-80b-a3b
-      AudioChoice__OpenAI__SceneVerificationModel: qwen.qwen3-next-80b-a3b
-      AudioChoice__OpenAI__SceneEscalationModel: qwen.qwen3-next-80b-a3b
+      AudioChoice__OpenAI__AnalysisModel: qwen.qwen3-32b-v1:0
+      AudioChoice__OpenAI__SceneVerificationModel: qwen.qwen3-32b-v1:0
+      AudioChoice__OpenAI__SceneEscalationModel: qwen.qwen3-32b-v1:0
+      # A real measured overflow: the production default (60 segments) produced a batch at
+      # 32,769 input tokens -- one over Qwen3-32B's 32,768 ceiling on Bedrock -- and failed
+      # the whole job. ~546 tokens/segment observed from that failure (32769/60), so 60
+      # segments was already right at the edge with the fixed fewer_thousand-token
+      # instruction prompt and output budget on top. Set well below even a conservative
+      # recompute (not just barely under it) so a second overflow on a different, denser
+      # passage elsewhere in the book does not cost another full failed run.
+      AudioChoice__OpenAI__MaximumSegmentsPerAnalysisRequest: "20"
       # Lower than the production vLLM lane's 6/6/6: Bedrock's own per-account on-demand
       # throttling limits for a newly-used model are unknown and unmeasured here, and
       # BedrockConverseModelClient already retries a ThrottlingException on its own patient
@@ -95,14 +106,10 @@ services:
       AudioChoice__Database__ApplyMigrations: "false"
       # Deliberately distinct from production's own default (7.13-sexual-content-only) so
       # this test lane's results are never mistaken for a production scan, and so the two
-      # can be directly compared by scanner_version in the scan_results table.
-      # Renamed from 7.13-bedrock-qwen32b-test: the model this lane tests moved from
-      # Qwen3-32B to Qwen3-Next-80B-A3B (see AnalysisModel's own remarks above) after a real
-      # context-window overflow failure. Kept distinct from production's own default
-      # (7.13-sexual-content-only) for the same reason as before -- comparing results across
-      # two scan_results rows for the same edition only works if their scanner_version
-      # values are not identical.
-      AudioChoice__OpenAI__ScannerVersion: 7.13-bedrock-qwen80b-test
+      # can be directly compared by scanner_version in the scan_results table. Reverted from
+      # 7.13-bedrock-qwen80b-test back to naming Qwen3-32B directly, with "-v2" marking that
+      # this run used the shrunk batch size, not the one that overflowed context earlier.
+      AudioChoice__OpenAI__ScannerVersion: 7.13-bedrock-qwen32b-test-v2
       # Both this service and the production "scanner" container use network_mode: host,
       # so both would otherwise try to bind the ASP.NET default port 8080 on the same host
       # and only one could actually start. This test worker has no HTTP API consumer of its
