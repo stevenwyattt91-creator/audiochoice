@@ -57,15 +57,27 @@ services:
       AudioChoice__OpenAI__TranscriptionProvider: faster-whisper
       AudioChoice__OpenAI__FasterWhisperEndpoint: http://127.0.0.1:8001/
       AudioChoice__OpenAI__FasterWhisperTimeoutSeconds: "900"
-      # Analysis transport: Bedrock, with all three tiers naming the same Qwen3-32B model
-      # Bedrock hosts natively (qwen.qwen3-32b-v1:0) -- see RoutingAnalysisModelClient's own
-      # IsBedrockModel/IsVllmModel remarks for why the "qwen." prefix, not a bare "qwen",
-      # is what makes this resolve to Bedrock rather than the self-hosted vLLM client.
+      # Analysis transport: Bedrock, with all three tiers naming the same model Bedrock hosts
+      # natively -- see RoutingAnalysisModelClient's own IsBedrockModel/IsVllmModel remarks
+      # for why the "qwen." prefix, not a bare "qwen", is what makes this resolve to Bedrock
+      # rather than the self-hosted vLLM client.
+      #
+      # Switched from qwen.qwen3-32b-v1:0 to qwen.qwen3-next-80b-a3b after a real failure:
+      # Qwen3-32B's context window on Bedrock is only 32,768 tokens, half the self-hosted
+      # Qwen3.6-27B lane's 65,536, and a real production-sized batch (IT, Carl's Doomsday
+      # Scenario) overflowed it outright with a 400 from Bedrock. Qwen3-Next-80B-A3B has a
+      # 262,144-token context window on Bedrock (4x the self-hosted lane's own ceiling) at
+      # almost the same price ($0.15/M input, same as the 32B model; $1.20/M output vs.
+      # $0.60/M -- an extra ~$0.08 on a full IT-length book given this pipeline's own
+      # input-token-heavy usage pattern). Comfortably fits this pipeline's real batch sizes
+      # with no risk of a mid-scan context overflow, so MaximumSegmentsPerAnalysisRequest
+      # below is restored to production's own default rather than staying shrunk for the
+      # smaller model.
       AudioChoice__OpenAI__AnalysisProvider: bedrock
       AudioChoice__OpenAI__BedrockRegion: us-east-1
-      AudioChoice__OpenAI__AnalysisModel: qwen.qwen3-32b-v1:0
-      AudioChoice__OpenAI__SceneVerificationModel: qwen.qwen3-32b-v1:0
-      AudioChoice__OpenAI__SceneEscalationModel: qwen.qwen3-32b-v1:0
+      AudioChoice__OpenAI__AnalysisModel: qwen.qwen3-next-80b-a3b
+      AudioChoice__OpenAI__SceneVerificationModel: qwen.qwen3-next-80b-a3b
+      AudioChoice__OpenAI__SceneEscalationModel: qwen.qwen3-next-80b-a3b
       # Lower than the production vLLM lane's 6/6/6: Bedrock's own per-account on-demand
       # throttling limits for a newly-used model are unknown and unmeasured here, and
       # BedrockConverseModelClient already retries a ThrottlingException on its own patient
@@ -84,16 +96,13 @@ services:
       # Deliberately distinct from production's own default (7.13-sexual-content-only) so
       # this test lane's results are never mistaken for a production scan, and so the two
       # can be directly compared by scanner_version in the scan_results table.
-      AudioChoice__OpenAI__ScannerVersion: 7.13-bedrock-qwen32b-test
-      # Real failure found running this test lane on IT and Carl's Doomsday Scenario: Bedrock
-      # Qwen3-32B has only a 32,768-token context window, half the self-hosted Qwen3.6-27B
-      # lane's 65,536 (see docker-compose.yml's own --max-model-len remarks). The default
-      # MaximumSegmentsPerAnalysisRequest (60) is sized against that larger window and
-      # produced a real batch at 32,769 input tokens -- one token over Bedrock Qwen3-32B's
-      # ceiling -- which failed the whole job outright with a 400 from Bedrock. Halved here
-      # for this lane specifically so a batch sized for the larger model is never sent to
-      # the smaller one; this does not change the production lane's own default at all.
-      AudioChoice__OpenAI__MaximumSegmentsPerAnalysisRequest: "28"
+      # Renamed from 7.13-bedrock-qwen32b-test: the model this lane tests moved from
+      # Qwen3-32B to Qwen3-Next-80B-A3B (see AnalysisModel's own remarks above) after a real
+      # context-window overflow failure. Kept distinct from production's own default
+      # (7.13-sexual-content-only) for the same reason as before -- comparing results across
+      # two scan_results rows for the same edition only works if their scanner_version
+      # values are not identical.
+      AudioChoice__OpenAI__ScannerVersion: 7.13-bedrock-qwen80b-test
       # Both this service and the production "scanner" container use network_mode: host,
       # so both would otherwise try to bind the ASP.NET default port 8080 on the same host
       # and only one could actually start. This test worker has no HTTP API consumer of its
