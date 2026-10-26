@@ -2500,7 +2500,7 @@ not merely for one suggestive word, and not for how long it lasts.
 """) + SceneVerificationClosingInstructions + """
 
 Candidates:
-""" + JsonSerializer.Serialize(candidates);
+""" + JsonSerializer.Serialize(candidates.Select(ToPromptCandidate));
         var response = await modelClient.CompleteJson(
             model,
             input,
@@ -2993,6 +2993,33 @@ Transcript segments:
         /// decides the finalized label.
         /// </summary>
         [property: JsonIgnore] string FirstPassLane = "sexual_complete_scene");
+
+    /// <summary>
+    /// Strips per-word timing before a candidate is serialized into the model prompt.
+    /// </summary>
+    /// <remarks>
+    /// A real production failure (Carl's Doomsday Scenario, repeatedly, on Bedrock's
+    /// 32,768-token Qwen3-32B) traced back to this: <see cref="SceneVerificationCandidate.Segments"/>
+    /// is <see cref="TranscriptSegment"/>, whose own Words property (per-word text and timing,
+    /// one object per word) was serialized into the prompt along with everything else, even
+    /// though Terra never reads Words -- only the later TranscriptWordLocator.FindPhrase call
+    /// does, against the original in-memory segments, never against the prompt text. The
+    /// per-batch diagnostic log here only ever measured segment.Text.Length, which stayed
+    /// small and modest on every failing candidate, while the real serialized payload sent to
+    /// the model silently carried a full per-word object for every word in every segment on
+    /// top of it -- large enough on a dialogue-dense passage to be the actual cause of an
+    /// overflow that looked, from the measured numbers alone, like it should not have been
+    /// possible. This was never caught on the self-hosted vLLM lane because that model's
+    /// 65,536-token context (2x Qwen3-32B's) had enough headroom to absorb the same bloat
+    /// without ever reaching its own ceiling.
+    /// </remarks>
+    private static SceneVerificationCandidate ToPromptCandidate(SceneVerificationCandidate candidate) =>
+        candidate with
+        {
+            Segments = candidate.Segments
+                .Select(segment => segment with { Words = null })
+                .ToList()
+        };
 
     private sealed record SceneVerificationPayload(
         [property: JsonPropertyName("candidates")]
