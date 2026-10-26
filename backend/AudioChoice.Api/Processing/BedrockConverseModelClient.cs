@@ -74,6 +74,7 @@ public sealed class BedrockConverseModelClient(
 
         var throttles = 0;
         var noToolResultAttempts = 0;
+        var bogusOverflowAttempts = 0;
         for (var attempt = 0; ; attempt += 1)
         {
             ConverseResponse response;
@@ -99,6 +100,34 @@ public sealed class BedrockConverseModelClient(
                     "{SchemaName} throttled on {Model}; waiting {Wait} (throttle {Count} of {Budget}).",
                     schemaName, model, wait, throttles, ThrottleRetryBudget);
                 await Task.Delay(wait, cancellationToken);
+                continue;
+            }
+            catch (Amazon.BedrockRuntime.Model.ValidationException error) when (
+                IsBogusContextOverflow(error) &&
+                bogusOverflowAttempts < MaximumBogusOverflowRetries)
+            {
+                // Confirmed genuinely non-deterministic, not content-dependent: on the same
+                // Carl's Doomsday Scenario run, one candidate (126 segments, ~11,112
+                // characters -- the largest of the four real cache-misses that run) failed
+                // this exact "32769 input tokens" claim twice and then succeeded on its
+                // third attempt, while a smaller candidate (73 segments, ~6,495 characters)
+                // failed it on all of MaximumRetries' 3 attempts and failed the job. A
+                // request whose real size does not change between attempts cannot
+                // deterministically overflow on one attempt and fit on the next; what
+                // varies is the bogus count, not the prompt. MaximumRetries' budget (3) is
+                // shared with genuine faults (timeouts, malformed tool calls) that should
+                // stay capped tightly, so this gets its own, more generous budget instead
+                // of just raising MaximumRetries for every other fault type too. Capped
+                // backoff (not unbounded exponential) because nothing about this fault
+                // benefits from waiting longer between attempts -- it is not a rate limit.
+                bogusOverflowAttempts += 1;
+                var delay = TimeSpan.FromSeconds(
+                    Math.Min(Math.Pow(2, bogusOverflowAttempts), MaximumBogusOverflowWaitSeconds));
+                logger.LogWarning(
+                    "{SchemaName} on {Model} hit the bogus 32769-input-token overflow " +
+                    "(attempt {Attempt} of {Budget}); retrying after {Delay}.",
+                    schemaName, model, bogusOverflowAttempts, MaximumBogusOverflowRetries, delay);
+                await Task.Delay(delay, cancellationToken);
                 continue;
             }
             catch (Exception error) when (
@@ -199,6 +228,23 @@ public sealed class BedrockConverseModelClient(
 
     /// <summary>Longest single wait after being throttled, so a stall stays observable.</summary>
     private const double MaximumThrottleWaitSeconds = 30;
+
+    /// <summary>
+    /// How many times to retry the confirmed-bogus "32769 input tokens" overflow (see
+    /// <see cref="IsBogusContextOverflow"/>) before giving up on this one candidate. Set well
+    /// above <see cref="OpenAIProcessingOptions.MaximumRetries"/>'s own default (3): on the
+    /// real run that proved this is noise, the candidate that eventually succeeded needed 3
+    /// attempts, and the one that exhausted a 6-attempt budget and still failed suggests 3 is
+    /// not always enough. This is deliberately its own budget rather than a change to
+    /// MaximumRetries, which stays tight for genuine faults (timeouts, malformed tool calls)
+    /// that retrying many times would otherwise mask.
+    /// </summary>
+    private const int MaximumBogusOverflowRetries = 8;
+
+    /// <summary>Longest single wait between bogus-overflow retries. Capped, not unbounded
+    /// exponential, because nothing about this fault benefits from a long wait -- it is not
+    /// a rate limit, so there is no reason to slow down the later attempts.</summary>
+    private const double MaximumBogusOverflowWaitSeconds = 15;
 
     /// <summary>
     /// Pulls the tool arguments out of the reply, as the JSON the scanner deserializes.
@@ -307,29 +353,39 @@ public sealed class BedrockConverseModelClient(
     /// ToolUse" -- the request was accepted, the model produced something unusable while
     /// sampling, and asking again normally works) are retried unconditionally.
     ///
-    /// The <see cref="Amazon.BedrockRuntime.Model.ValidationException"/> case is narrower and
-    /// exists for one specific, confirmed, reproducible bug: a real production failure on
-    /// Carl's Doomsday Scenario claimed "your prompt contains at least 32769 input tokens"
-    /// immediately after a genuinely small, successful call (the preceding request logged
-    /// in=4991), on a candidate whose own real segment count and character length were
-    /// nowhere near large enough to produce that figure. The exact same number recurred
-    /// across three separate books and pipeline stages after two independent rounds of
-    /// shrinking every known real prompt-size knob (MaximumSegmentsPerAnalysisRequest,
-    /// MaximumContextExpansionSeconds) failed to change it at all -- ruling out a genuinely
-    /// oversized prompt as the cause, the same way an almost identical vLLM-side bug was
-    /// ruled out before (see VerifySceneBatchWithCheckpoint's own remarks on its
-    /// "context-overflow retries" catch). What remains is a bogus input-token count from the
-    /// provider side that a retry of the identical request reliably clears. Matched narrowly
-    /// on this exact claimed count, not on the error type alone, so a real, differently-sized
-    /// overflow elsewhere still fails loudly instead of being silently retried into eventually
-    /// exhausting the retry budget and failing anyway, just slower.
+    /// The bogus context-overflow case (see <see cref="IsBogusContextOverflow"/>) is handled
+    /// separately above with its own, more generous retry budget, not folded in here.
     /// </remarks>
     private static bool IsRetryableFault(Exception error) =>
         error is ModelTimeoutException or
             Amazon.BedrockRuntime.Model.InternalServerException or
-            ModelErrorException ||
-        (error is Amazon.BedrockRuntime.Model.ValidationException &&
-            error.Message.Contains("at least 32769 input tokens"));
+            ModelErrorException;
+
+    /// <summary>
+    /// Whether a <see cref="Amazon.BedrockRuntime.Model.ValidationException"/> is the one
+    /// specific, confirmed-non-deterministic bogus overflow this book has been failing on,
+    /// rather than a real one.
+    /// </summary>
+    /// <remarks>
+    /// A real production failure on Carl's Doomsday Scenario claimed "your prompt contains at
+    /// least 32769 input tokens" immediately after a genuinely small, successful call (the
+    /// preceding request logged in=4991), on a candidate whose own real segment count and
+    /// character length were nowhere near large enough to produce that figure. The exact same
+    /// number recurred across three separate books and pipeline stages after two independent
+    /// rounds of shrinking every known real prompt-size knob
+    /// (MaximumSegmentsPerAnalysisRequest, MaximumContextExpansionSeconds) failed to change it
+    /// at all. Decisive proof this is noise and not a real, content-dependent limit: on one
+    /// run, a 126-segment/~11,112-character candidate failed this exact claim twice and then
+    /// succeeded on a third, identical retry, while a smaller 73-segment/~6,495-character
+    /// candidate failed it on every attempt within the general retry budget and failed the
+    /// job -- a request whose real size does not change between attempts cannot
+    /// deterministically overflow on one attempt and fit on the next. Matched narrowly on
+    /// this exact claimed count, not on the error type alone, so a real, differently-sized
+    /// overflow elsewhere still fails loudly instead of being silently retried into eventually
+    /// exhausting the budget and failing anyway, just slower.
+    /// </remarks>
+    private static bool IsBogusContextOverflow(Amazon.BedrockRuntime.Model.ValidationException error) =>
+        error.Message.Contains("at least 32769 input tokens");
 
     private static string ExtractToolInput(
         ConverseResponse response, string schemaName, JsonObject schema)
