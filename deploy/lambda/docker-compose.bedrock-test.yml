@@ -85,3 +85,9 @@ services:
       # this test lane's results are never mistaken for a production scan, and so the two
       # can be directly compared by scanner_version in the scan_results table.
       AudioChoice__OpenAI__ScannerVersion: 7.13-bedrock-qwen32b-test
+      # Both this service and the production "scanner" container use network_mode: host,
+      # so both would otherwise try to bind the ASP.NET default port 8080 on the same host
+      # and only one could actually start. This test worker has no HTTP API consumer of its
+      # own -- it only polls the shared job queue in the database -- so it just needs a port
+      # that is not already taken, not any particular one.
+      ASPNETCORE_URLS: http://[::]:8089
