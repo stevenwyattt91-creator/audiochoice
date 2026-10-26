@@ -85,6 +85,15 @@ services:
       # this test lane's results are never mistaken for a production scan, and so the two
       # can be directly compared by scanner_version in the scan_results table.
       AudioChoice__OpenAI__ScannerVersion: 7.13-bedrock-qwen32b-test
+      # Real failure found running this test lane on IT and Carl's Doomsday Scenario: Bedrock
+      # Qwen3-32B has only a 32,768-token context window, half the self-hosted Qwen3.6-27B
+      # lane's 65,536 (see docker-compose.yml's own --max-model-len remarks). The default
+      # MaximumSegmentsPerAnalysisRequest (60) is sized against that larger window and
+      # produced a real batch at 32,769 input tokens -- one token over Bedrock Qwen3-32B's
+      # ceiling -- which failed the whole job outright with a 400 from Bedrock. Halved here
+      # for this lane specifically so a batch sized for the larger model is never sent to
+      # the smaller one; this does not change the production lane's own default at all.
+      AudioChoice__OpenAI__MaximumSegmentsPerAnalysisRequest: "28"
       # Both this service and the production "scanner" container use network_mode: host,
       # so both would otherwise try to bind the ASP.NET default port 8080 on the same host
       # and only one could actually start. This test worker has no HTTP API consumer of its
