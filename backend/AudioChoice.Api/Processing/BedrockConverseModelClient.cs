@@ -73,15 +73,13 @@ public sealed class BedrockConverseModelClient(
         };
 
         var throttles = 0;
+        var noToolResultAttempts = 0;
         for (var attempt = 0; ; attempt += 1)
         {
+            ConverseResponse response;
             try
             {
-                var response = await bedrock.ConverseAsync(request, cancellationToken);
-                return new AnalysisModelResponse(
-                    ExtractToolInput(response, schemaName, schema),
-                    response.Usage?.InputTokens,
-                    response.Usage?.OutputTokens);
+                response = await bedrock.ConverseAsync(request, cancellationToken);
             }
             catch (ThrottlingException) when (throttles < ThrottleRetryBudget)
             {
@@ -101,6 +99,7 @@ public sealed class BedrockConverseModelClient(
                     "{SchemaName} throttled on {Model}; waiting {Wait} (throttle {Count} of {Budget}).",
                     schemaName, model, wait, throttles, ThrottleRetryBudget);
                 await Task.Delay(wait, cancellationToken);
+                continue;
             }
             catch (Exception error) when (
                 (error is ModelTimeoutException or
@@ -119,9 +118,85 @@ public sealed class BedrockConverseModelClient(
                     "{SchemaName} retry {Attempt} on {Model} after {Delay} ({Error}).",
                     schemaName, attempt + 1, model, delay, error.GetType().Name);
                 await Task.Delay(delay, cancellationToken);
+                continue;
+            }
+
+            try
+            {
+                return new AnalysisModelResponse(
+                    ExtractToolInput(response, schemaName, schema),
+                    response.Usage?.InputTokens,
+                    response.Usage?.OutputTokens);
+            }
+            catch (NoToolResultException error)
+            {
+                // A real, repeatedly observed Bedrock Converse behavior, not unique to one
+                // model: a forced tool_choice is not always honored, and the model answers in
+                // plain prose instead -- stopReason "end_turn", not "tool_use" -- even though
+                // the request gave it no other option. Retried first rather than accepted
+                // immediately, the same as a malformed-output fault above: a second
+                // independent call asking the identical question is cheap next to the cost of
+                // treating a genuine miss as a confirmed empty result.
+                noToolResultAttempts += 1;
+                if (noToolResultAttempts <= MaximumNoToolResultRetries)
+                {
+                    logger.LogWarning(
+                        "{SchemaName} on {Model} answered in prose instead of using the " +
+                        "forced tool (attempt {Attempt} of {Budget}); retrying. Text: {Text}",
+                        schemaName, model, noToolResultAttempts, MaximumNoToolResultRetries,
+                        error.SpokenText);
+                    continue;
+                }
+
+                // Retries exhausted. Only ever falls back to an empty result, and only for
+                // the one schema (audiochoice_scan_events) where an empty array is itself a
+                // real, meaningful answer this pipeline already treats as "nothing found in
+                // this batch" -- never for scene verification/escalation, where a candidate
+                // the caller is waiting on a decision for is not safely assumed clean just
+                // because the model talked around the question instead of answering it, and
+                // where ResolveMajorityVote's own missing-vote handling already has a
+                // different, deliberate meaning (a vote that does not count toward either
+                // side) that this must not be confused with. Logged at Error, not Warning,
+                // because this is the one path where real sexual-content judgment is being
+                // silently assumed rather than actually rendered, and that needs to stay
+                // visible rather than blend into ordinary retry noise.
+                if (schemaName == "audiochoice_scan_events")
+                {
+                    logger.LogError(
+                        "{SchemaName} on {Model} never used the forced tool after {Budget} " +
+                        "retries; treating this batch as reporting no events. This batch's " +
+                        "real content was never actually judged by a structured answer -- " +
+                        "only by prose this pipeline cannot act on. Text: {Text}",
+                        schemaName, model, MaximumNoToolResultRetries, error.SpokenText);
+                    return new AnalysisModelResponse("""{"events":[]}""", null, null);
+                }
+
+                throw new InvalidOperationException(
+                    $"{schemaName} never used the forced tool on {model} after " +
+                    $"{MaximumNoToolResultRetries} retries. This schema has no safe empty " +
+                    $"fallback -- a candidate this caller is waiting on a real decision for " +
+                    $"cannot be silently treated as anything. Stop reason: {error.StopReason}. " +
+                    $"Text: {error.SpokenText}");
             }
         }
     }
+
+    /// <summary>
+    /// How many additional times a call that answered in prose instead of using the forced
+    /// tool may be retried before <see cref="CompleteJson"/> gives up on getting a real
+    /// structured answer.
+    /// </summary>
+    /// <remarks>
+    /// Separate from <see cref="OpenAIProcessingOptions.MaximumRetries"/>, which exists for
+    /// outright faults (a timeout, a malformed tool call) -- this is a different kind of
+    /// failure (the call succeeded; the model simply chose not to answer through the tool it
+    /// was forced to use), observed repeatedly across more than one Bedrock-hosted model, not
+    /// a one-off. Kept small: a model that skips the forced tool once on a given prompt is
+    /// not reliably more likely to use it on a byte-for-byte identical retry, so this exists
+    /// to catch the genuinely transient case without paying for many retries of a call that
+    /// will likely fail the same way every time.
+    /// </remarks>
+    private const int MaximumNoToolResultRetries = 2;
 
     /// <summary>
     /// How many times one call may be throttled before giving up, separate from the retry
@@ -248,11 +323,27 @@ public sealed class BedrockConverseModelClient(
 
         // A model that answered in prose despite being given no choice. Reported with what it
         // said, because the alternative is a null-reference further down that says nothing
-        // about which model misbehaved or why.
+        // about which model misbehaved or why. A distinct exception type rather than
+        // InvalidOperationException directly, so CompleteJson's retry loop can recognize and
+        // react to this specific failure (see MaximumNoToolResultRetries's own remarks)
+        // instead of treating it the same as a genuine fault.
         var spoken = string.Join(" ", content.Select(block => block.Text).Where(text => text is not null));
-        throw new InvalidOperationException(
-            $"{schemaName} returned no tool result. Stop reason: {response.StopReason}. " +
-            $"Text: {(spoken.Length > 400 ? spoken[..400] : spoken)}");
+        throw new NoToolResultException(
+            schemaName, response.StopReason?.ToString() ?? "unknown",
+            spoken.Length > 400 ? spoken[..400] : spoken);
     }
 
+}
+
+/// <summary>
+/// A Bedrock model answered in plain prose instead of using the tool
+/// <see cref="BedrockConverseModelClient"/> forced it to use. See
+/// <see cref="BedrockConverseModelClient.MaximumNoToolResultRetries"/>'s own remarks for why
+/// this is handled as its own retryable case rather than an ordinary fault.
+/// </summary>
+internal sealed class NoToolResultException(string schemaName, string stopReason, string spokenText)
+    : Exception($"{schemaName} returned no tool result. Stop reason: {stopReason}. Text: {spokenText}")
+{
+    public string StopReason { get; } = stopReason;
+    public string SpokenText { get; } = spokenText;
 }
