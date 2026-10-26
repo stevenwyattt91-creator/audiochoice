@@ -44,6 +44,34 @@ public static partial class DeterministicContentDetector
         windowSegments.FirstOrDefault(segment => SceneCueRegex().IsMatch(segment.Text));
 
     /// <summary>
+    /// The matching cue segment together with the exact cue text matched inside it, so a
+    /// caller can word-snap to the cue's own span rather than trusting the whole segment's
+    /// boundary.
+    /// </summary>
+    /// <remarks>
+    /// A transcript segment is frequently a full sentence or clause; the regex match itself
+    /// can land anywhere inside it, not necessarily at the start. Reporting the matched
+    /// segment's own StartTime/EndTime as a listener-facing boundary -- which is what this
+    /// pipeline did before this was added -- means the reported range can start well before
+    /// or run well past the words that actually justify it, however the transcriber happened
+    /// to draw that segment's boundary and wherever the cue phrase happened to fall within
+    /// it. Returning the matched substring lets the caller locate it against the segment's
+    /// own word-level timing (see TranscriptWordLocator.FindPhrase) the same way every other
+    /// confirmed event in this pipeline is boundary-snapped, instead of a lone exception
+    /// trusting segment-level timing alone.
+    /// </remarks>
+    public static (TranscriptSegment Segment, string MatchedText)? FindMatchingCue(
+        IReadOnlyList<TranscriptSegment> windowSegments)
+    {
+        foreach (var segment in windowSegments)
+        {
+            var match = SceneCueRegex().Match(segment.Text);
+            if (match.Success) return (segment, match.Value);
+        }
+        return null;
+    }
+
+    /// <summary>
     /// Produces high-recall transcript windows for the inexpensive first stage of the
     /// scanner funnel. This only decides what needs model review; it never creates a
     /// scene event by itself, so explicit-scene decisions remain with Luna/Terra/Sol.

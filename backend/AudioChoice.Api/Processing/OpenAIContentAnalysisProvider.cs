@@ -229,7 +229,19 @@ public sealed class OpenAIContentAnalysisProvider(
     // DeterministicContentDetector.FindMatchingCueSegment) and anchors to that segment alone.
     // A scan made under the prior version has these oversized fallback events and must be
     // re-scanned to correct them, not merely re-run for new coverage.
-    private const string BaseAnalysisPromptVersion = "6.10-sexual-content-only";
+    //
+    // Bumped again for a real listener report on the prior fix's own replacement boundary:
+    // "skipping right after it should have" -- the fallback had moved from the multi-minute
+    // review window down to the matched segment's own StartTime/EndTime, but a transcript
+    // segment is often a full sentence, and the matched cue word is not always at its start.
+    // Reporting the segment's own boundary meant the skip could still start measurably after
+    // the cue phrase itself had already begun playing. AddKeywordSafetyNetFallback now word-
+    // snaps to the matched cue text's own span via TranscriptWordLocator.FindPhrase (the same
+    // mechanism every other confirmed event in this pipeline already uses), widened by a
+    // fixed 2-second pad on each side, rather than trusting any segment's own width. A scan
+    // made under the prior version has fallback events boundaried to the matched segment,
+    // not the matched words, and must be re-scanned to correct them.
+    private const string BaseAnalysisPromptVersion = "6.11-sexual-content-only";
     // Bumped for the keyword safety net's lane isolation fix: a candidate whose window
     // happens to match a checkpoint cached under the prior version may have been built
     // before a safety-net seed's own lane existed, when it could still get coalesced into a
@@ -1785,6 +1797,20 @@ public sealed class OpenAIContentAnalysisProvider(
 
     private static bool LooksLikeNudityCue(string text) => KeywordFallbackNudityPattern.IsMatch(text);
 
+    /// <summary>
+    /// Fixed padding added on each side of a word-snapped keyword-fallback cue.
+    /// </summary>
+    /// <remarks>
+    /// The bare matched word/phrase alone is usually too narrow to represent "a suggestive
+    /// line" -- a cue word is often mid-sentence, with the sentence's own charge coming from
+    /// the words around it, not the single matched token in isolation. Kept small and fixed
+    /// (not segment-width) specifically because this is the exact problem being fixed here:
+    /// trusting a whole transcript segment's own width inflated these events far past the
+    /// words that justified them. 2 seconds each side is enough to keep a short phrase
+    /// audible as one line, not a sentence or more.
+    /// </remarks>
+    private const double FallbackContextPaddingSeconds = 2;
+
     private void AddKeywordSafetyNetFallback(
         List<ScanEvent> retained,
         VerifiedSceneCandidate verification,
@@ -1806,22 +1832,44 @@ public sealed class OpenAIContentAnalysisProvider(
 
         // No confirmed quote to anchor to -- Terra rejected the scene claim this quote was
         // meant to support, so trusting that same quote for a different label's boundary
-        // would be trusting evidence the verifier itself did not accept. The keyword
-        // window Terra reviewed is several minutes wide on dense narration (it exists to
-        // give Terra context to judge a full scene, not to be a listener-facing boundary by
-        // itself), so re-locate the one segment within it that actually matched the keyword
-        // cue and anchor the fallback event to that segment alone -- a short reference or a
-        // single suggestive line is a short event, the exact same rule the prompt states for
-        // everything else this pipeline reports. Falls back to the full window only in the
-        // extremely unlikely case the cue segment cannot be re-found (it was always found
-        // once already, to seed this very candidate).
-        var cueSegment = DeterministicContentDetector.FindMatchingCueSegment(
+        // would be trusting evidence the verifier itself did not accept. The keyword window
+        // Terra reviewed is several minutes wide on dense narration (it exists to give Terra
+        // context to judge a full scene, not to be a listener-facing boundary by itself), so
+        // re-locate the one segment within it that actually matched the keyword cue.
+        //
+        // A real listener report caught a gap in the first version of this fix: it anchored
+        // to that whole matched SEGMENT's own StartTime/EndTime, not to the matched cue text's
+        // own position within it. A transcript segment is often a full sentence, and the cue
+        // phrase can land anywhere inside it -- reporting the segment's own boundary meant
+        // the skip could start measurably after the cue phrase itself had already begun
+        // playing (a real report: "skipping right after it should have"), the exact failure
+        // every other confirmed event in this pipeline is protected against by word-level
+        // snapping (TryConfirmSceneBoundary/TranscriptWordLocator) and that this one path
+        // alone had been skipping. Now locates the matched cue text's own word span via
+        // TranscriptWordLocator.FindPhrase and widens it by a fixed, small amount of
+        // surrounding context on each side (FallbackContextPaddingSeconds) -- enough to cover
+        // "a suggestive line," not the padded multi-minute review window, and not the bare
+        // trigger word alone either. Falls back to the matched segment's own boundary only if
+        // the word-level span cannot be located at all (no per-word timing on this segment,
+        // or an unexpected mismatch) -- strictly a fallback of last resort, not the normal
+        // path any more.
+        var cue = DeterministicContentDetector.FindMatchingCue(
             sourceCandidate.Segments
                 .Where(segment => segment.StartTime >= sourceCandidate.ProposedStartTime &&
                     segment.EndTime <= sourceCandidate.ProposedEndTime)
                 .ToArray());
-        var start = cueSegment?.StartTime ?? sourceCandidate.ProposedStartTime;
-        var end = cueSegment?.EndTime ?? sourceCandidate.ProposedEndTime;
+        double start, end;
+        if (cue is { } found &&
+            TranscriptWordLocator.FindPhrase(found.Segment.Words, found.MatchedText) is { } span)
+        {
+            start = Math.Max(0, span.StartTime - FallbackContextPaddingSeconds);
+            end = span.EndTime + FallbackContextPaddingSeconds;
+        }
+        else
+        {
+            start = cue?.Segment.StartTime ?? sourceCandidate.ProposedStartTime;
+            end = cue?.Segment.EndTime ?? sourceCandidate.ProposedEndTime;
+        }
 
         // Reported at the keyword safety net's own long-standing confidence (see
         // AddUncoveredSexualCandidates), not Terra/Sol's confidence in the scene claim they

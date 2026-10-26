@@ -2208,17 +2208,23 @@ Assert(retainedSceneEvents.Count == 1,
             "sexual_suggestive_dialogue -- the exact real content the keyword scan was " +
             "seeded to catch (Luna's own first pass proposed nothing for this window at " +
             "all) was lost with no event reported.");
-        // Narrowed to the one segment that actually matched the keyword cue (10 seconds,
-        // this fixture's own segment length), not the padded ±12-segment review window
-        // around it, which in this fixture spans the full 10-40 range (30 seconds) -- the
-        // real failure mode this guards against.
+        // Word-snapped to the matched cue word itself ("flirted", 10.2-10.6) plus the fixed
+        // 2-second context padding on each side (8.2-12.6) -- NOT the whole matched
+        // segment's own boundary (10-20, the bug a real listener report caught: the skip
+        // started measurably after the cue phrase had already begun playing, because the
+        // segment's own width, not the cue word's position within it, was being reported),
+        // and NOT the padded ±12-segment review window Terra was given for context either
+        // (which in this fixture spans the full 10-40 range).
         Assert(
-            fallbackEvent is not null && fallbackEvent.StartTime == 10 && fallbackEvent.EndTime == 20,
-            $"A keyword-safety-net fallback event's boundary was not narrowed to the cue " +
-            $"segment that actually matched -- it inherited the whole multi-segment review " +
-            $"window Terra was given for context instead (got " +
+            fallbackEvent is not null &&
+                Math.Abs(fallbackEvent.StartTime - 8.2) < 0.01 &&
+                Math.Abs(fallbackEvent.EndTime - 12.6) < 0.01,
+            $"A keyword-safety-net fallback event's boundary was not word-snapped to the " +
+            $"cue text that actually matched -- it used the whole matched segment's (or " +
+            $"review window's) own boundary instead (got " +
             $"{(fallbackEvent is null ? "n/a" : $"{fallbackEvent.StartTime}-{fallbackEvent.EndTime}")}" +
-            ", expected 10-20; a short cue must stay a short event, not a multi-minute skip).");
+            ", expected approximately 8.2-12.6; a real listener report caught audible " +
+            "content playing right before this exact kind of event's skip engaged).");
     }
     finally
     {

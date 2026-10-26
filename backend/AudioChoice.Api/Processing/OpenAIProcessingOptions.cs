@@ -405,7 +405,14 @@ public sealed class OpenAIProcessingOptions
     // test book immediately after shipping it, produced dozens of multi-minute "suggestive
     // dialogue" events for what was really one line each. A scan made under the prior
     // version has these oversized events and must be re-scanned to correct them.
-    public string ScannerVersion { get; init; } = "7.12-sexual-content-only";
+    //
+    // Bumped again together with BaseAnalysisPromptVersion: a real listener report on a
+    // Carl's Doomsday Scenario scan found the keyword-fallback skip starting measurably
+    // after the cue phrase had already begun playing, because the fallback was boundaried
+    // to the matched transcript SEGMENT, not the matched WORDS within it. See
+    // BaseAnalysisPromptVersion's own remarks for the full fix. A scan made under the prior
+    // version has this boundary bug and must be re-scanned to correct it.
+    public string ScannerVersion { get; init; } = "7.13-sexual-content-only";
     /// <summary>Only jobs in this lane may be claimed by this worker instance.</summary>
     public string ProcessingLane { get; init; } = ScanProcessingLanes.AzureOpenAI;
     /// <summary>
