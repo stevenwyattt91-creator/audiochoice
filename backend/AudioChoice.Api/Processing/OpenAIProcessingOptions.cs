@@ -460,6 +460,15 @@ public sealed class OpenAIProcessingOptions
     // half the context window, so a real overflow becomes rare rather than a recurring risk
     // for exactly the passages most worth scanning carefully.
     public int MaximumSegmentsPerAnalysisRequest { get; init; } = 60;
+    /// <summary>
+    /// The furthest a Terra context window may expand outward on each side once it reaches
+    /// a sentence boundary. See OpenAIContentAnalysisProvider.MaximumContextExpansionSeconds'
+    /// own remarks for why this needed to become configurable rather than staying a fixed
+    /// constant: it is a second, independent place a large prompt can form, separate from
+    /// MaximumSegmentsPerAnalysisRequest above, and a model with a smaller context window
+    /// needs both shrunk together.
+    /// </summary>
+    public double MaximumContextExpansionSeconds { get; init; } = 60;
     public int MaximumSceneVerificationRequestsPerJob { get; init; } = 50;
     // The strict sexual-content lane escalates every plausible scene candidate.
     // Keep the overall job ceiling bounded by the existing 50-candidate safety cap.

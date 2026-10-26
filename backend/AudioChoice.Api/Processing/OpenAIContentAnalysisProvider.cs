@@ -782,9 +782,16 @@ public sealed class OpenAIContentAnalysisProvider(
     /// at all, in an unpunctuated transcript) would ever reach this. Exists so a chapter
     /// cannot be read to Terra whole just because no sentence terminator appeared for a long
     /// stretch.
+    ///
+    /// Made configurable (AudioChoice:OpenAI:MaximumContextExpansionSeconds) rather than
+    /// staying a fixed constant after a real failure: Luna's own batch size
+    /// (MaximumSegmentsPerAnalysisRequest) was shrunk for a model with a smaller context
+    /// window (Bedrock Qwen3-32B, 32,768 tokens vs. the self-hosted lane's 65,536), but Terra
+    /// builds its own, independently-sized prompt via SentenceBoundedContext, and a dense
+    /// candidate's context window still overflowed the smaller model's context outright
+    /// even with Luna's own batches safely shrunk -- the two prompt-size knobs are
+    /// independent and both need to move together for a smaller-context model.
     /// </remarks>
-    private const double MaximumContextExpansionSeconds = 60;
-
     /// <summary>
     /// The transcript segments Terra is shown for one candidate: the segments the candidate
     /// itself spans, expanded outward to the nearest sentence boundary on each side.
@@ -799,11 +806,18 @@ public sealed class OpenAIContentAnalysisProvider(
     /// merge decision is. This window is context for the model call only and must never
     /// become the stored event's boundary -- that is decided separately, by word-snapping
     /// Sol's (or Terra's own) refined range against the transcript's actual words.
+    ///
+    /// <paramref name="maximumContextExpansionSeconds"/> defaults to the value every caller
+    /// used before this became configurable (60); see
+    /// OpenAIProcessingOptions.MaximumContextExpansionSeconds's own remarks for why a smaller-
+    /// context-window model needs this (and Luna's separate MaximumSegmentsPerAnalysisRequest)
+    /// shrunk together rather than leaving this a fixed constant.
     /// </remarks>
     internal static IReadOnlyList<TranscriptSegment> SentenceBoundedContext(
         double start,
         double end,
-        IReadOnlyList<TranscriptSegment> segments)
+        IReadOnlyList<TranscriptSegment> segments,
+        double maximumContextExpansionSeconds = 60)
     {
         var ordered = segments.OrderBy(segment => segment.StartTime).ToArray();
         var coreIndices = ordered
@@ -823,7 +837,7 @@ public sealed class OpenAIContentAnalysisProvider(
             // Measured against the candidate's own original boundary, not the enclosing
             // segment's -- the cap is a promise about how far past the actual event this
             // window may reach, not about the segment grid it happens to be sliced into.
-            if (start - candidate.StartTime > MaximumContextExpansionSeconds) break;
+            if (start - candidate.StartTime > maximumContextExpansionSeconds) break;
             firstIndex -= 1;
             // This segment itself closes a sentence, so the window now begins at the start
             // of a new one -- a natural place to stop expanding backward.
@@ -834,7 +848,7 @@ public sealed class OpenAIContentAnalysisProvider(
         while (lastIndex < ordered.Length - 1)
         {
             var candidate = ordered[lastIndex + 1];
-            if (candidate.EndTime - end > MaximumContextExpansionSeconds) break;
+            if (candidate.EndTime - end > maximumContextExpansionSeconds) break;
             lastIndex += 1;
             // This newly included segment itself closes a sentence, so the window now ends
             // at a natural break rather than mid-thought.
@@ -1355,7 +1369,8 @@ public sealed class OpenAIContentAnalysisProvider(
                 item.StableKey,
                 item.StartTime,
                 item.EndTime,
-                SentenceBoundedContext(item.StartTime, item.EndTime, segments),
+                SentenceBoundedContext(
+                    item.StartTime, item.EndTime, segments, options.MaximumContextExpansionSeconds),
                 // Which lane Luna's first pass placed this event in, not a final decision --
                 // Terra/Sol's own nonconsensualEvidence field decides the finalized label
                 // below. This only keeps a real assault scene's supporting context separate
