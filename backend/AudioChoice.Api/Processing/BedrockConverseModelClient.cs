@@ -48,25 +48,9 @@ public sealed class BedrockConverseModelClient(
                     Content = [new ContentBlock { Text = input }]
                 }
             ],
-            // Matches VllmModelClient's own baseTemperature exactly: Luna's first pass
-            // (audiochoice_scan_events) runs at 0.7, Qwen's own documented instruct/
-            // non-thinking tuning point, not greedy decoding -- see VllmModelClient's own
-            // remarks for the real production evidence that running this call at 0 measurably
-            // loses recall on subtler sexual-content cues. Terra/Sol's verification and
-            // escalation calls stay at 0 for consistency with the self-hosted lane.
-            //
-            // Found missing here, not as a guess, from a real side-by-side on Butcher's
-            // Masquerade: the same passage that self-hosted Qwen3.6-27B described as "A
-            // character jokes about others viewing adult content" at 0.95 confidence, Bedrock
-            // Qwen3-32B described only as "Suggestive dialogue or innuendo occurs" at 0.35 --
-            // vague, generic, low-signal, exactly the symptom VllmModelClient's own remarks
-            // describe for temperature-0 decoding on this model family. This request had been
-            // silently running at whatever Bedrock's own per-model default is for Qwen3-32B
-            // (undocumented, and not necessarily 0.7) because no InferenceConfig was ever set
-            // at all -- not matching the self-hosted lane's deliberate choice, by omission.
             InferenceConfig = new InferenceConfiguration
             {
-                Temperature = schemaName == "audiochoice_scan_events" ? 0.7f : 0.0f
+                Temperature = Temperature(model, schemaName)
             },
             ToolConfig = new ToolConfiguration
             {
@@ -394,6 +378,41 @@ public sealed class BedrockConverseModelClient(
         }
     }
 
+
+    /// <summary>
+    /// The sampling temperature for one call, tuned per model family rather than one value
+    /// applied universally -- different model families' own documented tool-use guidance
+    /// actively disagrees on this.
+    /// </summary>
+    /// <remarks>
+    /// Qwen (on Bedrock, "qwen." model IDs): matches VllmModelClient's own baseTemperature --
+    /// Luna's first pass (audiochoice_scan_events) runs at 0.7, Qwen's own documented
+    /// instruct/non-thinking tuning point, not greedy decoding. Found missing here, not as a
+    /// guess, from a real side-by-side on Butcher's Masquerade: the same passage self-hosted
+    /// Qwen3.6-27B described as "A character jokes about others viewing adult content" at
+    /// 0.95 confidence, Bedrock Qwen3-32B described only as "Suggestive dialogue or innuendo
+    /// occurs" at 0.35 -- vague, generic, low-signal, exactly the symptom VllmModelClient's
+    /// own remarks describe for temperature-0 decoding on this model family.
+    ///
+    /// Nova (any "amazon.nova-*" model ID): the opposite guidance applies. AWS's own
+    /// published Nova tool-use troubleshooting states plainly that Nova models have more
+    /// success calling tools under greedy decoding, and to set temperature to 0 for that.
+    /// Applying Qwen's 0.7 to Nova here would have been copying a fix across model families
+    /// without checking whether the reasoning that justified it for Qwen holds for Nova too
+    /// -- it does not, and AWS documents the opposite directly.
+    ///
+    /// Everything else defaults to 0: a model this pipeline has not specifically tuned for
+    /// should default to the more conservative, deterministic choice rather than guessing at
+    /// a higher value with no documented basis for it.
+    /// </remarks>
+    private static float Temperature(string model, string schemaName)
+    {
+        if (model.Contains("qwen.", StringComparison.OrdinalIgnoreCase))
+        {
+            return schemaName == "audiochoice_scan_events" ? 0.7f : 0.0f;
+        }
+        return 0.0f;
+    }
 
     /// <summary>
     /// Whether a fault is one worth asking again rather than failing the whole batch outright.

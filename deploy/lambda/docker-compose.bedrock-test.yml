@@ -1,8 +1,10 @@
 services:
-  # A parallel, isolated test worker evaluating Bedrock-hosted Qwen3-32B against the real
+  # A parallel, isolated test worker evaluating a Bedrock-hosted model against the real
   # production self-hosted Qwen3.6-27B lane (see deploy/lambda/docker-compose.yml's own
   # "qwen"/"scanner" services), without touching production scanning or requiring a full
-  # provider switch to find out whether it holds up on real books.
+  # provider switch to find out whether it holds up on real books. Currently configured for
+  # Amazon Nova Pro -- see AnalysisModel's own remarks below for why this moved on from
+  # qwen.qwen3-32b-v1:0, tested here first.
   #
   # This is NOT a replacement for the production scanner service. It is a second worker
   # instance claiming jobs from its own queue lane (ScanProcessingLanes.BedrockQwenTest, see
@@ -57,51 +59,43 @@ services:
       AudioChoice__OpenAI__TranscriptionProvider: faster-whisper
       AudioChoice__OpenAI__FasterWhisperEndpoint: http://127.0.0.1:8001/
       AudioChoice__OpenAI__FasterWhisperTimeoutSeconds: "900"
-      # Analysis transport: Bedrock, with all three tiers naming the same model Bedrock hosts
-      # natively -- see RoutingAnalysisModelClient's own IsBedrockModel/IsVllmModel remarks
-      # for why the "qwen." prefix, not a bare "qwen", is what makes this resolve to Bedrock
-      # rather than the self-hosted vLLM client.
+      # Analysis transport: Bedrock. Switched from qwen.qwen3-32b-v1:0 to Nova Pro after
+      # finding the real, structural reason Qwen3-32B kept underperforming production on
+      # Butcher's Masquerade (372 events/40 scene clusters vs. 199-200 events/1-2 clusters
+      # even after fixing the temperature, batch size, and prose-recovery issues below):
+      # Qwen3-32B is a hybrid reasoning model that reasons inline as plain prose text when it
+      # judges a question complex enough to need it, and Bedrock's Converse API has no
+      # working way to suppress this for this model -- directly confirmed by testing both
+      # documented parameter names (enable_thinking and chat_template_kwargs.enable_thinking)
+      # via additionalModelRequestFields against the real hosted model and observing zero
+      # effect on a simple reasoning prompt either way. That single fact explains the forced
+      # tool-choice failures (the model wants to reason in text, which conflicts with a
+      # forced tool call in the same turn), the vague/low-confidence first-pass detections on
+      # subtle or crude content (skipping reasoning to comply with the tool produces a
+      # shallower answer), and why the self-hosted lane's own explicit enable_thinking=false
+      # (VllmModelClient.CompleteJson) has no Bedrock-side equivalent for this model.
       #
-      # Tried qwen.qwen3-next-80b-a3b (262,144-token context, no risk of the overflow below)
-      # as a fix for Qwen3-32B's small context window, but found a different, worse real
-      # failure: it does not reliably honor Bedrock's forced tool-choice the way Nova and
-      # Qwen3-32B both do -- on a batch with no sexual content, it answered in plain prose
-      # (stopReason "end_turn", not "tool_use") explaining why nothing qualified, which
-      # BedrockConverseModelClient's own ExtractToolInput correctly treats as a hard failure
-      # rather than silently guessing at an unstructured answer. This is a known class of
-      # Bedrock Converse issue on some models (forced tool_choice inconsistently honored),
-      # not something fixable from this app's own config. Reverted to qwen.qwen3-32b-v1:0,
-      # which has correctly honored the forced tool every time it has been tested here (the
-      # 35-case ground-truth eval, ad hoc single calls, and every real batch before it hit
-      # its own, separate, context-size problem) -- its only real issue is the smaller
-      # 32,768-token window, fixed below by shrinking the batch size instead of switching
-      # models again.
+      # Nova Pro was already confirmed (the original 35-case ground-truth eval) to honor
+      # forced tool-choice reliably with zero no-tool-result incidents, unlike both
+      # Qwen3-32B (unreliable under this schema's complexity) and Qwen3-Next-80B (prose
+      # answers on simple batches). Nova's own eval score (27/33) was lower than Qwen3-32B's
+      # (30/33) on that abstract eval, but that eval never tested Qwen3-32B's real,
+      # now-understood failure mode (inline reasoning conflicting with tool_choice) at all,
+      # so it is not the deciding number here -- a model that answers reliably every time,
+      # even if occasionally less precise, is a materially different proposition than one
+      # that silently reasons around the structured answer it was forced to give.
       AudioChoice__OpenAI__AnalysisProvider: bedrock
       AudioChoice__OpenAI__BedrockRegion: us-east-1
-      AudioChoice__OpenAI__AnalysisModel: qwen.qwen3-32b-v1:0
-      AudioChoice__OpenAI__SceneVerificationModel: qwen.qwen3-32b-v1:0
-      AudioChoice__OpenAI__SceneEscalationModel: qwen.qwen3-32b-v1:0
-      # Raised from 20 back toward the production default (60) after finding the real cause
-      # of the original overflow: BuildInput's own prompt-building serialization was
-      # including full per-word timing (TranscriptSegment.Words) for every segment, never
-      # read by this first pass, which silently multiplied every batch's real token count far
-      # beyond what its segment text alone would suggest (see OpenAIContentAnalysisProvider's
-      # own remarks on BuildInput). That bug is now fixed; this was never really a "need a
-      # smaller batch size" problem, it was "stop sending data nobody reads." Shrinking the
-      # batch to 20 earlier also meaningfully hurt recall: Carl's Doomsday Scenario's Luna
-      # pass proposed only 108 real candidates here against production's 445 on the same
-      # book, because a narrower window gives the model less surrounding context per
-      # decision. 45 is a middle step, not an immediate jump straight back to 60, so this
-      # gets to be tested with real margin before trusting the original ceiling again.
-      AudioChoice__OpenAI__MaximumSegmentsPerAnalysisRequest: "45"
-      # Raised from 20 back toward the production default (60), same reasoning as
-      # MaximumSegmentsPerAnalysisRequest above: the real overflow cause was the Words
-      # per-word timing bloat in the prompt-building serialization (now fixed), not that
-      # Terra's own context window genuinely needed to be this narrow. A narrower window
-      # also means Terra sees less surrounding narrative per candidate, which plausibly
-      # affects its own accept/reject judgment the same way Luna's batch size affects
-      # recall. 45 as a matching middle step before trusting the original ceiling again.
-      AudioChoice__OpenAI__MaximumContextExpansionSeconds: "45"
+      AudioChoice__OpenAI__AnalysisModel: amazon.nova-pro-v1:0
+      AudioChoice__OpenAI__SceneVerificationModel: amazon.nova-pro-v1:0
+      AudioChoice__OpenAI__SceneEscalationModel: amazon.nova-pro-v1:0
+      # Nova Pro's context window (300K tokens) is far larger than Qwen3-32B's (32,768), the
+      # entire reason Luna's/Terra's windows were shrunk to 45/20 in the first place. Back to
+      # the production self-hosted lane's own defaults (60/60) now that there is no
+      # comparable risk of overflow -- no reason to keep paying the recall cost of a narrower
+      # window once the model hosting it can comfortably hold the full default size.
+      AudioChoice__OpenAI__MaximumSegmentsPerAnalysisRequest: "60"
+      AudioChoice__OpenAI__MaximumContextExpansionSeconds: "60"
       # Lower than the production vLLM lane's 6/6/6: Bedrock's own per-account on-demand
       # throttling limits for a newly-used model are unknown and unmeasured here, and
       # BedrockConverseModelClient already retries a ThrottlingException on its own patient
@@ -117,12 +111,10 @@ services:
       AudioChoice__Ffmpeg__MaximumInputDurationSeconds: "180000"
       AudioChoice__OpenAI__MaximumAudioDurationSeconds: "180000"
       AudioChoice__Database__ApplyMigrations: "false"
-      # Deliberately distinct from production's own default (7.13-sexual-content-only) so
-      # this test lane's results are never mistaken for a production scan, and so the two
-      # can be directly compared by scanner_version in the scan_results table. Reverted from
-      # 7.13-bedrock-qwen80b-test back to naming Qwen3-32B directly, with "-v2" marking that
-      # this run used the shrunk batch size, not the one that overflowed context earlier.
-      AudioChoice__OpenAI__ScannerVersion: 7.13-bedrock-qwen32b-test-v2
+      # Deliberately distinct from production's own default (7.13-sexual-content-only) and
+      # from the earlier qwen32b-test-v2 scanner_version, so all three can be directly
+      # compared side by side in the scan_results table.
+      AudioChoice__OpenAI__ScannerVersion: 7.13-bedrock-nova-pro-test
       # Both this service and the production "scanner" container use network_mode: host,
       # so both would otherwise try to bind the ASP.NET default port 8080 on the same host
       # and only one could actually start. This test worker has no HTTP API consumer of its
