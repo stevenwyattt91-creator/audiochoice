@@ -39,13 +39,37 @@ object PlaybackFilterTaxonomy {
         add(1, listOf("Suggestive dialogue", "Sexual references", "Nudity", "Implied sexual activity", "Explicit sexual activity", "Complete sex scenes", "Sexual violence (rape / sexual assault)", "Kissing"), "Sexual Content")
     }
 
+    // Complete sex scenes and sexual violence are never allowed to lose the aggregate
+    // tie-break to a lower-rung label sharing the same aggregateKey (see the real production
+    // bug this guards against, below). A real scan found a 124-second, 0.95-confidence
+    // "Complete sex scenes" event sharing an aggregateKey with four much shorter nearby
+    // "Suggestive dialogue"/"Nudity" events from the same passage -- exactly the overlap this
+    // aggregation exists to collapse. Picking "first chronologically" silently hid the scene
+    // event entirely (its group lost the tie) while the minor labels kept their own switches,
+    // so a listener saw every lesser label for that passage except the one that actually
+    // mattered. These two groupIDs are the only ones a listener must always be able to find
+    // and turn off for a given passage, however many lesser labels happen to overlap it.
+    private val neverSuppressedGroupIDs = setOf(
+        group(1, 6), // sexual_complete_scene
+        group(1, 7), // sexual_violence
+    )
+
     fun available(events: List<ScanEvent>): List<PlaybackFilterParent> {
-        // One aggregate can span several taxonomy subgroups. Show it once in
-        // the first chronological subgroup while playback retains every range.
+        // One aggregate can span several taxonomy subgroups. Show it once, preferring a
+        // Complete sex scenes/Sexual violence subgroup over any other sharing the same
+        // aggregateKey (see neverSuppressedGroupIDs), then falling back to the first
+        // chronological subgroup, while playback retains every event's own range regardless.
         val preferredGroupByKey = mutableMapOf<String, String>()
         events.sortedBy { it.startTime }.forEach { event ->
             event.aggregateKey?.takeIf { it.isNotBlank() }?.let { key ->
-                preferredGroupByKey.putIfAbsent(key, event.groupID)
+                val current = preferredGroupByKey[key]
+                val eventIsNeverSuppressed =
+                    neverSuppressedGroupIDs.any { it.equals(event.groupID, ignoreCase = true) }
+                val currentIsNeverSuppressed =
+                    current != null && neverSuppressedGroupIDs.any { it.equals(current, ignoreCase = true) }
+                if (current == null || (eventIsNeverSuppressed && !currentIsNeverSuppressed)) {
+                    preferredGroupByKey[key] = event.groupID
+                }
             }
         }
         val visibleEvents = events.filter { event ->
