@@ -71,16 +71,37 @@ enum PlaybackFilterTaxonomy {
             }
         }
 
-        add(1, "Sexual Content", [
-            "Suggestive dialogue", "Sexual references", "Nudity",
-            "Implied sexual activity", "Explicit sexual activity", "Complete sex scenes",
-            "Sexual violence (rape / sexual assault)", "Kissing"
-        ])
+        // Narrowed a second time, matching the backend's own second narrowing of
+        // EnforcedLabels and the Android client's identical change: exactly three real
+        // switches now (Nudity, group 3; Explicit/vulgar scenes, the newly-added group 9;
+        // Sexual violence, group 7). Suggestive dialogue, Sexual references, Implied sexual
+        // activity, Explicit sexual activity (the old, broader version), Complete sex
+        // scenes, and Kissing are removed from here the same way the five non-sexual
+        // categories were removed above -- a book scanned before this change may still
+        // carry old events under those groups, and this makes sure none of them render a
+        // switch any more either. Explicit group numbers, not the add() helper's sequential
+        // indexing, since the real numbers (3, 7, 9) are not consecutive starting at 1.
+        values[groupID(category: 1, group: 3)] = Definition(parentLabel: "Sexual Content", childLabel: "Nudity")
+        values[groupID(category: 1, group: 9)] = Definition(parentLabel: "Sexual Content", childLabel: "Explicit / vulgar sex scenes")
+        values[groupID(category: 1, group: 7)] = Definition(parentLabel: "Sexual Content", childLabel: "Sexual violence (rape / sexual assault)")
         return values
     }()
 
     private static let icons: [String: String] = [
         "Sexual Content": "heart.slash"
+    ]
+
+    /// Explicit/vulgar sex scenes and sexual violence are never allowed to lose the
+    /// aggregate tie-break to a lower-rung label sharing the same aggregateKey. Ported from
+    /// the same fix on the Android client, which found this as a real production bug: a
+    /// 124-second, 0.95-confidence scene event shared an aggregateKey with four much
+    /// shorter Nudity events from the same passage, and "first chronologically wins" picked
+    /// the minor label, hiding the scene control entirely for that passage. These two
+    /// groupIDs are the only ones a listener must always be able to find and turn off for a
+    /// given passage, however many lesser labels happen to overlap it.
+    private static let neverSuppressedGroupIDs: Set<String> = [
+        groupID(category: 1, group: 9), // sexual_explicit_vulgar_scene
+        groupID(category: 1, group: 7), // sexual_violence
     ]
 
     /// Whether playback removes this event at all, before the listener's choices apply.
@@ -115,13 +136,20 @@ enum PlaybackFilterTaxonomy {
     /// Disabled controls stay in the list on purpose: dropping them would make a
     /// switch vanish the moment it was turned off, leaving no way to turn it back on.
     static func available(_ events: [ScanEvent]) -> [PlaybackFilterCategory] {
-        // One aggregate can span several taxonomy subgroups. Show it once, in the first
-        // subgroup it appears in chronologically, while playback keeps every range.
+        // One aggregate can span several taxonomy subgroups. Show it once, preferring a
+        // never-suppressed subgroup (see neverSuppressedGroupIDs) over any other sharing the
+        // same aggregateKey, then falling back to the first chronological subgroup, while
+        // playback keeps every event's own range regardless.
         var preferredGroupByKey: [String: String] = [:]
         for event in events.sorted(by: { $0.startTime < $1.startTime }) {
             guard let key = event.aggregateKey, !key.isEmpty else { continue }
             let group = event.groupID.uuidString.lowercased()
-            if preferredGroupByKey[key] == nil { preferredGroupByKey[key] = group }
+            let current = preferredGroupByKey[key]
+            let eventIsNeverSuppressed = neverSuppressedGroupIDs.contains(group)
+            let currentIsNeverSuppressed = current.map { neverSuppressedGroupIDs.contains($0) } ?? false
+            if current == nil || (eventIsNeverSuppressed && !currentIsNeverSuppressed) {
+                preferredGroupByKey[key] = group
+            }
         }
 
         let visible = events.filter { event in

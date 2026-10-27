@@ -32,12 +32,28 @@ object PlaybackFilterTaxonomy {
     // removed here too, not just left to stop appearing on their own: a book scanned before
     // this change may still carry old events in those groups, and this makes sure none of
     // them render a switch even for those, matching the backend's own permanent removal.
-    private val definitions = buildMap {
-        fun add(c: Int, labels: List<String>, parent: String) = labels.forEachIndexed { index, label ->
-            put(group(c, index + 1), Definition(parent, label))
-        }
-        add(1, listOf("Suggestive dialogue", "Sexual references", "Nudity", "Implied sexual activity", "Explicit sexual activity", "Complete sex scenes", "Sexual violence (rape / sexual assault)", "Kissing"), "Sexual Content")
-    }
+    //
+    // Narrowed a second time to exactly three real switches, matching the backend's own
+    // second narrowing of EnforcedLabels: Nudity (anatomical word only, not general
+    // nakedness), Explicit/vulgar scenes (group 9, a genuinely new concept -- graphic,
+    // mechanical sexual description only; ordinary romantic/sexual tension, kissing, and
+    // non-graphic intimate scenes are no longer flagged at all), and Sexual violence
+    // (unchanged). Suggestive dialogue, Sexual references, Implied sexual activity, Explicit
+    // sexual activity (the old, broader version), Complete sex scenes, and Kissing are
+    // removed from here the same way the five non-sexual categories were removed above -- a
+    // book scanned before this change may still carry old events under those groups, and
+    // this makes sure none of them render a switch any more either.
+    // Explicit group numbers rather than sequential indexing (the prior six-slot
+    // forEachIndexed helper, now removed): the real group numbers below must match
+    // ContentTaxonomy.Mappings' own GUIDs exactly -- sexual_nudity is group 3,
+    // sexual_explicit_vulgar_scene is the newly-added group 9, sexual_violence is group 7.
+    // Using 1/2/3 here would silently collide with the old sexual_suggestive_dialogue/
+    // sexual_references/sexual_nudity GUIDs instead of the real, current ones.
+    private val definitions = mapOf(
+        group(1, 3) to Definition("Sexual Content", "Nudity"),
+        group(1, 9) to Definition("Sexual Content", "Explicit / vulgar sex scenes"),
+        group(1, 7) to Definition("Sexual Content", "Sexual violence (rape / sexual assault)"),
+    )
 
     // Complete sex scenes and sexual violence are never allowed to lose the aggregate
     // tie-break to a lower-rung label sharing the same aggregateKey (see the real production
@@ -49,8 +65,12 @@ object PlaybackFilterTaxonomy {
     // so a listener saw every lesser label for that passage except the one that actually
     // mattered. These two groupIDs are the only ones a listener must always be able to find
     // and turn off for a given passage, however many lesser labels happen to overlap it.
+    // Updated from group 6 (sexual_complete_scene) to group 9 (sexual_explicit_vulgar_scene)
+    // when the taxonomy was narrowed to three labels -- the real risk this guards against
+    // (a lesser label winning the aggregate tie-break and hiding the one that actually
+    // matters) applies identically to the new label replacing the old one.
     private val neverSuppressedGroupIDs = setOf(
-        group(1, 6), // sexual_complete_scene
+        group(1, 9), // sexual_explicit_vulgar_scene
         group(1, 7), // sexual_violence
     )
 

@@ -18,6 +18,15 @@ public static class ContentTaxonomy
             ["sexual_complete_scene"] = Map(1, 6),
             ["sexual_violence"] = Map(1, 7),
             ["sexual_kissing"] = Map(1, 8),
+            // Added for the owner's permanent rule narrowing (see EnforcedLabels' own
+            // remarks): a genuinely new concept, not a renaming of sexual_explicit_activity
+            // or sexual_complete_scene -- those labels' own definitions allowed intensity,
+            // tension, and non-graphic sexual activity that this new rule explicitly keeps
+            // playable, while this label is strictly narrower, requiring graphic, mechanical,
+            // anatomical sexual description to qualify at all. Given its own new group (9)
+            // rather than reusing either old label's GUID, so a scan made under the old rule
+            // is never silently reinterpreted under the new, much stricter bar.
+            ["sexual_explicit_vulgar_scene"] = Map(1, 9),
             ["profanity_mild"] = Map(2, 1),
             ["profanity_strong"] = Map(2, 2),
             ["profanity_sexual"] = Map(2, 3),
@@ -87,11 +96,28 @@ public static class ContentTaxonomy
     // category below -- it is explicitly a sexual-content label (category 1, same as every
     // other sexual_* entry), not a violence label that happens to share a word. Anything that
     // falls under the sexual-content umbrella, including rape/sexual assault, stays enforced.
+    //
+    // Narrowed a second time, permanently, at the owner's explicit request, from the original
+    // eight sexual_* labels down to exactly three real concepts:
+    //   - sexual_nudity: ONLY a specific anatomical word naming intimate anatomy (genitalia,
+    //     breasts, nipples, areolas, buttocks). A general reference to nakedness/undressing
+    //     with no anatomical word used does not qualify.
+    //   - sexual_explicit_vulgar_scene: ONLY a passage that crosses into graphic, mechanical,
+    //     anatomical description of a sexual act (e.g. explicit description of penetration).
+    //     Ordinary romantic/sexual tension, kissing, grinding, biting, desire stated in
+    //     prose, and intense/forceful physicality read as mutual escalation are explicitly
+    //     allowed and must never be flagged -- this is a real, permanent loosening, not an
+    //     oversight. sexual_suggestive_dialogue, sexual_references, sexual_implied_activity,
+    //     sexual_explicit_activity, sexual_complete_scene, and sexual_kissing are no longer
+    //     enforced at all under this rule; a passage that used to trip one of those labels
+    //     alone (without crossing the much higher bar above) now plays through.
+    //   - sexual_violence: ONLY an ongoing scene depicting rape or sexual assault as a sexual
+    //     act, as it happens. A brief reference or backstory mention (a character stating or
+    //     recalling that they were assaulted, without the act itself being depicted) does not
+    //     qualify. Unchanged in definition from before; still fully enforced.
     public static readonly IReadOnlyList<string> EnforcedLabels =
     [
-        "sexual_suggestive_dialogue", "sexual_references", "sexual_nudity",
-        "sexual_implied_activity", "sexual_explicit_activity", "sexual_complete_scene",
-        "sexual_violence", "sexual_kissing"
+        "sexual_nudity", "sexual_explicit_vulgar_scene", "sexual_violence"
     ];
 
     /// <summary>
@@ -126,7 +152,13 @@ public static class ContentTaxonomy
         "substance_drug_use", "substance_abuse_overdose",
         "blasphemy_religious_profanity", "blasphemy_statement",
         "self_harm_reference", "self_harm_suicidal_thoughts",
-        "self_harm_suicide_attempt", "self_harm_depiction"
+        "self_harm_suicide_attempt", "self_harm_depiction",
+        // Moved here when EnforcedLabels was narrowed to exactly three labels (see that
+        // list's own remarks): a scan made under the prior eight-label rule may still carry
+        // events under these, and those must keep resolving to a CanonicalDescription rather
+        // than being dropped. Nothing may ever emit a new event under any of these again.
+        "sexual_suggestive_dialogue", "sexual_references", "sexual_implied_activity",
+        "sexual_explicit_activity", "sexual_complete_scene", "sexual_kissing"
     ];
 
     /// <summary>
@@ -153,6 +185,7 @@ public static class ContentTaxonomy
         "sexual_implied_activity" => "An intimate encounter is implied",
         "sexual_explicit_activity" => "Characters are described in an intimate encounter",
         "sexual_complete_scene" => "Characters are described in a sustained intimate encounter",
+        "sexual_explicit_vulgar_scene" => "A sexual scene is described in explicit, graphic detail",
         "sexual_violence" => "Sexual violence is described",
         "violence_graphic" => "Graphic violence described",
         "violence_torture" => "Torture described",

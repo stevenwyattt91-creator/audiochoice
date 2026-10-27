@@ -1,21 +1,22 @@
 {
   "version": "2.1",
   "note": "The canonical registry of content categories, groups and their stable identifiers. Identifiers are derived, not arbitrary: for category digit C and group index G, categoryID is C0000000-0000-0000-0000-000000000001, groupID is C1000000-0000-0000-0000-<G padded to 12>, and eventID is C1100000-0000-0000-0000-<G padded to 12>. The backend asserts this file matches Processing/ContentTaxonomy.cs, and both mobile clients assert their own group tables match it, so a change in one place fails a check rather than drifting.",
-  "enforced": "Whether the analysis model may emit this label. Unenforced labels remain listed so a scan made before a policy change still resolves. As of 2.1, every non-sexual category (Profanity, Violence, Drugs & Alcohol, Blasphemy, Self-Harm & Suicide) is permanently unenforced: this deployment filters sexual content only. Sexual violence (rape / sexual assault) is a sexual-content label and stays enforced along with the rest of category 1.",
+  "enforced": "Whether the analysis model may emit this label. Unenforced labels remain listed so a scan made before a policy change still resolves. As of 2.1, every non-sexual category (Profanity, Violence, Drugs & Alcohol, Blasphemy, Self-Harm & Suicide) is permanently unenforced: this deployment filters sexual content only. As of 2.2, category 1 itself was narrowed a second time to exactly three enforced labels (Nudity, Explicit/vulgar sex scenes, Sexual violence) at the owner's explicit, permanent request -- Suggestive dialogue, Sexual references, Implied sexual activity, Explicit sexual activity (the old, broader version), Complete sex scenes, and Kissing are no longer enforced, matching the backend's own ContentTaxonomy.EnforcedLabels. Sexual violence (rape / sexual assault) stays enforced, unchanged in definition.",
   "categories": [
     {
       "digit": 1,
       "name": "Sexual Content",
       "categoryID": "10000000-0000-0000-0000-000000000001",
       "groups": [
-        { "index": 1, "label": "sexual_suggestive_dialogue", "name": "Suggestive dialogue", "enforced": true },
-        { "index": 2, "label": "sexual_references", "name": "Sexual references", "enforced": true },
+        { "index": 1, "label": "sexual_suggestive_dialogue", "name": "Suggestive dialogue", "enforced": false },
+        { "index": 2, "label": "sexual_references", "name": "Sexual references", "enforced": false },
         { "index": 3, "label": "sexual_nudity", "name": "Nudity", "enforced": true },
-        { "index": 4, "label": "sexual_implied_activity", "name": "Implied sexual activity", "enforced": true },
-        { "index": 5, "label": "sexual_explicit_activity", "name": "Explicit sexual activity", "enforced": true },
-        { "index": 6, "label": "sexual_complete_scene", "name": "Complete sex scenes", "enforced": true },
+        { "index": 4, "label": "sexual_implied_activity", "name": "Implied sexual activity", "enforced": false },
+        { "index": 5, "label": "sexual_explicit_activity", "name": "Explicit sexual activity", "enforced": false },
+        { "index": 6, "label": "sexual_complete_scene", "name": "Complete sex scenes", "enforced": false },
         { "index": 7, "label": "sexual_violence", "name": "Sexual violence (rape / sexual assault)", "enforced": true },
-        { "index": 8, "label": "sexual_kissing", "name": "Kissing", "enforced": true }
+        { "index": 8, "label": "sexual_kissing", "name": "Kissing", "enforced": false },
+        { "index": 9, "label": "sexual_explicit_vulgar_scene", "name": "Explicit / vulgar sex scenes", "enforced": true }
       ]
     },
     {
