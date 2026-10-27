@@ -48,6 +48,26 @@ public sealed class BedrockConverseModelClient(
                     Content = [new ContentBlock { Text = input }]
                 }
             ],
+            // Matches VllmModelClient's own baseTemperature exactly: Luna's first pass
+            // (audiochoice_scan_events) runs at 0.7, Qwen's own documented instruct/
+            // non-thinking tuning point, not greedy decoding -- see VllmModelClient's own
+            // remarks for the real production evidence that running this call at 0 measurably
+            // loses recall on subtler sexual-content cues. Terra/Sol's verification and
+            // escalation calls stay at 0 for consistency with the self-hosted lane.
+            //
+            // Found missing here, not as a guess, from a real side-by-side on Butcher's
+            // Masquerade: the same passage that self-hosted Qwen3.6-27B described as "A
+            // character jokes about others viewing adult content" at 0.95 confidence, Bedrock
+            // Qwen3-32B described only as "Suggestive dialogue or innuendo occurs" at 0.35 --
+            // vague, generic, low-signal, exactly the symptom VllmModelClient's own remarks
+            // describe for temperature-0 decoding on this model family. This request had been
+            // silently running at whatever Bedrock's own per-model default is for Qwen3-32B
+            // (undocumented, and not necessarily 0.7) because no InferenceConfig was ever set
+            // at all -- not matching the self-hosted lane's deliberate choice, by omission.
+            InferenceConfig = new InferenceConfiguration
+            {
+                Temperature = schemaName == "audiochoice_scan_events" ? 0.7f : 0.0f
+            },
             ToolConfig = new ToolConfiguration
             {
                 Tools =
