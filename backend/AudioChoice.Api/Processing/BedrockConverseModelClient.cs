@@ -205,20 +205,32 @@ public sealed class BedrockConverseModelClient(
 
     /// <summary>
     /// How many additional times a call that answered in prose instead of using the forced
-    /// tool may be retried before <see cref="CompleteJson"/> gives up on getting a real
-    /// structured answer.
+    /// tool, or used it but left out a required field (see
+    /// <see cref="FindMissingRequiredField"/>), may be retried before <see cref="CompleteJson"/>
+    /// gives up on getting a real structured answer.
     /// </summary>
     /// <remarks>
     /// Separate from <see cref="OpenAIProcessingOptions.MaximumRetries"/>, which exists for
     /// outright faults (a timeout, a malformed tool call) -- this is a different kind of
     /// failure (the call succeeded; the model simply chose not to answer through the tool it
-    /// was forced to use), observed repeatedly across more than one Bedrock-hosted model, not
-    /// a one-off. Kept small: a model that skips the forced tool once on a given prompt is
-    /// not reliably more likely to use it on a byte-for-byte identical retry, so this exists
-    /// to catch the genuinely transient case without paying for many retries of a call that
-    /// will likely fail the same way every time.
+    /// was forced to use, or answered through it incompletely).
+    ///
+    /// Raised from 2 to 4 after direct evidence on Butcher's Masquerade that this is a real,
+    /// frequent Qwen3-32B-on-Bedrock behavior, not an occasional fluke: 147 occurrences across
+    /// one book's scan (prose answers and missing required fields combined), the large
+    /// majority clearing within the original 2-attempt budget, and exactly one candidate that
+    /// did not and failed the whole job at candidate 199 of roughly 199 -- a missing
+    /// needsEscalation field, not even the same field as an earlier run's missing
+    /// candidateKey. This is not "fixed" by raising the budget; the model's own forced-tool
+    /// reliability under this schema's complexity is a genuine, repeatedly-confirmed
+    /// limitation worth weighing directly in whether this model is viable for production, not
+    /// something this retry is meant to make invisible. Raised only modestly, and not to the
+    /// bogus-overflow budget's scale (8, see MaximumBogusOverflowRetries): unlike that
+    /// confirmed-noise case, a model that skips or incompletes a forced tool call is not
+    /// guaranteed to eventually comply no matter how many times it is asked, so a very large
+    /// budget here would mostly just delay an honest failure rather than fix anything.
     /// </remarks>
-    private const int MaximumNoToolResultRetries = 2;
+    private const int MaximumNoToolResultRetries = 4;
 
     /// <summary>
     /// How many times one call may be throttled before giving up, separate from the retry
