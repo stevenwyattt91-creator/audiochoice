@@ -204,6 +204,25 @@ public sealed class BedrockConverseModelClient(
                 // visible rather than blend into ordinary retry noise.
                 if (schemaName == "audiochoice_scan_events")
                 {
+                    if (TryRecoverEventsFromProse(error.FullSpokenText, schema) is { } recovered)
+                    {
+                        // Real production evidence this is worth attempting, not a guess:
+                        // every one of 17 prose answers observed on one book's scan was
+                        // itself a well-formed events array, carrying specific, high-
+                        // confidence detections (0.8-0.97) that a plain empty fallback would
+                        // have discarded outright -- 25 real events lost in that one run.
+                        // Still logged at Error, same as the fallback path: this is the
+                        // model skipping the structured answer it was forced to use, and that
+                        // stays visible even when this pipeline manages to recover the
+                        // content anyway.
+                        logger.LogError(
+                            "{SchemaName} on {Model} never used the forced tool after " +
+                            "{Budget} retries, but its prose answer was itself a well-formed " +
+                            "events array and was recovered rather than discarded. Text: {Text}",
+                            schemaName, model, MaximumNoToolResultRetries, error.SpokenText);
+                        return new AnalysisModelResponse(recovered, null, null);
+                    }
+
                     logger.LogError(
                         "{SchemaName} on {Model} never used the forced tool after {Budget} " +
                         "retries; treating this batch as reporting no events. This batch's " +
@@ -481,6 +500,35 @@ public sealed class BedrockConverseModelClient(
         return null;
     }
 
+    /// <summary>
+    /// Attempts to recover a real answer from a model's prose instead of discarding it, for
+    /// <c>audiochoice_scan_events</c> only (see the call site's own remarks for why). Returns
+    /// null rather than a best-effort guess when the text is not confidently a complete,
+    /// well-formed answer to this exact schema -- an empty-array fallback is always a safe
+    /// default for this one schema, so there is no reason to risk returning a malformed or
+    /// partial parse instead of just falling back.
+    /// </summary>
+    private static string? TryRecoverEventsFromProse(string fullSpokenText, JsonObject schema)
+    {
+        var start = fullSpokenText.IndexOf('{');
+        var end = fullSpokenText.LastIndexOf('}');
+        if (start < 0 || end <= start) return null;
+
+        JsonNode? parsed;
+        try
+        {
+            parsed = JsonNode.Parse(fullSpokenText[start..(end + 1)]);
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+        if (parsed is not JsonObject answer) return null;
+
+        Conform(answer, schema);
+        return FindMissingRequiredField(answer, schema) is null ? answer.ToJsonString() : null;
+    }
+
     private static string ExtractToolInput(
         ConverseResponse response, string schemaName, JsonObject schema)
     {
@@ -511,7 +559,7 @@ public sealed class BedrockConverseModelClient(
                     var answerJson = answer.ToJsonString();
                     throw new NoToolResultException(
                         schemaName, $"missing required field '{missingField}'",
-                        answerJson.Length > 400 ? answerJson[..400] : answerJson);
+                        answerJson.Length > 400 ? answerJson[..400] : answerJson, answerJson);
                 }
                 return answer.ToJsonString();
             }
@@ -526,7 +574,7 @@ public sealed class BedrockConverseModelClient(
         var spoken = string.Join(" ", content.Select(block => block.Text).Where(text => text is not null));
         throw new NoToolResultException(
             schemaName, response.StopReason?.ToString() ?? "unknown",
-            spoken.Length > 400 ? spoken[..400] : spoken);
+            spoken.Length > 400 ? spoken[..400] : spoken, spoken);
     }
 
 }
@@ -537,9 +585,26 @@ public sealed class BedrockConverseModelClient(
 /// <see cref="BedrockConverseModelClient.MaximumNoToolResultRetries"/>'s own remarks for why
 /// this is handled as its own retryable case rather than an ordinary fault.
 /// </summary>
-internal sealed class NoToolResultException(string schemaName, string stopReason, string spokenText)
+internal sealed class NoToolResultException(
+    string schemaName, string stopReason, string spokenText, string fullSpokenText)
     : Exception($"{schemaName} returned no tool result. Stop reason: {stopReason}. Text: {spokenText}")
 {
     public string StopReason { get; } = stopReason;
+
+    /// <summary>Truncated to 400 characters -- for logging only. See <see cref="FullSpokenText"/>
+    /// for the untruncated text, which is what any recovery attempt must parse against.</summary>
     public string SpokenText { get; } = spokenText;
+
+    /// <summary>
+    /// The model's complete prose answer, untruncated. Qwen3-32B's prose answers when it
+    /// skips the forced tool are not random chatter -- a real production sample (Butcher's
+    /// Masquerade) showed every one of 17 such answers was itself a well-formed JSON events
+    /// array, just not delivered through the tool call mechanism. Discarding this as an empty
+    /// result once temperature was raised to 0.7 for real recall (see the Temperature remarks
+    /// above) meant throwing away real, specific, high-confidence detections this exact
+    /// prose text already contained -- 25 events lost across one book's scan. Kept
+    /// untruncated here so CompleteJson's final fallback can attempt to parse it as the real
+    /// answer before falling back to an empty one.
+    /// </summary>
+    public string FullSpokenText { get; } = fullSpokenText;
 }
