@@ -48,7 +48,15 @@ public static class SceneEventPostProcessor
     /// assault scene with a nearby confirmed consensual one here would erase that distinction
     /// right before it reaches the listener.
     /// </remarks>
-    private static readonly string[] SceneLabels = ["sexual_complete_scene", "sexual_violence"];
+    // Was ["sexual_complete_scene", "sexual_violence"] -- sexual_complete_scene is a legacy
+    // label since the taxonomy narrowed to three labels (see ContentTaxonomy.EnforcedLabels'
+    // own remarks and OpenAIContentAnalysisProvider.ResolveSceneOutcome's own fix). A real
+    // accepted consensual scene finalizes as sexual_explicit_vulgar_scene now, and this
+    // constant gating the merge/word-snap/minimum-length pipeline below was never updated to
+    // match -- every real explicit-scene event accepted since the taxonomy change has been
+    // silently skipping all of this processing, a live production gap, not merely a stale
+    // comment.
+    private static readonly string[] SceneLabels = ["sexual_explicit_vulgar_scene", "sexual_violence"];
 
     /// <summary>
     /// The individual sexual-content labels below sexual_complete_scene on the ladder, whose
@@ -68,6 +76,14 @@ public static class SceneEventPostProcessor
     /// unbroken run of the first window's own individually-labeled events immediately
     /// preceding a confirmed scene IS that scene's real, earlier beginning.
     /// </remarks>
+    // Inert since the taxonomy narrowed to three labels (see ContentTaxonomy.EnforcedLabels'
+    // own remarks): none of these six labels can be produced by a real scan any more, so the
+    // scene-start-extension mechanism this list feeds (below) never actually finds a match
+    // and is a permanent no-op now. Left in place rather than removed: the mechanism itself
+    // relied on a multi-rung ladder leading up to a scene, a concept the new three-label rule
+    // has no equivalent of at all (sexual_nudity is now mechanically unrelated to
+    // sexual_explicit_vulgar_scene, not a lower rung leading into it) -- there is no
+    // replacement concept to wire in here, this genuinely has nothing left to extend from.
     private static readonly string[] LowerRungSexualLabels =
     [
         "sexual_suggestive_dialogue", "sexual_kissing", "sexual_references", "sexual_nudity",

@@ -591,7 +591,7 @@ Assert(
         Guid.Parse("21100000-0000-0000-0000-000000000001"),
     "Backend taxonomy IDs changed unexpectedly.");
 
-var completeSceneMapping = ContentTaxonomy.Mappings["sexual_complete_scene"];
+var completeSceneMapping = ContentTaxonomy.Mappings["sexual_explicit_vulgar_scene"];
 var joinedSceneEvents = SceneEventPostProcessor.Process(
     [
         new ScanEvent(Guid.NewGuid(), 100, 180, completeSceneMapping.CategoryID,
@@ -1186,13 +1186,16 @@ Assert(abbreviationBetween.Count == 1,
         "description", Quote: "quote", NonconsensualEvidence: nonconsensual);
 
     // The consensual lane never looks at nonconsensualEvidence at all -- an accepted,
-    // sustained candidate finalizes as sexual_complete_scene regardless of that field.
+    // sustained candidate finalizes as sexual_explicit_vulgar_scene regardless of that field.
+    // (Label was sexual_complete_scene before the taxonomy narrowed to three labels; the
+    // first-pass lane name "sexual_complete_scene" is unrelated to the finalized label and
+    // is kept as-is purely as a historical candidate-routing identifier, not a taxonomy label.)
     var consensualOutcome = OpenAIContentAnalysisProvider.ResolveSceneOutcome(
         "sexual_complete_scene", Decision(true, true, true, nonconsensual: true));
     Assert(
-        consensualOutcome is { Label: "sexual_complete_scene" },
+        consensualOutcome is { Label: "sexual_explicit_vulgar_scene" },
         "A candidate reviewed under the consensual lane did not finalize as " +
-        "sexual_complete_scene regardless of an incidentally-true nonconsensualEvidence field.");
+        "sexual_explicit_vulgar_scene regardless of an incidentally-true nonconsensualEvidence field.");
 
     // The sexual_violence lane requires nonconsensualEvidence specifically; without it, an
     // otherwise-accepted candidate must not finalize as sexual_violence.
@@ -1572,10 +1575,10 @@ Assert(retainedSceneEvents.Count == 1,
             "this deployment.");
 
         var sceneEvent = e2eResult.SingleOrDefault(
-            item => item.EventID == ContentTaxonomy.Mappings["sexual_complete_scene"].EventID);
+            item => item.EventID == ContentTaxonomy.Mappings["sexual_explicit_vulgar_scene"].EventID);
         Assert(
             sceneEvent is not null,
-            "The end-to-end pipeline did not produce a complete-scene event for the fixture " +
+            "The end-to-end pipeline did not produce an explicit-scene event for the fixture " +
             "sexual scene.");
         // Word-snapped, not flat-padded: the scene's boundary must land exactly on one of
         // the fixture's own word timings, not on some multi-second-padded number.
@@ -1783,11 +1786,11 @@ Assert(retainedSceneEvents.Count == 1,
             "FixtureAnalysisModelClient.RespondToLuna's no-events branch.");
 
         var safetyNetEvent = safetyNetResult.SingleOrDefault(
-            item => item.EventID == ContentTaxonomy.Mappings["sexual_complete_scene"].EventID);
+            item => item.EventID == ContentTaxonomy.Mappings["sexual_explicit_vulgar_scene"].EventID);
         Assert(
             safetyNetEvent is not null,
-            "The keyword safety net did not surface a sexual_complete_scene event for a " +
-            "passage Luna's own first pass reported no events for at all.");
+            "The keyword safety net did not surface a sexual_explicit_vulgar_scene event for " +
+            "a passage Luna's own first pass reported no events for at all.");
         Assert(
             safetyNetModelClient.TerraCallCount >= 1,
             "The keyword safety net's candidate was never sent to Terra for confirmation.");
@@ -1887,9 +1890,9 @@ Assert(retainedSceneEvents.Count == 1,
 
         Assert(
             noDuplicateResult.Count(
-                item => item.EventID == ContentTaxonomy.Mappings["sexual_complete_scene"].EventID) == 1,
-            $"A passage Luna already covered with its own sexual_complete_scene event " +
-            $"produced {noDuplicateResult.Count(item => item.EventID == ContentTaxonomy.Mappings["sexual_complete_scene"].EventID)} " +
+                item => item.EventID == ContentTaxonomy.Mappings["sexual_explicit_vulgar_scene"].EventID) == 1,
+            $"A passage Luna already covered with its own sexual_explicit_vulgar_scene event " +
+            $"produced {noDuplicateResult.Count(item => item.EventID == ContentTaxonomy.Mappings["sexual_explicit_vulgar_scene"].EventID)} " +
             "such events after the keyword safety net ran, rather than the original single " +
             "event -- the safety net added a duplicate for a window Luna already covered.");
         Assert(
@@ -2030,7 +2033,7 @@ Assert(retainedSceneEvents.Count == 1,
             laneIsolationSegments, null, CancellationToken.None);
 
         var realSceneEvent = laneIsolationResult.SingleOrDefault(
-            item => item.EventID == ContentTaxonomy.Mappings["sexual_complete_scene"].EventID);
+            item => item.EventID == ContentTaxonomy.Mappings["sexual_explicit_vulgar_scene"].EventID);
         Assert(
             realSceneEvent is not null,
             "A real Luna-confirmed scene disappeared entirely once a keyword-safety-net " +
@@ -2126,12 +2129,12 @@ Assert(retainedSceneEvents.Count == 1,
             $"{solSecondOpinionModelClient.SolCallCount} Sol call(s), expected 2).");
 
         var sceneEvent = solSecondOpinionResult.SingleOrDefault(
-            item => item.EventID == ContentTaxonomy.Mappings["sexual_complete_scene"].EventID);
+            item => item.EventID == ContentTaxonomy.Mappings["sexual_explicit_vulgar_scene"].EventID);
         Assert(
             sceneEvent is not null,
             "Both Sol votes accepted the safety-net candidate (a 2-1 majority over Terra's " +
-            "rejection), but no sexual_complete_scene event was produced -- the majority " +
-            "vote's override of Terra's rejection did not take effect.");
+            "rejection), but no sexual_explicit_vulgar_scene event was produced -- the " +
+            "majority vote's override of Terra's rejection did not take effect.");
     }
     finally
     {
@@ -2139,11 +2142,16 @@ Assert(retainedSceneEvents.Count == 1,
     }
 }
 
-// Keyword safety net fallback: a safety-net candidate that Terra AND both Sol votes reject
-// for the scene bar must not simply vanish -- Luna's own first pass never proposed any event
-// for this window at all, so a flat rejection here means the one thing the keyword scan
-// exists to catch would otherwise disappear completely. The candidate must instead be
-// reported at the lighter rung Terra/Sol's own evidence booleans support.
+// Keyword safety net, outright rejection: a safety-net candidate that Terra AND both Sol
+// votes reject for the scene bar must simply vanish -- not fall back to a lesser label. This
+// used to assert the opposite (a fallback to sexual_suggestive_dialogue), which was the exact
+// bug a real production report caught: "sex doll"-style crude humor the keyword net's own
+// wide regex matches on purpose (to give Terra something to review) kept surfacing under a
+// label the three-category rule no longer enforces at all, long after the taxonomy was
+// narrowed, because this fallback kept constructing it anyway (see ResolveSceneOutcome's own
+// remarks, and AddKeywordSafetyNetFallback's deletion). Flirtation that Terra and Sol both
+// correctly judge as not a direct act is now a real, correct "this does not qualify" answer,
+// not a signal to downgrade.
 {
     var fallbackRoot = Path.Combine(
         Path.GetTempPath(), $"audiochoice-safety-net-fallback-{Guid.NewGuid():N}");
@@ -2196,35 +2204,17 @@ Assert(retainedSceneEvents.Count == 1,
 
         Assert(
             !fallbackResult.Any(
-                item => item.EventID == ContentTaxonomy.Mappings["sexual_complete_scene"].EventID),
+                item => item.EventID == ContentTaxonomy.Mappings["sexual_explicit_vulgar_scene"].EventID),
             "A keyword-safety-net candidate Terra and Sol both rejected for the scene bar " +
-            "was still reported as a sexual_complete_scene.");
-        var fallbackEvent = fallbackResult.FirstOrDefault(
-            item => item.EventID == ContentTaxonomy.Mappings["sexual_suggestive_dialogue"].EventID);
+            "was still reported as a sexual_explicit_vulgar_scene.");
         Assert(
-            fallbackEvent is not null,
-            "A keyword-safety-net candidate rejected for the scene bar (no direct act " +
-            "evidence) vanished entirely instead of falling back to " +
-            "sexual_suggestive_dialogue -- the exact real content the keyword scan was " +
-            "seeded to catch (Luna's own first pass proposed nothing for this window at " +
-            "all) was lost with no event reported.");
-        // Word-snapped to the matched cue word itself ("flirted", 10.2-10.6) plus the fixed
-        // 2-second context padding on each side (8.2-12.6) -- NOT the whole matched
-        // segment's own boundary (10-20, the bug a real listener report caught: the skip
-        // started measurably after the cue phrase had already begun playing, because the
-        // segment's own width, not the cue word's position within it, was being reported),
-        // and NOT the padded ±12-segment review window Terra was given for context either
-        // (which in this fixture spans the full 10-40 range).
-        Assert(
-            fallbackEvent is not null &&
-                Math.Abs(fallbackEvent.StartTime - 8.2) < 0.01 &&
-                Math.Abs(fallbackEvent.EndTime - 12.6) < 0.01,
-            $"A keyword-safety-net fallback event's boundary was not word-snapped to the " +
-            $"cue text that actually matched -- it used the whole matched segment's (or " +
-            $"review window's) own boundary instead (got " +
-            $"{(fallbackEvent is null ? "n/a" : $"{fallbackEvent.StartTime}-{fallbackEvent.EndTime}")}" +
-            ", expected approximately 8.2-12.6; a real listener report caught audible " +
-            "content playing right before this exact kind of event's skip engaged).");
+            fallbackResult.Count == 0,
+            $"A keyword-safety-net candidate Terra and both Sol votes rejected for the " +
+            $"scene bar (no direct act evidence, nothing sustained) produced " +
+            $"{fallbackResult.Count} event(s) instead of vanishing entirely -- under the " +
+            "three-category rule there is no lesser sexual label left to fall back to " +
+            "(see ResolveSceneOutcome's own remarks), so a real rejection here must mean " +
+            "no event at all, not a downgrade to a legacy label.");
     }
     finally
     {
@@ -2297,11 +2287,11 @@ Assert(retainedSceneEvents.Count == 1,
             $"{ordinaryRejectionModelClient.SolCallCount} Sol call(s), expected 2).");
         Assert(
             ordinaryRejectionResult.Any(
-                item => item.EventID == ContentTaxonomy.Mappings["sexual_complete_scene"].EventID),
+                item => item.EventID == ContentTaxonomy.Mappings["sexual_explicit_vulgar_scene"].EventID),
             "Both Sol votes accepted the ordinary candidate (a 2-1 majority over Terra's " +
-            "rejection), but no sexual_complete_scene event was produced -- the majority " +
-            "vote's override of Terra's rejection did not take effect for a non-safety-net " +
-            "candidate.");
+            "rejection), but no sexual_explicit_vulgar_scene event was produced -- the " +
+            "majority vote's override of Terra's rejection did not take effect for a " +
+            "non-safety-net candidate.");
     }
     finally
     {
@@ -4463,12 +4453,14 @@ sealed class FixtureAnalysisModelClient : IAnalysisModelClient
 
     /// <summary>
     /// Luna's fixed answer: the fixture sexual scene, whichever batch(es) it falls in,
-    /// reported as one implied-activity event plus the required accompanying complete-scene
-    /// event -- exactly the pairing the real prompt requires ("ALWAYS emit
-    /// sexual_complete_scene alongside..."). A separate trigger phrase reports a
-    /// sexual_violence candidate instead, mutually exclusive with the consensual pairing, the
-    /// same way Luna's real prompt requires. Never reports profanity (Luna no longer may) or
-    /// graphic violence for the fixture's ordinary argument.
+    /// reported as a single sexual_explicit_vulgar_scene event -- the real three-category
+    /// prompt has no pairing requirement any more (that was old-taxonomy prose; the real
+    /// schema's enum no longer even permits a legacy label like sexual_implied_activity or
+    /// sexual_complete_scene at all, so a fixture emitting them was simulating a response the
+    /// real model can no longer produce). A separate trigger phrase reports a sexual_violence
+    /// candidate instead, mutually exclusive with the consensual label, the same way Luna's
+    /// real prompt requires. Never reports profanity (Luna no longer may) or graphic violence
+    /// for the fixture's ordinary argument.
     /// </summary>
     private string RespondToLuna(string input)
     {
@@ -4494,10 +4486,7 @@ sealed class FixtureAnalysisModelClient : IAnalysisModelClient
         }
         return """
         {"events":[
-          {"label":"sexual_implied_activity","startTime":10,"endTime":30,"confidence":0.8,
-           "safeDescription":"An intimate encounter is implied","profanityWord":null,
-           "quote":"kissed him slowly"},
-          {"label":"sexual_complete_scene","startTime":10,"endTime":30,"confidence":0.8,
+          {"label":"sexual_explicit_vulgar_scene","startTime":10,"endTime":30,"confidence":0.8,
            "safeDescription":"A sustained intimate encounter","profanityWord":null,
            "quote":"kissed him slowly"}
         ]}
@@ -4587,7 +4576,9 @@ sealed class SolSecondOpinionFixtureModelClient : IAnalysisModelClient
     /// non-safety-net Terra rejection to prove the rejection-escalation rule applies to an
     /// ordinary Luna-proposed candidate too, not only a keyword-safety-net seed) and nothing
     /// at all for the "bit down as she moaned" passage (where only the keyword safety net
-    /// produces a candidate).
+    /// produces a candidate). Single sexual_explicit_vulgar_scene label, not the old
+    /// implied-activity/complete-scene pairing -- the real three-category schema's enum no
+    /// longer permits either legacy label at all.
     /// </summary>
     private static string RespondToLuna(string input)
     {
@@ -4595,10 +4586,7 @@ sealed class SolSecondOpinionFixtureModelClient : IAnalysisModelClient
         {
             return """
             {"events":[
-              {"label":"sexual_implied_activity","startTime":10,"endTime":20,"confidence":0.8,
-               "safeDescription":"An intimate encounter is implied","profanityWord":null,
-               "quote":"knowing smile"},
-              {"label":"sexual_complete_scene","startTime":10,"endTime":20,"confidence":0.8,
+              {"label":"sexual_explicit_vulgar_scene","startTime":10,"endTime":20,"confidence":0.8,
                "safeDescription":"A sustained intimate encounter","profanityWord":null,
                "quote":"knowing smile"}
             ]}

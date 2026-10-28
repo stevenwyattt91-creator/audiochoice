@@ -668,7 +668,10 @@ public sealed class OpenAIContentAnalysisProvider(
         IReadOnlyList<TranscriptSegment> segments)
     {
         if (segments.Count == 0) return events.ToArray();
-        var mapping = ContentTaxonomy.Mappings["sexual_complete_scene"];
+        // Was "sexual_complete_scene" -- see ResolveSceneOutcome's own remarks for why that
+        // label is legacy now and never produced by a real scan. Updated to the label a real
+        // accepted consensual scene actually finalizes under today.
+        var mapping = ContentTaxonomy.Mappings["sexual_explicit_vulgar_scene"];
         var completeScenes = events.Where(item => item.EventID == mapping.EventID).ToArray();
         if (completeScenes.Length == 0) return events.ToArray();
 
@@ -709,11 +712,18 @@ public sealed class OpenAIContentAnalysisProvider(
         return Path.Combine(_checkpointFolder, $"{key}.json");
     }
 
+    // Legacy labels kept alongside the three real ones so a checkpoint written under an
+    // older scanner version (see CheckpointPath's own remarks on reusing prior candidate
+    // checkpoints across releases) still resolves correctly; a real scan under the current
+    // three-category prompt only ever produces sexual_explicit_vulgar_scene, sexual_nudity,
+    // or sexual_violence here. Missing sexual_explicit_vulgar_scene entirely was a real bug
+    // this list shared with the two near-identical lists below (see AddUncoveredSexualCandidates
+    // and VerifyCompleteSexualScenes' own remarks for the production-visible symptom it caused).
     private static readonly HashSet<string> SexualContentLabels =
     [
         "sexual_suggestive_dialogue", "sexual_references", "sexual_nudity",
         "sexual_implied_activity", "sexual_explicit_activity", "sexual_complete_scene",
-        "sexual_violence", "sexual_kissing"
+        "sexual_explicit_vulgar_scene", "sexual_violence", "sexual_kissing"
     ];
 
     internal static bool HasSexualContentEvent(AnalysisPayload payload) =>
@@ -1283,11 +1293,16 @@ public sealed class OpenAIContentAnalysisProvider(
     {
         var seedIDs = new HashSet<Guid>();
         var completeSceneMapping = ContentTaxonomy.Mappings["sexual_complete_scene"];
+        // Missing sexual_explicit_vulgar_scene here was a real bug: a real Luna-confirmed
+        // scene under the current three-category prompt was never recognized as coverage,
+        // so this method re-seeded a keyword-safety-net candidate directly on top of a scene
+        // Luna had already proposed, for Terra to review all over again as a second,
+        // separately-laned candidate right next to the first.
         var sexualEventIDs = new[]
         {
             "sexual_suggestive_dialogue", "sexual_references", "sexual_nudity",
             "sexual_implied_activity", "sexual_explicit_activity", "sexual_complete_scene",
-            "sexual_violence", "sexual_kissing"
+            "sexual_explicit_vulgar_scene", "sexual_violence", "sexual_kissing"
         }.Select(label => ContentTaxonomy.Mappings[label].EventID).ToHashSet();
         var lunaSexualRanges = events
             .Where(item => sexualEventIDs.Contains(item.EventID))
@@ -1351,11 +1366,15 @@ public sealed class OpenAIContentAnalysisProvider(
     {
         var completeSceneMapping = ContentTaxonomy.Mappings["sexual_complete_scene"];
         var sexualViolenceMapping = ContentTaxonomy.Mappings["sexual_violence"];
+        // Missing sexual_explicit_vulgar_scene here was a real bug: a real Luna-confirmed
+        // scene under the current three-category prompt would not even be recognized as a
+        // sexual candidate for Terra verification purposes by this filter (see
+        // AddUncoveredSexualCandidates' own remarks for the matching bug it shared).
         var sexualEventIDs = new[]
         {
             "sexual_suggestive_dialogue", "sexual_references", "sexual_nudity",
             "sexual_implied_activity", "sexual_explicit_activity", "sexual_complete_scene",
-            "sexual_violence", "sexual_kissing"
+            "sexual_explicit_vulgar_scene", "sexual_violence", "sexual_kissing"
         }.Select(label => ContentTaxonomy.Mappings[label].EventID).ToHashSet();
         var sexualCandidateEvents = events
             .Where(item => sexualEventIDs.Contains(item.EventID))
@@ -1523,19 +1542,25 @@ public sealed class OpenAIContentAnalysisProvider(
             var outcome = ResolveSceneOutcome(sourceCandidate.FirstPassLane, verification);
             if (outcome is null)
             {
-                // A keyword-safety-net seed that fails the scene bar is not nothing -- Luna's
-                // own first pass never proposed ANY event for this window at all (that is
-                // the entire reason the keyword scan seeded it), so simply discarding it
-                // when it falls short of a full scene throws away the one thing this method
-                // was seeded to catch: real sexual content Luna missed outright. A real
-                // Luna-proposed candidate that fails this same bar already has its own
-                // correctly-labeled lighter event sitting in `retained` from the top of this
-                // method and needs nothing more; a keyword seed has no such fallback unless
-                // one is added here.
-                if (sourceCandidate.FirstPassLane == "sexual_keyword_safety_net")
-                {
-                    AddKeywordSafetyNetFallback(retained, verification, sourceCandidate);
-                }
+                // Previously fell back to a lesser label (sexual_implied_activity,
+                // sexual_nudity, or sexual_suggestive_dialogue) when a keyword-safety-net
+                // seed failed the scene bar, specifically so real content Luna's first pass
+                // missed outright was not simply discarded. That fallback no longer has a
+                // valid target: under the three-category rule (see ContentTaxonomy.
+                // EnforcedLabels' own remarks), there is no lesser sexual label left to
+                // report a rejected candidate under at all -- sexual_suggestive_dialogue,
+                // sexual_references, sexual_implied_activity, and sexual_explicit_activity
+                // are all legacy now. A keyword-net candidate (crude jokes, innuendo, and
+                // similar phrasing like "sex doll" that the net's own wide regex still
+                // matches on purpose, to give Terra something to review) that Terra/Sol
+                // correctly rejects against the new, much stricter explicit_scene bar is a
+                // real, correct "this does not qualify" answer now, not a signal to
+                // downgrade -- a real production report confirmed the old fallback was
+                // still firing after the taxonomy was narrowed, reporting "sex doll"-style
+                // crude humor under the no-longer-enforced sexual_suggestive_dialogue label.
+                // Standalone nudity (an anatomical word used on its own, with no scene around
+                // it at all) is handled entirely separately now and does not go through scene
+                // verification in the first place, so it needs nothing recovered here either.
                 continue;
             }
             var (label, mapping) = outcome.Value;
@@ -1624,6 +1649,15 @@ public sealed class OpenAIContentAnalysisProvider(
     /// (nudity, implied or explicit activity, or an already-flagged complete scene) was
     /// already kept regardless, and still is -- a passing reference next to real activity is
     /// context for that activity, not noise.
+    ///
+    /// strongEventIDs below still lists the legacy strong labels rather than
+    /// sexual_explicit_vulgar_scene, unlike AddUncoveredSexualCandidates and
+    /// VerifyCompleteSexualScenes' own matching lists (which needed the real fix -- see their
+    /// own remarks). Left as-is here because it is genuinely inert under the current
+    /// three-category prompt: this whole method only examines WeakSexualEventIDs
+    /// (sexual_suggestive_dialogue, sexual_references, sexual_kissing), none of which Luna
+    /// can emit any more, so weakIndices.Length is always 0 and the method returns every
+    /// candidate unchanged before strongEventIDs is ever consulted.
     /// </remarks>
     internal static IReadOnlyList<ScanEvent> ExcludeLoneWeakSingletons(
         IReadOnlyList<ScanEvent> candidates,
@@ -1778,130 +1812,16 @@ public sealed class OpenAIContentAnalysisProvider(
                 : null;
         }
 
-        return ("sexual_complete_scene", ContentTaxonomy.Mappings["sexual_complete_scene"]);
-    }
-
-    /// <summary>
-    /// The lighter sexual-content label a rejected keyword-safety-net candidate still
-    /// deserves, chosen from Terra/Sol's own evidence booleans.
-    /// </summary>
-    /// <remarks>
-    /// Terra/Sol already independently judged whether an actual sexual act occurred
-    /// (<c>directSexualActEvidence</c>) and whether nudity-only evidence was present
-    /// (<c>sustainedBeyondKissing</c> false but some evidence still true) when deciding the
-    /// candidate did not clear the scene bar -- that is real information this method already
-    /// paid for and previously discarded outright. It cannot recover which exact rung among
-    /// suggestive_dialogue/references/nudity/kissing/implied_activity the original keyword
-    /// cue actually was (the keyword window, not Terra's schema, is the only thing that ever
-    /// looked at the cue word itself), so this intentionally reports the single rung that is
-    /// correct regardless of which specific cue fired: sexual_implied_activity when there is
-    /// real but not-sustained act evidence, sexual_nudity when the candidate's own window
-    /// matched a nudity-shaped keyword cue, and sexual_suggestive_dialogue otherwise -- the
-    /// ladder's lowest rung, safe to report for anything that triggered the keyword scan at
-    /// all without overclaiming what Terra/Sol actually found.
-    /// </remarks>
-    /// <summary>
-    /// A narrow subset of nudity-specific wording, used only to decide which lighter label a
-    /// rejected keyword-safety-net candidate falls back to -- not a detector in its own
-    /// right. Deliberately much smaller than DeterministicContentDetector's own SceneCueRegex
-    /// (which exists to decide whether to seed a candidate at all, not which of several
-    /// lighter labels best fits one that already failed the scene bar).
-    /// </summary>
-    private static readonly System.Text.RegularExpressions.Regex KeywordFallbackNudityPattern =
-        new(
-            @"\b(?:naked|nude|nudity|undress(?:ed|ing)?|strip(?:ped|ping)?|disrobe(?:d|ing)?|" +
-            @"bare(?:ly)?\s+(?:skin|body|chest|breasts?)|expos(?:e|ed|ing)|uncover(?:ed|ing)|" +
-            @"clothing\s+(?:fell|slipped|dropped|pooled)|shirt\s+(?:torn|ripped|came)\s+open)\b",
-            System.Text.RegularExpressions.RegexOptions.IgnoreCase |
-            System.Text.RegularExpressions.RegexOptions.Compiled);
-
-    private static bool LooksLikeNudityCue(string text) => KeywordFallbackNudityPattern.IsMatch(text);
-
-    /// <summary>
-    /// Fixed padding added on each side of a word-snapped keyword-fallback cue.
-    /// </summary>
-    /// <remarks>
-    /// The bare matched word/phrase alone is usually too narrow to represent "a suggestive
-    /// line" -- a cue word is often mid-sentence, with the sentence's own charge coming from
-    /// the words around it, not the single matched token in isolation. Kept small and fixed
-    /// (not segment-width) specifically because this is the exact problem being fixed here:
-    /// trusting a whole transcript segment's own width inflated these events far past the
-    /// words that justified them. 2 seconds each side is enough to keep a short phrase
-    /// audible as one line, not a sentence or more.
-    /// </remarks>
-    private const double FallbackContextPaddingSeconds = 2;
-
-    private void AddKeywordSafetyNetFallback(
-        List<ScanEvent> retained,
-        VerifiedSceneCandidate verification,
-        SceneVerificationCandidate sourceCandidate)
-    {
-        // Terra/Sol already rejected the scene outcome by the time this runs, but their
-        // evidence booleans about THIS SAME candidate are still informative about what rung
-        // (if any) the underlying passage actually supports.
-        var windowText = string.Join(" ", sourceCandidate.Segments
-            .Where(segment => segment.EndTime >= sourceCandidate.ProposedStartTime &&
-                segment.StartTime <= sourceCandidate.ProposedEndTime)
-            .Select(segment => segment.Text));
-        string label = verification.DirectSexualActEvidence
-            ? "sexual_implied_activity"
-            : LooksLikeNudityCue(windowText)
-                ? "sexual_nudity"
-                : "sexual_suggestive_dialogue";
-        var mapping = ContentTaxonomy.Mappings[label];
-
-        // No confirmed quote to anchor to -- Terra rejected the scene claim this quote was
-        // meant to support, so trusting that same quote for a different label's boundary
-        // would be trusting evidence the verifier itself did not accept. The keyword window
-        // Terra reviewed is several minutes wide on dense narration (it exists to give Terra
-        // context to judge a full scene, not to be a listener-facing boundary by itself), so
-        // re-locate the one segment within it that actually matched the keyword cue.
-        //
-        // A real listener report caught a gap in the first version of this fix: it anchored
-        // to that whole matched SEGMENT's own StartTime/EndTime, not to the matched cue text's
-        // own position within it. A transcript segment is often a full sentence, and the cue
-        // phrase can land anywhere inside it -- reporting the segment's own boundary meant
-        // the skip could start measurably after the cue phrase itself had already begun
-        // playing (a real report: "skipping right after it should have"), the exact failure
-        // every other confirmed event in this pipeline is protected against by word-level
-        // snapping (TryConfirmSceneBoundary/TranscriptWordLocator) and that this one path
-        // alone had been skipping. Now locates the matched cue text's own word span via
-        // TranscriptWordLocator.FindPhrase and widens it by a fixed, small amount of
-        // surrounding context on each side (FallbackContextPaddingSeconds) -- enough to cover
-        // "a suggestive line," not the padded multi-minute review window, and not the bare
-        // trigger word alone either. Falls back to the matched segment's own boundary only if
-        // the word-level span cannot be located at all (no per-word timing on this segment,
-        // or an unexpected mismatch) -- strictly a fallback of last resort, not the normal
-        // path any more.
-        var cue = DeterministicContentDetector.FindMatchingCue(
-            sourceCandidate.Segments
-                .Where(segment => segment.StartTime >= sourceCandidate.ProposedStartTime &&
-                    segment.EndTime <= sourceCandidate.ProposedEndTime)
-                .ToArray());
-        double start, end;
-        if (cue is { } found &&
-            TranscriptWordLocator.FindPhrase(found.Segment.Words, found.MatchedText) is { } span)
-        {
-            start = Math.Max(0, span.StartTime - FallbackContextPaddingSeconds);
-            end = span.EndTime + FallbackContextPaddingSeconds;
-        }
-        else
-        {
-            start = cue?.Segment.StartTime ?? sourceCandidate.ProposedStartTime;
-            end = cue?.Segment.EndTime ?? sourceCandidate.ProposedEndTime;
-        }
-
-        // Reported at the keyword safety net's own long-standing confidence (see
-        // AddUncoveredSexualCandidates), not Terra/Sol's confidence in the scene claim they
-        // just rejected -- that confidence describes a different question (was this a full
-        // scene) than the one this fallback event is actually answering (is this rung's
-        // content present at all).
-        const double fallbackConfidence = .35;
-        retained.Add(new ScanEvent(
-            Guid.NewGuid(), start, end, mapping.CategoryID, mapping.GroupID,
-            mapping.EventID, fallbackConfidence,
-            Hash($"keyword-fallback|{mapping.EventID:N}|{start:F1}|{end:F1}|{verification.CandidateKey}"),
-            SafeDescriptionForEvent(label, null)));
+        // Was a hardcoded "sexual_complete_scene" -- a legacy label since the taxonomy
+        // narrowed to three labels (see ContentTaxonomy.EnforcedLabels' own remarks). A
+        // real production scan (A Court of Thorns and Roses Part 2's new edition import)
+        // confirmed this specific code path had not yet produced a live mislabeled event,
+        // only because no candidate on that book happened to clear the new, much stricter
+        // explicit-scene bar yet -- but the bug was real and would have silently mislabeled
+        // the next accepted scene on any book under a legacy label the app no longer
+        // renders a switch for at all. VerifySceneBatch's own prompt was already rewritten
+        // for this same bar; this is the other half of the same fix.
+        return ("sexual_explicit_vulgar_scene", ContentTaxonomy.Mappings["sexual_explicit_vulgar_scene"]);
     }
 
     /// <summary>
