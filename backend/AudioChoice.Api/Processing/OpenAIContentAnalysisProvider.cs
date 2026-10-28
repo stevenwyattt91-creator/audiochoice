@@ -246,7 +246,19 @@ public sealed class OpenAIContentAnalysisProvider(
     // was not enough; the real fix required rewriting BuildInput's prompt text itself,
     // since the old prose kept teaching the model the removed eight-label vocabulary even
     // after the response schema's own enum was already narrowed to three labels).
-    private const string BaseAnalysisPromptVersion = "7.0-three-category";
+    //
+    // Bumped again to 7.1: added "sex as anatomy" to sexual_nudity's own synonym list, and a
+    // new instruction to escalate a sentence pairing a narrow anatomical word with graphic
+    // physiological detail beside it (swollen, gleaming, wet, dripping, aching, throbbing,
+    // especially tied to arousal or a sexual act's aftermath) to sexual_explicit_vulgar_scene
+    // instead of a narrow sexual_nudity hit on the single word. Found rebuilding a standalone
+    // chapter-redaction tool against this exact prompt: a direct real-book passage reading
+    // "her sex swollen and gleaming, wet with his seed" was reported only for the word "sex"
+    // in isolation, leaving the graphic detail immediately beside it fully visible -- which
+    // defeats the purpose, since a listener who only has the single word's narration skipped
+    // still hears content that trivially implies it. A scan made under the prior version may
+    // be under-reporting this exact pattern and should be re-scanned.
+    private const string BaseAnalysisPromptVersion = "7.1-nudity-detail-escalation";
     // Bumped for the keyword safety net's lane isolation fix: a candidate whose window
     // happens to match a checkpoint cached under the prior version may have been built
     // before a safety-net seed's own lane existed, when it could still get coalesced into a
@@ -2530,19 +2542,28 @@ described without graphic mechanical detail) are all explicitly ALLOWED now and 
 reported under any label. Only the three things below qualify at all.
 
 sexual_nudity -- ONLY a specific anatomical word or its direct synonym naming intimate anatomy:
-genitalia (penis, vagina, cock, dick as anatomy, pussy, genitals), breasts, nipples, areolas, or
-buttocks (butt, ass as a body part). Report the narrowest possible range -- the exact word or
-short phrase that uses the anatomical term, never the sentence or paragraph around it. A general
-reference to someone being naked, nude, unclothed, undressed, bare, or removing clothing does
-NOT qualify on its own -- this label is only for the literal anatomical word itself, not for
-nakedness in general. A word in this list used in a non-body sense (an insult, a euphemism with
-no anatomical meaning, an unrelated word that happens to share a spelling) does not qualify
-either -- judge the word's actual use in context, not just its presence. No word is sexual
-content by itself: a hand on a chest during first aid, a breast wound in battle, a medical
-examination, a badge pinned at her breast, or armour such as a breastplate is anatomy mentioned
-in a non-sexual, non-exposed context and does not qualify. The word qualifies when the passage
-itself describes that anatomy as bare, uncovered, exposed, or otherwise names it directly in a
-body-revealing or sexual context.
+genitalia (penis, vagina, cock, dick as anatomy, pussy, genitals, sex as anatomy), breasts,
+nipples, areolas, or buttocks (butt, ass as a body part). Report the narrowest possible range --
+the exact word or short phrase that uses the anatomical term, never the sentence or paragraph
+around it. A general reference to someone being naked, nude, unclothed, undressed, bare, or
+removing clothing does NOT qualify on its own -- this label is only for the literal anatomical
+word itself, not for nakedness in general. A word in this list used in a non-body sense (an
+insult, a euphemism with no anatomical meaning, an unrelated word that happens to share a
+spelling) does not qualify either -- judge the word's actual use in context, not just its
+presence. No word is sexual content by itself: a hand on a chest during first aid, a breast
+wound in battle, a medical examination, a badge pinned at her breast, or armour such as a
+breastplate is anatomy mentioned in a non-sexual, non-exposed context and does not qualify. The
+word qualifies when the passage itself describes that anatomy as bare, uncovered, exposed, or
+otherwise names it directly in a body-revealing or sexual context. If the sentence containing
+the anatomical word ALSO describes that anatomy with graphic physiological detail -- swollen,
+gleaming, wet, dripping, aching, throbbing, or similar, especially tied to arousal or the
+aftermath of a sexual act (e.g. "wet with his seed") -- report the whole sentence or clause as
+sexual_explicit_vulgar_scene instead of a narrow sexual_nudity hit on the single word. A real
+listener-caught miss this rule exists to fix: a passage naming intimate anatomy as "swollen and
+gleaming, wet with his seed" was reported only for the anatomical word itself, leaving the
+graphic detail immediately beside it unreported -- a listener who skips only the single word
+still hears content that trivially implies it. When in doubt about whether graphic detail
+accompanies an anatomical word, prefer the fuller clause under sexual_explicit_vulgar_scene.
 
 sexual_explicit_vulgar_scene -- ONLY a passage that crosses into graphic, mechanical, anatomical
 description of a sexual act -- for example an explicit description of penetration, or similarly
