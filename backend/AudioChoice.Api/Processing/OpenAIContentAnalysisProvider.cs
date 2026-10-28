@@ -241,7 +241,12 @@ public sealed class OpenAIContentAnalysisProvider(
     // fixed 2-second pad on each side, rather than trusting any segment's own width. A scan
     // made under the prior version has fallback events boundaried to the matched segment,
     // not the matched words, and must be re-scanned to correct them.
-    private const string BaseAnalysisPromptVersion = "6.11-sexual-content-only";
+    // Bumped to 7.0 for the three-category rewrite -- see OpenAIProcessingOptions.
+    // ScannerVersion's own remarks for the full reasoning (narrowing EnforcedLabels alone
+    // was not enough; the real fix required rewriting BuildInput's prompt text itself,
+    // since the old prose kept teaching the model the removed eight-label vocabulary even
+    // after the response schema's own enum was already narrowed to three labels).
+    private const string BaseAnalysisPromptVersion = "7.0-three-category";
     // Bumped for the keyword safety net's lane isolation fix: a candidate whose window
     // happens to match a checkpoint cached under the prior version may have been built
     // before a safety-net seed's own lane existed, when it could still get coalesced into a
@@ -2446,57 +2451,61 @@ it false for clear rejections, ambiguous-consent passages, or passages that read
 Confirmed accepted candidates also receive final review.
 """
             : """
-Act as a strict final verifier for one audiobook sexual-scene skip range.
-Each candidate was produced by a high-recall detector and may be a false positive.
-Set directSexualActEvidence=true only when this candidate's own transcript directly supports
-an ongoing sexual act. Set sustainedBeyondKissing=true when the passage goes beyond
-attraction, dialogue, kissing, embracing, or nudity alone into an actual sexual act. It asks how
-far the passage goes, NOT how long it lasts: a brief encounter still qualifies. A listener who
-switched on Complete sex scenes is asking for sex scenes to be gone, and a short one rejected here
-is exactly the scene that then plays. A discussion
-of past sex is a reference, not an ongoing act. Flirting, suggestive language, attraction,
-kissing alone, embraces, nudity alone, sexual jokes or references, profanity, medical
-discussion, violence, combat, pain, breathing, groaning, or the word "thrust" in a non-sexual
-context must be rejected. Do not infer an act from tone, romance, or physical closeness.
-Do not require graphic anatomical vocabulary. In context, physical sexual escalation such as
-intimate touching (for example a hand moving onto a thigh), opening or spreading legs, removing
-clothing, intimate caressing, or explicit consent/positioning is direct evidence when it is part
-of an ongoing sexual encounter. A combination of these cues must not be downgraded merely because
-the narration is euphemistic or non-graphic. This lane is for consensual activity only: if the
-passage instead shows the act was non-consensual, reject it here (accepted=false) rather than
-reclassifying it -- a separate sexual-violence review handles that case.
+Act as a strict final verifier for one audiobook explicit-scene skip range. Each candidate was
+produced by a high-recall detector and may be a false positive. This deployment's bar for this
+label is deliberately high and narrow, permanently loosened from a much broader prior rule at
+the owner's explicit request.
 
-Rough physicality during an established romantic or sexual encounter -- biting, pinning,
-gripping, growling, a partner briefly pushing the other away mid-encounter, or resistance that
-reads as heightened arousal rather than a refusal -- is not by itself evidence of non-consent.
-Judge consent from what the passage actually establishes about the characters' own intent, not
-from the intensity of the physical description alone: a bite that pins rather than injures, or
-a shove followed immediately by the same character pressing back into contact, is consistent
-with mutual, escalating desire in a consensual encounter and must not be read as refusal just
-because the vocabulary is forceful. Reserve a non-consent reading for what the passage itself
-makes unambiguous: a stated refusal that is not reversed or contradicted by the character's own
-next action, incapacitation, explicit coercion, or a threat. A passage that mixes some
-resistance-sounding language with clear mutual escalation (grinding, drawing closer, wanting
-more) is evidence of consensual intensity, not evidence against consent.
+Set directSexualActEvidence=true ONLY when this candidate's own transcript directly, explicitly
+describes a sexual act in graphic, mechanical, anatomical detail -- for example an explicit
+description of penetration, or similarly vulgar, graphic description of a sexual act's physical
+mechanics using explicit, literal (not euphemistic) anatomical or sexual-act vocabulary. Set
+sustainedBeyondKissing=true the same way: true only when the passage reaches that same graphic,
+explicit bar, not merely "beyond kissing into any sexual act."
 
-Example -- a real passage from a production book, correctly accepted as consensual:
-"He grabbed my hands again, and bit my neck. His teeth clamped onto the tender spot where my
-neck met my shoulder. I couldn't move, couldn't think, and my world narrowed to the feeling of
-his lips and teeth against my skin. The push of his body against mine, the hard and the soft,
-made me see red, see lightning, made me grind my hips against his." An earlier moment in this
-same encounter has her push him away and him smile "like an animal" in response -- taken alone,
-that could read as refusal met with menace. Read against what follows in the same passage
-(grinding into him, heat, wanting more), the earlier resistance is the encounter's own
-back-and-forth intensity, not a withdrawn refusal that the biting then overrides. accepted must
-be true here.
+REJECT (accepted must be false) all of the following, even when clearly present and even at
+length: romantic or sexual tension; kissing; grinding; biting; desire stated in prose (wanting
+someone, wanting to be touched, wanting someone's body); an intimate encounter conveyed through
+emotion and physical sensation rather than explicit mechanics; a euphemism for sex, however
+obvious ("stolen hours together," "tangled in the sheets," "rutting," "lost ourselves in each
+other"); nudity alone; attraction; sexual jokes or references; or intense, forceful physicality
+read as mutual escalation (biting that pins rather than injures, growling, gripping, a partner
+pushing the other away mid-encounter and then pressing back into contact). None of that is
+evidence for this label, however long the passage dwells on it or however clearly a sexual
+encounter is happening -- only explicit, graphic, mechanical description crosses this bar. This
+lane is for consensual activity only: if the passage instead shows the act was non-consensual,
+reject it here (accepted=false) rather than reclassifying it -- a separate sexual-violence
+review handles that case.
 
-accepted may be true only when BOTH evidence booleans are true and confidence is at least
-0.85. Otherwise accepted must be false. Set needsEscalation=true only when the candidate is
-still a plausible ongoing sexual scene but the evidence, confidence, or exact boundaries are
-uncertain and require a stronger final review. Set needsEscalation=false for clear rejections,
-isolated innuendo, references, attraction, kissing, or nudity alone. Confirmed accepted scenes
-will also receive final review. Confidence must describe the evidence that a sexual act occurs,
-not merely for one suggestive word, and not for how long it lasts.
+Example -- a real passage from a production book that must be REJECTED despite real physical
+intensity and an unambiguous sexual encounter underway: "He grabbed my hands again, and bit my
+neck. His teeth clamped onto the tender spot where my neck met my shoulder. I couldn't move,
+couldn't think, and my world narrowed to the feeling of his lips and teeth against my skin. The
+push of his body against mine, the hard and the soft, made me see red, see lightning, made me
+grind my hips against his." This passage has real desire, real forceful physicality, and reads
+unambiguously as a sexual encounter in progress -- and must still be rejected, because nothing
+in it is graphic, mechanical, or anatomically explicit. Biting, grinding, and desire stated in
+prose are all on the allowed side of this deployment's new rule, not evidence for this label.
+
+Example -- a real passage that must be ACCEPTED: an extended description of oral sex using
+explicit anatomical vocabulary for genitalia, narrating the physical mechanics of the act in
+graphic detail (size, sensation, movement, taste) rather than conveying it through emotion or
+euphemism. The deciding difference from the rejected example above is not length, intensity, or
+whether a sexual act is clearly happening -- both examples have that -- it is whether the
+passage actually uses explicit, literal, mechanical description or stays in emotion/sensation/
+euphemism throughout.
+
+accepted may be true only when BOTH evidence booleans are true and confidence is at least 0.85.
+Otherwise accepted must be false. When genuinely unsure whether a passage has crossed into
+graphic/mechanical territory or is still on the allowed side (tension, non-graphic intimacy,
+euphemism), resolve it as allowed and set accepted=false -- this label exists for a narrow, high
+bar, not a broad one, and the new rule explicitly keeps far more content playable than before.
+Set needsEscalation=true only when the candidate is still a plausible explicit scene but the
+evidence, confidence, or exact boundaries are uncertain and require a stronger final review. Set
+needsEscalation=false for clear rejections, including any passage whose only content is tension,
+non-graphic intimacy, kissing, or nudity alone. Confirmed accepted scenes will also receive
+final review. Confidence must describe the evidence that the passage is explicit and graphic,
+not merely that a sexual act is occurring.
 """) + SceneVerificationClosingInstructions + """
 
 Candidates:
@@ -2591,247 +2600,87 @@ no matter how prominent they are in a passage.
 For isolated events, return the narrowest supported timestamps. A short reference is a short
 event: if three words carry it, the range should cover those three words and not the sentence
 or paragraph around them. Never widen a brief event to be safe -- a wide range on a passing
-reference removes narration the listener wanted to hear. 
-The seven sexual levels below are a ladder, and each rung means one thing. A listener switches on
-the level they are not willing to hear, so a passage placed a rung too high is removed from
-someone who wanted it, and a rung too low is heard by someone who did not. Choose the highest
-rung the passage actually reaches, and only that one, except where a complete scene is also
-required below. sexual_violence sits apart from this ladder entirely; see its own definition
-below for when it replaces the ladder rather than adding to it.
+reference removes narration the listener wanted to hear.
 
-sexual_suggestive_dialogue -- flirtation, innuendo, wanting, tension, and anticipation: a charged
-conversation, a longing glance, biting, grabbing, or other physical contact short of kissing, a
-character imagining what might happen next. Kissing itself belongs to sexual_kissing below, not
-here, however brief the rest of the passage's tension is; everything else on this rung (biting,
-grabbing, an embrace with no kiss in it, wanting) stays exactly as it was.
+This deployment looks for exactly three things, permanently narrowed down from a much larger
+set of sexual-content rungs at the owner's explicit request. Ordinary romantic or sexual
+tension, kissing, flirtation, innuendo, crude jokes, suggestive dialogue, nudity mentioned only
+in passing with no anatomical word, and non-graphic sexual activity (including a full scene
+described without graphic mechanical detail) are all explicitly ALLOWED now and must never be
+reported under any label. Only the three things below qualify at all.
 
-Innuendo belongs here even when nothing explicit is ever said. A double entendre, a euphemism an
-adult would recognize but a child would not ("warm up the bed," "see what the sheets look like
-in the morning," "show you my etchings," a joke that only lands if you know what it is really
-about), banter that is clearly sexual in intent even while staying technically clean, a comment
-on someone's body or appeal phrased as a compliment or a tease, dialogue that trails off
-suggestively, or two characters' charged silence after a loaded remark are all
-sexual_suggestive_dialogue. Do not require the dialogue to be unambiguous or require that both
-characters' intentions be stated outright -- if an adult listener would read it as sexual
-undertone, report it at this rung even if a literal-minded reading of the words alone would not.
-This rung exists specifically to catch what is implied rather than stated; reserve the higher
-rungs for when the passage actually says or shows more than that.
+sexual_nudity -- ONLY a specific anatomical word or its direct synonym naming intimate anatomy:
+genitalia (penis, vagina, cock, dick as anatomy, pussy, genitals), breasts, nipples, areolas, or
+buttocks (butt, ass as a body part). Report the narrowest possible range -- the exact word or
+short phrase that uses the anatomical term, never the sentence or paragraph around it. A general
+reference to someone being naked, nude, unclothed, undressed, bare, or removing clothing does
+NOT qualify on its own -- this label is only for the literal anatomical word itself, not for
+nakedness in general. A word in this list used in a non-body sense (an insult, a euphemism with
+no anatomical meaning, an unrelated word that happens to share a spelling) does not qualify
+either -- judge the word's actual use in context, not just its presence. No word is sexual
+content by itself: a hand on a chest during first aid, a breast wound in battle, a medical
+examination, a badge pinned at her breast, or armour such as a breastplate is anatomy mentioned
+in a non-sexual, non-exposed context and does not qualify. The word qualifies when the passage
+itself describes that anatomy as bare, uncovered, exposed, or otherwise names it directly in a
+body-revealing or sexual context.
 
-Two things widen this rung and one narrows it, and all three matter as much as the examples
-above. A crude joke, insult, or taunt that borrows sexual language without actually being about
-sex or arousal is NOT sexual_suggestive_dialogue, however vulgar it sounds: two characters told
-to stop comparing the size of their anatomy because they are competing over who is better, a
-crude taunt about someone's performance in a fight rather than in bed, or a vulgarly-phrased
-threat or insult with no sexual intent behind it, stay unflagged. The test is what the moment is
-actually about -- rivalry, ego, combat, comedy -- not whether the words it borrows could also
-describe sex. An example from this library's own genre: during a boss fight, a crude taunt like
-"you're about to get fucked" or a joke about needing lube before a hard encounter is banter about
-the fight, not about sex, and stays unflagged even though the wording is explicit -- it is not
-read as sexual because nothing in the scene is.
+sexual_explicit_vulgar_scene -- ONLY a passage that crosses into graphic, mechanical, anatomical
+description of a sexual act -- for example an explicit description of penetration, or similarly
+vulgar, graphic description of a sexual act's physical mechanics using explicit, literal (not
+euphemistic) anatomical or sexual-act vocabulary. This is a genuinely high bar, not merely "a
+sex scene happened." Do NOT report: romantic or sexual tension; kissing; grinding; biting;
+desire stated in prose (wanting someone, wanting to be touched, wanting someone's body); an
+embrace or an intimate scene described through emotion and sensation rather than mechanics; a
+euphemism for sex, even an obvious one ("stolen hours together," "tangled in the sheets,"
+"rutting," "lost ourselves in each other"); or intense, forceful physicality read as mutual
+escalation (biting that pins rather than injures, growling, gripping, a push followed by the
+same character pressing back into contact). ALL of that is explicitly ALLOWED and must never be
+flagged under this label -- it is a real, permanent loosening, not an oversight. Only flag a
+passage once it actually, unmistakably crosses into graphic, mechanically descriptive sexual
+content: explicit, literal anatomical vocabulary used in the act itself, an explicit description
+of penetration or other sexual acts' physical mechanics, or graphic physiological detail
+(sensation, taste, wetness) described explicitly during the act, not merely alluded to. Report
+the full span of the explicit material, from where it becomes explicit to where it stops, not
+just one sentence of it. When genuinely unsure whether a passage has crossed this bar or is
+still on the allowed side (tension, non-graphic intimacy), resolve it as allowed and do not
+report it -- this label exists for a narrow, high bar, not a broad one.
 
-That same crude joke flips to sexual_suggestive_dialogue the moment it is actually aimed at
-sexualizing a person rather than describing a fight, a contest, or an insult with no sexual
-subject -- particularly a joke, comment, or innuendo that lingers on a specific person's body,
-appeal, or desirability rather than their skill, ego, or performance at something non-sexual.
-"Stop comparing dicks" when it is about rivalry is not this rung; a joke that goes on to actually
-describe or dwell on either man's anatomy, or that is really about one of them wanting the other,
-would be.
+sexual_violence -- ONLY an ongoing scene depicting rape or sexual assault as a sexual act, as it
+happens -- it must itself be sexual in nature, not merely violent. This is strictly separate
+from ordinary physical violence: a beating, an attack, a fight, combat, or any other assault
+with no sexual element, however brutal, does NOT qualify here and must never be reported under
+this label -- ordinary violence is completely out of scope for this filter and must never be
+reported under any label at all. A brief reference or backstory mention of sexual violence (a
+character stating or recalling that they were assaulted, without the act itself being depicted
+in this passage) also does NOT qualify -- only a scene actually depicting the act, as it is
+happening, qualifies. Judge consent from what the passage itself establishes -- refusal,
+resistance, incapacitation, coercion, or an imbalance of power exploited to force the act -- not
+from a character's profession, relationship, or the setting alone. A passage ambiguous about
+consent is not sexual_violence.
 
-Hold a woman to a lower bar than the rest of this rung: the rivalry/insult exemption above is for
-two people trading crude jabs at each other, not for a remark that uses a woman as its subject or
-its punchline rather than its target. A crude joke or taunt between two men about each other is
-the exemption; the same joke made about a woman present, mentioned, or being discussed -- a
-comment on her body, what someone would do to or with her, treating her as the prize or the butt
-of the joke rather than a participant trading the same insult back -- is sexual_suggestive_dialogue,
-full stop, no matter how the men's own dialogue frames it or how minor it seems. When a passage is
-ambiguous about whether a crude remark is mutual rivalry or is actually about a woman in it,
-resolve it as the latter and report it.
-
-Beyond that specific exemption, report any remark, innuendo, banter, comment on a body part, or
-mention of nudity concerning a woman at this rung or higher, even a mild or brief one that would
-not necessarily reach this bar for a man or for a passage with no particular subject. Plain
-admiration on its own -- a character finding a woman beautiful or attractive, a simple compliment
-on her looks, noticing she is pretty, with nothing more said about her body or what anyone wants
-from her -- is not sexual content and stays unflagged; this lower bar is for content that goes
-beyond that into a remark, joke, tease, or description with sexual intent or sexual subject
-matter, not for ordinary attraction stated plainly. The line is the same one the rest of this
-rung already draws between stating a fact and lingering on it sexually -- it is drawn earlier,
-and more readily resolved in favor of reporting, when the subject is a woman.
-
-Naming what a character is or does for a living -- a prostitute, a sex worker, an escort, a
-madam, someone who "sells herself" -- is NOT sexual content by itself, the same way naming a
-character's job as a soldier or a thief is not violence or theft content. State it and move on:
-this is a fact about the character, not a sexual reference. It becomes sexual_suggestive_dialogue
-or higher only when the passage goes on to actually linger on it sexually -- describing her
-body or appearance in a sexualized way, describing what clients do with her, a scene of her
-working, or dialogue that dwells on it rather than simply mentioning it. "She was the city's most
-famous prostitute" stays unflagged on its own; a paragraph describing her figure, what she wears
-to attract clients, or propositioning a customer is not.
-
-sexual_kissing -- a kiss, or a sustained series of kisses, on the mouth, that goes beyond a
-brief, incidental peck: a kiss the narration lingers on, a sustained or passionate kiss. This
-rung is for kissing on the mouth only. A kiss anywhere else on the body -- the cheek, forehead,
-brow, nose, hand, hair, or shoulder -- never reaches this rung, no matter how many times it is
-described, how affectionate it is, or how the narration lingers on it: a kiss on the cheek is
-not sexual content at all. Do not flag it. A quick kiss goodbye, a kiss mentioned only in
-passing with nothing more said about it, or any kiss not on the mouth stays unflagged, or stays
-sexual_suggestive_dialogue only if the surrounding passage is independently charged for other
-reasons. Kissing is NOT explicit activity at any intensity: however long or passionate a kiss on
-the mouth is described, it stays this rung unless the passage goes on to convey an actual sexual
-act beyond the kiss itself, in which case follow the escalation rule below.
-
-sexual_references -- sex mentioned flatly, as a fact, with no charge, tension, or innuendo to
-it: a past encounter named without being dwelt on ("they had slept together once, years ago"),
-a crude joke with a sexual subject told purely for comedy rather than to arouse or tease, a
-plain statement of someone's sexual history or reputation, an offer made and declined, a
-clinical or matter-of-fact mention of sex as a topic of conversation. The test for this rung is
-whether the passage is simply naming or noting that sex happened, is being discussed, or is part
-of someone's history or situation -- not whether it is trying to be suggestive about it.
-
-sexual_references and sexual_suggestive_dialogue both cover sex "spoken about rather than
-happening," and the same subject matter -- a past encounter, someone's history, a crude joke --
-can appear in either one; the ladder's own earlier instruction to choose the highest rung a
-passage actually reaches applies directly to this choice. The deciding question is tone and
-intent, not topic: if the passage lingers on it, is phrased to tease or arouse, carries any
-charge, double meaning, or anticipation, or would read to an adult listener as flirtatious or
-suggestive rather than merely informative, it is sexual_suggestive_dialogue, not
-sexual_references, even though the underlying fact being discussed is identical. "They had a
-thing years ago, nothing serious" said in passing, with nothing more made of it, is
-sexual_references. The same fact raised with a smirk, a loaded pause, or as a tease ("you
-remember how that went, don't you?") is sexual_suggestive_dialogue. When genuinely unsure which
-of the two applies, resolve it as sexual_suggestive_dialogue -- the higher rung is the safer
-miss for a listener who filters at this level, since sexual_references is the one rung on this
-entire ladder with no independent second check behind Luna's own first-pass call, and a passage
-that actually carried a sexual undertone must not be the one case reported at the plainer,
-lower-scrutiny label purely because the distinction was close.
-
-sexual_nudity -- a body described unclothed, or clothing being removed, with no sexual act
-following in this passage. Undressing on its own is this rung, not explicit activity. Intimate
-anatomy described as bare, naked, uncovered or exposed reaches this rung by itself, even in a
-passage that is otherwise not sexual at all and even where nobody reacts to it: a body uncovered
-in a bath scene, bare breasts noted in passing during a transformation or an injury, a shirt torn
-open. Nothing has to happen next for this to qualify.
-
-sexual_implied_activity -- sex happens and the narration does not describe it. It fades out, cuts
-away, or resumes afterwards: "later, tangled in the sheets". The act is certain, the description
-is absent.
-
-sexual_explicit_activity -- a sexual act described as it happens. Intercourse, oral sex, or
-equivalent, narrated in the moment. Euphemism still counts when the act is unmistakable. This
-includes oral sex under any of its names -- a blow job/blowjob, fellatio, cunnilingus, going down
-on someone -- and explicit anatomical terms used in the act itself, such as the clitoris/clit,
-regardless of how casual or vulgar the specific word choice is. A vulgar or slang term for an act
-or body part is not by itself a reason to withhold this label; judge the passage by what is
-happening, the same way a clinical term would be judged. Kissing, undressing, or a hand on a
-thigh do not reach this rung on their own; the passage has to convey that a sexual act is taking
-place.
-
-sexual_complete_scene -- the whole span of a scene containing implied or explicit activity, from
-its clear lead-in to the point where the story returns to non-sexual action or conversation.
-Reserved for consensual activity; see sexual_violence below for the non-consensual case.
-
-sexual_violence -- rape or sexual assault: a sexual act, or the credible immediate threat or
-attempt of one, imposed on a character who does not consent, cannot consent, or whose consent
-is coerced or withdrawn and disregarded. This includes an assault narrated as it happens, one
-implied or faded out the same way sexual_implied_activity is, and one described only
-afterward provided the passage makes clear that it happened without consent. Judge consent from
-what the passage itself establishes -- refusal, resistance, incapacitation, coercion, or an
-imbalance of power exploited to force the act -- not from a character's profession, relationship
-to another character, or the setting alone. A passage that is ambiguous about consent, or where
-the narration itself is uncertain, is not sexual_violence; use the ordinary ladder instead and
-let a human reviewer resolve the ambiguity. This is its own category, not a rung on the ladder
-above: a passage is sexual_violence or it is a consensual sexual_suggestive_dialogue /
-sexual_kissing / sexual_references / sexual_nudity / sexual_implied_activity /
-sexual_explicit_activity / sexual_complete_scene, never both. Do not emit sexual_complete_scene for a passage reported as
-sexual_violence, and do not emit sexual_violence for a passage that is ordinary threat, assault,
-or violence with no sexual element -- that is not reported at all, since violence is out of
-scope. Report it when the passage actually depicts or credibly implies a sexual act or its
-credible immediate threat imposed without consent, and do not infer it from a menacing tone, a
-violent scene that happens to involve two characters, or a relationship's power imbalance on
-its own.
-
-No word is sexual content by itself. A body part named in passing is anatomy, not a sexual
-reference: a hand on a chest during first aid, a breast wound in battle, a character washing, a
-mother nursing, a medical examination, a badge or pin fastened at her breast, armour such as a
-breastplate. Judge the passage by what is happening in it, never by the presence of a word --
-a word is evidence only in the sense the passage actually uses it.
-
-Being named in passing and being described exposed are not the same thing, and this distinction
-decides the two cases most often got wrong in opposite directions. Intimate anatomy stated as
-bare, naked, uncovered, exposed, or spilling free of clothing -- her bare breasts, her nipples
-visible or hardening, a body uncovered as clothing comes away -- is sexual_nudity, on its own,
-with no sexual act required and no arousal, touching, or partner reaction needed. That is the
-whole purpose of that rung. The anatomy carve-out above exempts a part mentioned while clothed or
-serving some other function; it does not exempt that part once the narration has put it on
-display. A listener filtering nudity is asking not to hear a body described bare, and reporting
-nothing because no act followed is exactly the omission this rung exists to prevent.
-
-The reverse still holds and is not softened: clothed contact, a part named as a location, an
-injury, bathing, nursing, or medical description is not nudity however intimate the part named.
-"The badge pinned to her breast" is anatomy. "Her bare breast" is nudity. The difference is
-whether the passage describes the body uncovered, not which word it used.
-
-ALWAYS emit sexual_complete_scene alongside sexual_implied_activity or sexual_explicit_activity
-for a CONSENSUAL scene, every time, including a brief encounter and one whose description is
-euphemistic. A listener who switches on Complete sex scenes is asking for sex scenes to be gone;
-a scene that was too short or too discreet to qualify is exactly the one that then plays and is
-heard. Do not reduce a scene to the single explicit sentence that made it recognisable, and do
-not withhold the scene event because the scene was small. A sexual_violence passage never also
-receives sexual_complete_scene -- report sexual_violence alone, spanning the same full extent a
-complete scene would (lead-in through to the point the story returns to non-sexual action).
-
-A passage often starts on a lower rung and escalates partway through -- do not label the whole
-passage at the rung it starts on. Judge each moment in it against the ladder again as the
-passage continues, the same way you would if it had been the start of a new passage.
-
-Example of a passage that starts as tension and escalates into activity within itself -- a real
-passage from a production book:
-"He grabbed my hands again, and bit my neck. His teeth clamped onto the tender spot where my
-neck met my shoulder. I couldn't move, couldn't think, and my world narrowed to the feeling of
-his lips and teeth against my skin. The push of his body against mine, the hard and the soft,
-made me see red, see lightning, made me grind my hips against his."
-The opening ("grabbed my hands", "bit my neck") is sexual_suggestive_dialogue: tension and
-physical contact, nothing more yet. But "made me grind my hips against his" is a sexual act
-already underway, not anticipation of one -- that sentence and everything from it onward is
-sexual_implied_activity (the act is certain; its mechanics are not narrated), and because this
-is a consensual encounter, sexual_complete_scene must also be emitted spanning the passage's own
-lead-in through this point. A model that labels this whole passage sexual_suggestive_dialogue
-because that is how it opens has under-reported it by two full rungs.
-
-If a sexual scene was already underway at the first supplied segment, set the scene start to
-that first segment's startTime. If it is still underway at the last supplied segment, set its
-end to that last segment's endTime. The server analyzes overlapping windows and will join those
-partial ranges. A scene can span several minutes. Consensual romance, foreplay, implied acts,
-explicit acts, and the immediate aftermath may establish continuity even when no explicit word
-appears in every segment; the same applies to a sexual_violence passage and its own immediate
-aftermath. Do not extend a scene across a clear topic, location, time, or chapter change.
 Allowed labels:
 """ + AllowedLabelList + """
 For safeDescription, write a neutral, discreet, non-graphic summary of at most 80 characters.
 It must still tell a listener why they might choose to skip: name the high-level situation, not
-the mechanics. For example: "A character removes clothing and is described without clothing",
-"Characters are in bed together during an intimate encounter", "Suggestive dialogue includes
-an invitation to bed", or "A non-consensual sexual encounter is described". Never name intimate
+the mechanics, and never name the specific anatomical word found. For example: "A character
+removes clothing and is described without clothing", "A sexual scene is described in explicit,
+graphic detail", or "A non-consensual sexual encounter is described". Never name intimate
 anatomy or describe touching, squeezing, positions, or mechanics. Do not use vague filler such
-as "related sexual content", "continuous passage", "sexual activity described", or
-"intimate positioning is described".
+as "related sexual content", "continuous passage", or "sexual activity described".
 The description itself must not expose a listener to the unwanted explicit material they are
 trying to avoid.
 For every event, also return quote: the exact consecutive words from the supplied transcript
 text that support this event, copied verbatim from a single segment's text field, not
 paraphrased, summarized, or combined across segments. This is not shown to any listener; it is
 how the server locates the words you mean. A short event's quote should be just the words that
-carry it, matching startTime and endTime -- three words for a three-word event, not the whole
-sentence around them. A longer scene's quote should be the clearest single supporting sentence
-or clause inside it, near where you believe the scene most clearly qualifies; it does not need
-to span the whole scene, and the server uses startTime and endTime for the outer boundary. If
-you cannot point to specific words that justify an event, do not report the event.
-For longer sexual scenes, emit one event spanning the complete supported scene rather than one
-event per sentence. Do not invent content or identifiers. Omit events below 0.45 confidence.
-A subtler or implied cue -- innuendo, euphemism, an unstated-but-clear undertone -- is not a
-reason to lower your confidence on its own: judge confidence by how clearly the passage supports
-the label you chose, not by how explicit the passage is. An unmistakable innuendo can be
-reported at high confidence even though nothing explicit was ever said.
+carry it, matching startTime and endTime -- the anatomical word itself for a nudity event, not
+the whole sentence around it. A longer scene's quote should be the clearest single supporting
+sentence or clause inside it, near where you believe the scene most clearly qualifies; it does
+not need to span the whole scene, and the server uses startTime and endTime for the outer
+boundary. If you cannot point to specific words that justify an event, do not report the event.
+Do not invent content or identifiers. Omit events below 0.6 confidence -- this deployment's
+three remaining labels are a genuinely high bar each, and a low-confidence guess at any of them
+costs a listener real narration they wanted to hear.
 
 Transcript segments:
 """ + transcript;

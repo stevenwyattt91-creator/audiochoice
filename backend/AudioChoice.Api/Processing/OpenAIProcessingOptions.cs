@@ -412,13 +412,28 @@ public sealed class OpenAIProcessingOptions
     // to the matched transcript SEGMENT, not the matched WORDS within it. See
     // BaseAnalysisPromptVersion's own remarks for the full fix. A scan made under the prior
     // version has this boundary bug and must be re-scanned to correct it.
+    //
+    // Bumped to 8.0 together with BaseAnalysisPromptVersion, ContentTaxonomy.EnforcedLabels,
+    // and MinimumEventConfidence, at the owner's explicit, permanent request: the eight
+    // sexual_* labels narrowed to exactly three (sexual_nudity, the newly-added
+    // sexual_explicit_vulgar_scene, sexual_violence). This is not cosmetic -- BuildInput's
+    // own prompt text was fully rewritten to match, after a real production scan
+    // (A Court of Thorns and Roses Part 2, a genuinely new edition import) proved that
+    // narrowing ContentTaxonomy.EnforcedLabels alone was not enough: the response schema's
+    // enum was already correctly built from the narrowed ModelEmittableLabels, but the old
+    // prompt prose still taught and asked for all eight labels in thousands of words of
+    // detailed rubric, and the model kept using the old labels anyway (27
+    // sexual_suggestive_dialogue events on that real scan) -- the schema's enum restriction
+    // did not override a prompt that still explicitly asked for the old vocabulary. A scan
+    // made under any prior version was produced by a materially different prompt and rule
+    // and must be re-scanned, not merely re-filtered by taxonomy, to reflect the new rule.
     // Overridable via config (AudioChoice:OpenAI:ScannerVersion) so a parallel test worker
     // (see ScanProcessingLanes.BedrockQwenTest's own remarks) can report a scanner_version
     // that is obviously distinct from production's own default below -- comparing results
     // across two scan_results rows for the same edition only works if their scanner_version
     // values are not identical, and a hardcoded default here left no way to achieve that
     // without hand-editing the shared default for a worker that will likely be torn down.
-    public string ScannerVersion { get; init; } = "7.13-sexual-content-only";
+    public string ScannerVersion { get; init; } = "8.0-three-category";
     /// <summary>Only jobs in this lane may be claimed by this worker instance.</summary>
     public string ProcessingLane { get; init; } = ScanProcessingLanes.AzureOpenAI;
     /// <summary>
@@ -441,8 +456,17 @@ public sealed class OpenAIProcessingOptions
     /// catch, independent of whether the model recognized them at all. The prompt was also
     /// changed to tell the model not to under-score confidence purely because a passage is
     /// implied rather than explicit, so this floor and that instruction move together.
+    ///
+    /// Raised from 0.45 to 0.6 when the taxonomy narrowed to three labels (see
+    /// ScannerVersion's own remarks): that 0.45 floor existed specifically to catch subtle,
+    /// implied, innuendo-level sexual_suggestive_dialogue, a label that no longer exists at
+    /// all under the new rule. The three remaining labels (sexual_nudity,
+    /// sexual_explicit_vulgar_scene, sexual_violence) are all meant to be a genuinely high,
+    /// unambiguous bar by design -- a low-confidence guess at any of them is exactly the
+    /// kind of over-reporting the new, narrower rule exists to avoid, not something worth
+    /// keeping a low floor to still catch.
     /// </remarks>
-    public double MinimumEventConfidence { get; init; } = .45;
+    public double MinimumEventConfidence { get; init; } = .6;
     public int MaximumRetries { get; init; } = 3;
     public int MaximumJobAttempts { get; init; } = 3;
     // Lowered from 100 after a real production batch of exactly 100 segments measured over
