@@ -20,12 +20,14 @@ public static class ContentTaxonomy
             ["sexual_kissing"] = Map(1, 8),
             // Added for the owner's permanent rule narrowing (see EnforcedLabels' own
             // remarks): a genuinely new concept, not a renaming of sexual_explicit_activity
-            // or sexual_complete_scene -- those labels' own definitions allowed intensity,
-            // tension, and non-graphic sexual activity that this new rule explicitly keeps
-            // playable, while this label is strictly narrower, requiring graphic, mechanical,
-            // anatomical sexual description to qualify at all. Given its own new group (9)
-            // rather than reusing either old label's GUID, so a scan made under the old rule
-            // is never silently reinterpreted under the new, much stricter bar.
+            // or sexual_complete_scene. Originally defined as strictly narrower than those --
+            // requiring graphic, mechanical, anatomical sexual description to qualify at all
+            // -- then broadened at the owner's explicit request (see EnforcedLabels' own
+            // remarks on the second revision) to cover sexual activity leading into, during,
+            // and explicitly talked about, while keeping pure tension and clean aftermath
+            // playable. Kept the same GUID/group (9) through that second revision: it is
+            // still the one concept beyond nudity/violence that gets cut, just drawn at a
+            // different line, not a different concept needing a new identity.
             ["sexual_explicit_vulgar_scene"] = Map(1, 9),
             ["profanity_mild"] = Map(2, 1),
             ["profanity_strong"] = Map(2, 2),
@@ -102,15 +104,22 @@ public static class ContentTaxonomy
     //   - sexual_nudity: ONLY a specific anatomical word naming intimate anatomy (genitalia,
     //     breasts, nipples, areolas, buttocks). A general reference to nakedness/undressing
     //     with no anatomical word used does not qualify.
-    //   - sexual_explicit_vulgar_scene: ONLY a passage that crosses into graphic, mechanical,
-    //     anatomical description of a sexual act (e.g. explicit description of penetration).
-    //     Ordinary romantic/sexual tension, kissing, grinding, biting, desire stated in
-    //     prose, and intense/forceful physicality read as mutual escalation are explicitly
-    //     allowed and must never be flagged -- this is a real, permanent loosening, not an
-    //     oversight. sexual_suggestive_dialogue, sexual_references, sexual_implied_activity,
-    //     sexual_explicit_activity, sexual_complete_scene, and sexual_kissing are no longer
-    //     enforced at all under this rule; a passage that used to trip one of those labels
-    //     alone (without crossing the much higher bar above) now plays through.
+    //   - sexual_explicit_vulgar_scene: originally ONLY graphic, mechanical, anatomical
+    //     description of a sexual act. Revised a third time, still at the owner's explicit
+    //     request, to a broader ceiling after real production review found the mechanical-
+    //     only bar let too much through: the ceiling for "still just tension" is now kissing,
+    //     pulling a partner close, embracing, and straddling with nothing further -- the
+    //     moment a passage moves past that into undressing with intent, further physical
+    //     positioning toward the act, vulgar/explicit sexual dialogue, talk about sexual
+    //     activity (including masturbation), or the act itself in any form, it is in scope.
+    //     Quiet aftermath (lying together, breathing hard) stays allowed as long as it does
+    //     not describe either character's body or recap the act. sexual_suggestive_dialogue,
+    //     sexual_references, sexual_implied_activity, sexual_explicit_activity,
+    //     sexual_complete_scene, and sexual_kissing are still not enforced as their own
+    //     separate labels -- this remains three labels, not a return to eight -- but a
+    //     passage that would have tripped one of those now very likely also crosses this
+    //     label's own broadened ceiling. See OpenAIContentAnalysisProvider.BuildInput's own
+    //     prompt text for the full current rule and worked examples.
     //   - sexual_violence: ONLY an ongoing scene depicting rape or sexual assault as a sexual
     //     act, as it happens. A brief reference or backstory mention (a character stating or
     //     recalling that they were assaulted, without the act itself being depicted) does not

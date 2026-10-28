@@ -258,7 +258,20 @@ public sealed class OpenAIContentAnalysisProvider(
     // defeats the purpose, since a listener who only has the single word's narration skipped
     // still hears content that trivially implies it. A scan made under the prior version may
     // be under-reporting this exact pattern and should be re-scanned.
-    private const string BaseAnalysisPromptVersion = "7.1-nudity-detail-escalation";
+    //
+    // Bumped again to 7.2 for a real, deliberate broadening of sexual_explicit_vulgar_scene,
+    // at the owner's explicit request after the same chapter-redaction review: the prior bar
+    // (graphic, mechanical, anatomical description only) let real pre-act positioning,
+    // undressing, explicit sexual dialogue, and masturbation references through untouched
+    // because none of those are themselves anatomically graphic. The new ceiling for "still
+    // just tension, not yet acting on it" is kissing, pulling a partner close, embracing, and
+    // straddling with nothing further; anything past that (undressing with intent, further
+    // positioning toward the act, vulgar/explicit dialogue, talk about sexual activity
+    // including masturbation, or the act itself in any form) is now in scope, while quiet
+    // non-descriptive aftermath stays allowed. This is a genuinely different, broader rule,
+    // not a wording tweak -- a scan made under the prior version under-reports real content
+    // this version now catches and should be re-scanned.
+    private const string BaseAnalysisPromptVersion = "7.2-broadened-explicit-scene-ceiling";
     // Bumped for the keyword safety net's lane isolation fix: a candidate whose window
     // happens to match a checkpoint cached under the prior version may have been built
     // before a safety-net seed's own lane existed, when it could still get coalesced into a
@@ -331,10 +344,17 @@ public sealed class OpenAIContentAnalysisProvider(
     // not begin a scene however charged, with a worked example of the too-early mistake beside the
     // existing too-late one. The too-late rule is untouched -- that failure put audible content in
     // front of a listener and is the worse of the two.
+    // Bumped together with BaseAnalysisPromptVersion's 7.2: VerifySceneBatch's consensual-
+    // lane evidence rule and SceneVerificationClosingInstructions' startTime rule both
+    // changed to match the broadened sexual_explicit_vulgar_scene ceiling -- kissing, pulling
+    // close, embracing, and straddling no longer mark where the skip begins; undressing,
+    // further positioning, explicit dialogue, or the act itself does. A candidate accepted or
+    // boundaried under the prior version was judged and refined against the old, narrower
+    // mechanical-only bar and must be re-verified, not trusted as already reflecting this one.
     private const string SceneVerificationVersion =
-        "6.7-physical-start-boundary";
+        "7.0-broadened-explicit-scene-ceiling";
     private const string SceneEscalationVersion =
-        "6.6-schema-maxlength-fix";
+        "7.0-broadened-explicit-scene-ceiling";
     private readonly string _checkpointFolder = dataPaths.AnalysisCheckpoints;
     public string ScannerVersion => options.ScannerVersion;
 
@@ -2297,52 +2317,52 @@ public sealed class OpenAIContentAnalysisProvider(
     /// counts as evidence, not about how a confirmed range is reported once accepted.
     /// </remarks>
     private const string SceneVerificationClosingInstructions = """
-For an accepted candidate, refine startTime to the beginning of the continuous romantic or
-physical escalation that leads directly into the act -- kissing, embracing, undressing, or
-touching that builds without a break in the scene -- not only the single sentence containing
-the act's own unmistakable moment. A listener who wants this scene skipped is asking to miss
-the buildup that makes the scene recognizable as one, not to have the skip begin partway
-through it once the act itself is unambiguous. Only start later, at the act itself, when the
-scene truly opens there with no preceding kissing or touching that belongs to the same
-continuous moment. Set endTime where that activity clearly finishes.
-The escalation that sets startTime is physical. Kissing, embracing, touching, undressing: one of
-those marks where the scene begins. Dialogue does not, however intimate, charged, or clearly
-leading somewhere it is -- not flirting, not a confession, not negotiating or asking for consent,
+For an accepted candidate, refine startTime to the beginning of the continuous escalation that
+is actually in scope (see the evidence rule above) -- not to the start of ordinary tension that
+precedes it. Kissing, pulling a partner close, embracing, and straddling with nothing further
+are themselves allowed and must NOT be included in the skip: the skip begins where the passage
+first moves past that ceiling into undressing with intent, further physical positioning toward
+the act, vulgar/explicit dialogue, or the act itself. Once the skip has begun, it continues
+without a break through the full continuous escalation (the buildup past the ceiling, the act,
+and into any immediate aftermath that is still describing the act or body), not only the single
+sentence containing the act's own most unambiguous moment. Set endTime where the passage
+returns to the allowed side -- the act has clearly finished AND the aftermath (if any) has
+become clean (no longer describing the act or either character's body).
+Dialogue alone, however intimate, charged, or clearly leading somewhere, does not itself mark
+where the skip begins -- not flirting, not a confession, not negotiating or asking for consent,
 not a conversation about a past encounter or about trust, and not narration of what a character
-wants or feels. Those may sit immediately before the scene and may be what makes it obvious one is
-coming, and they are still not part of it. Start at the first physical contact that belongs to the
-unbroken escalation, not at the talking that preceded it.
-Example of a startTime placed too early -- the opposite mistake to the one below, and equally
-wrong: a couple spend two minutes discussing her past and whether she trusts him, after which he
-undresses and the encounter begins. The correct startTime is the undressing. A startTime back in
-the conversation sweeps up minutes of dialogue that contains nothing a listener asked to skip, and
-a skip that removes ordinary conversation teaches them the filter cannot be trusted with the book.
+wants or feels -- UNLESS that dialogue itself is vulgar/descriptive sexual dialogue or explicit
+talk about sexual activity, which is itself in scope per the evidence rule above. Ordinary
+charged conversation may sit immediately before the skip and may be what makes it obvious one is
+coming, while still not being part of it.
 
-Example of a correct startTime -- a real passage from a production book, reported by a
-listener because the skip began too late and audible content still played:
-"He leaned forward and kissed me lightly. Not forever. And though I knew it was a lie, I put my
-arms around his neck and kissed him. He pulled me onto his lap, holding me tightly against him
-as his lips parted mine. I became aware of every pore in my body when his tongue entered my
-mouth. [...] I pushed Tamlin onto the bed, straddling him."
-The correct startTime is at "He leaned forward and kissed me lightly" -- the kissing is the
-scene's own beginning, part of the same unbroken escalation, not separate lead-in to be left
-playing. A startTime placed instead at "I pushed Tamlin onto the bed" (the act's own most
-unambiguous sentence) is wrong: it skips too little, and is exactly the mistake this
-instruction exists to prevent.
+Example of a startTime placed too early -- ordinary charged conversation before the skip: a
+couple spend two minutes discussing her past and whether she trusts him, after which he
+undresses and the encounter begins. The correct startTime is the undressing, not the
+conversation. A startTime back in the conversation sweeps up minutes of dialogue that contains
+nothing a listener asked to skip.
 
-Example of a correct rejection -- ordinary romantic tension with no escalation to skip:
+Example of a startTime placed too early under the OLD rule, now correct to place later under
+this rule -- a real passage from a production book: "He leaned forward and kissed me lightly.
+Not forever. And though I knew it was a lie, I put my arms around his neck and kissed him. He
+pulled me onto his lap, holding me tightly against him as his lips parted mine. I became aware
+of every pore in my body when his tongue entered my mouth. [...] I pushed Tamlin onto the bed,
+straddling him." The kissing, being pulled onto a lap, and straddling are all on the allowed
+side now -- the correct startTime is wherever the passage moves past straddling into further
+positioning, undressing, or the act itself, not at the first kiss.
+
+Example of a correct rejection -- ordinary romantic tension with no escalation past the ceiling:
 "He caught her eye across the room and she felt her pulse quicken. There was something about
 the way he looked at her." This is attraction and narration, not activity; accepted must be
-false here regardless of how romantically charged the prose is, because there is no kissing,
-touching, or undressing to mark where a scene even begins.
+false here.
 
 Keep timestamps within the supplied excerpt. Use a neutral, non-graphic but useful description.
 Do not include graphic details or quotations in safeDescription. Never name intimate
 anatomy or describe touching mechanics, positions, squeezing, or similar physical details.
 Also return quote: for an accepted candidate, the exact consecutive words, copied verbatim
-from a single segment's text, that begin the activity at your refined startTime -- this is not
-shown to a listener, it is how the server confirms your refined boundary against the
-transcript's own word timing. For a rejected candidate return an empty string. Return one
+from a single segment's text, that begin the in-scope activity at your refined startTime --
+this is not shown to a listener, it is how the server confirms your refined boundary against
+the transcript's own word timing. For a rejected candidate return an empty string. Return one
 decision for every candidateKey, including nonconsensualEvidence (false when not applicable).
 """;
 
@@ -2383,61 +2403,63 @@ it false for clear rejections, ambiguous-consent passages, or passages that read
 Confirmed accepted candidates also receive final review.
 """
             : """
-Act as a strict final verifier for one audiobook explicit-scene skip range. Each candidate was
-produced by a high-recall detector and may be a false positive. This deployment's bar for this
-label is deliberately high and narrow, permanently loosened from a much broader prior rule at
-the owner's explicit request.
+Act as a strict final verifier for one audiobook sexual-content skip range. Each candidate was
+produced by a high-recall detector and may be a false positive. This deployment's bar covers
+sexual activity in all its stages -- leading into it, during it, and explicit talk about it --
+not only graphic mechanical description, while keeping pure tension (not yet acting on it) and
+clean aftermath (not describing it) playable.
 
-Set directSexualActEvidence=true ONLY when this candidate's own transcript directly, explicitly
-describes a sexual act in graphic, mechanical, anatomical detail -- for example an explicit
-description of penetration, or similarly vulgar, graphic description of a sexual act's physical
-mechanics using explicit, literal (not euphemistic) anatomical or sexual-act vocabulary. Set
-sustainedBeyondKissing=true the same way: true only when the passage reaches that same graphic,
-explicit bar, not merely "beyond kissing into any sexual act."
+The allowed ceiling, which never counts as evidence for this label: ordinary romantic or sexual
+tension; kissing; pulling a partner close; embracing; straddling with nothing further; desire
+stated in prose (wanting someone, wanting to be touched, wanting someone's body) with no
+positioning or act underway; attraction; sexual jokes or references; biting, grinding, growling,
+or other intense, forceful physicality read as mutual escalation that stops at that ceiling
+(biting that pins rather than injures, gripping, a partner pushing the other away mid-encounter
+and then pressing back into contact); and quiet aftermath -- lying together, tangled in sheets,
+breathing hard, calm or affectionate talk -- as long as the aftermath does not describe either
+character's body, recap what they did sexually, or continue explicit sexual dialogue.
 
-REJECT (accepted must be false) all of the following, even when clearly present and even at
-length: romantic or sexual tension; kissing; grinding; biting; desire stated in prose (wanting
-someone, wanting to be touched, wanting someone's body); an intimate encounter conveyed through
-emotion and physical sensation rather than explicit mechanics; a euphemism for sex, however
-obvious ("stolen hours together," "tangled in the sheets," "rutting," "lost ourselves in each
-other"); nudity alone; attraction; sexual jokes or references; or intense, forceful physicality
-read as mutual escalation (biting that pins rather than injures, growling, gripping, a partner
-pushing the other away mid-encounter and then pressing back into contact). None of that is
-evidence for this label, however long the passage dwells on it or however clearly a sexual
-encounter is happening -- only explicit, graphic, mechanical description crosses this bar. This
-lane is for consensual activity only: if the passage instead shows the act was non-consensual,
-reject it here (accepted=false) rather than reclassifying it -- a separate sexual-violence
-review handles that case.
+Set directSexualActEvidence=true when this candidate's own transcript shows ANY of: undressing
+(self or partner) with sexual intent; physical positioning or action that begins or advances
+toward a sexual act beyond a straddle (climbing further into position, moving or spreading legs
+to begin the act, gripping/positioning a partner against or beneath oneself, or similar -- this
+counts even described through sensation rather than anatomical mechanics, with no anatomical
+word required); vulgar or descriptive sexual dialogue (dirty talk, describing what is wanted,
+being done, or about to happen); explicit talk about sexual activity generally, including
+masturbation, even with no act currently happening; the act itself actually happening, in any
+form (graphic/mechanical description still qualifies, and so does the act depicted through
+sensation or implication once it has clearly started, not merely anticipated); or a character's
+body described nakedly/sexually during or immediately around the act (beyond the single
+anatomical word sexual_nudity covers on its own), or aftermath that recaps the act or body. Set
+sustainedBeyondKissing=true the same way: true once the passage goes past kissing/pulling
+close/straddling into any of the above, not only once it reaches graphic mechanical detail.
 
-Example -- a real passage from a production book that must be REJECTED despite real physical
-intensity and an unambiguous sexual encounter underway: "He grabbed my hands again, and bit my
-neck. His teeth clamped onto the tender spot where my neck met my shoulder. I couldn't move,
-couldn't think, and my world narrowed to the feeling of his lips and teeth against my skin. The
-push of his body against mine, the hard and the soft, made me see red, see lightning, made me
-grind my hips against his." This passage has real desire, real forceful physicality, and reads
-unambiguously as a sexual encounter in progress -- and must still be rejected, because nothing
-in it is graphic, mechanical, or anatomically explicit. Biting, grinding, and desire stated in
-prose are all on the allowed side of this deployment's new rule, not evidence for this label.
+Example -- a real passage from a production book that stays on the ALLOWED side despite real
+physical intensity and an unambiguous romantic/sexual moment: "He grabbed my hands again, and
+bit my neck. His teeth clamped onto the tender spot where my neck met my shoulder. I couldn't
+move, couldn't think, and my world narrowed to the feeling of his lips and teeth against my
+skin. The push of his body against mine, the hard and the soft, made me see red, see lightning,
+made me grind my hips against his." This stays allowed: biting, grinding, and desire stated in
+prose are the ceiling, and nothing here moves past it into undressing, further positioning
+toward the act, explicit dialogue, or the act itself.
 
-Example -- a real passage that must be ACCEPTED: an extended description of oral sex using
-explicit anatomical vocabulary for genitalia, narrating the physical mechanics of the act in
-graphic detail (size, sensation, movement, taste) rather than conveying it through emotion or
-euphemism. The deciding difference from the rejected example above is not length, intensity, or
-whether a sexual act is clearly happening -- both examples have that -- it is whether the
-passage actually uses explicit, literal, mechanical description or stays in emotion/sensation/
-euphemism throughout.
+Example -- now IN SCOPE under this rule (even though it has no anatomical word and is not
+mechanically graphic): "She kissed him deeply, then reached for the hem of his shirt" is in
+scope starting at "reached for the hem" (undressing with intent). "He gripped her hips,
+positioning her beneath him" is in scope (positioning toward the act). "Have you been touching
+yourself at night, thinking about it like I do?" is in scope (explicit talk about masturbation).
+Afterward, "They lay tangled together, her head on his chest, breathing hard" stays allowed;
+"They lay tangled together, still feeling him inside her" is back in scope (describes the
+act/body in the aftermath).
 
 accepted may be true only when BOTH evidence booleans are true and confidence is at least 0.85.
-Otherwise accepted must be false. When genuinely unsure whether a passage has crossed into
-graphic/mechanical territory or is still on the allowed side (tension, non-graphic intimacy,
-euphemism), resolve it as allowed and set accepted=false -- this label exists for a narrow, high
-bar, not a broad one, and the new rule explicitly keeps far more content playable than before.
-Set needsEscalation=true only when the candidate is still a plausible explicit scene but the
-evidence, confidence, or exact boundaries are uncertain and require a stronger final review. Set
-needsEscalation=false for clear rejections, including any passage whose only content is tension,
-non-graphic intimacy, kissing, or nudity alone. Confirmed accepted scenes will also receive
-final review. Confidence must describe the evidence that the passage is explicit and graphic,
-not merely that a sexual act is occurring.
+Otherwise accepted must be false. When genuinely unsure whether a passage has crossed past the
+tension/clean-aftermath ceiling, resolve it as allowed and set accepted=false. Set
+needsEscalation=true only when the candidate is still plausibly in scope but the evidence,
+confidence, or exact boundaries are uncertain and require a stronger final review. Set
+needsEscalation=false for clear rejections, including any passage whose only content is
+tension, kissing, straddling, or clean aftermath. Confirmed accepted scenes will also receive
+final review.
 """) + SceneVerificationClosingInstructions + """
 
 Candidates:
@@ -2536,10 +2558,14 @@ reference removes narration the listener wanted to hear.
 
 This deployment looks for exactly three things, permanently narrowed down from a much larger
 set of sexual-content rungs at the owner's explicit request. Ordinary romantic or sexual
-tension, kissing, flirtation, innuendo, crude jokes, suggestive dialogue, nudity mentioned only
-in passing with no anatomical word, and non-graphic sexual activity (including a full scene
-described without graphic mechanical detail) are all explicitly ALLOWED now and must never be
-reported under any label. Only the three things below qualify at all.
+tension, flirtation, innuendo, crude jokes, suggestive dialogue, nudity mentioned only in
+passing with no anatomical word, kissing, pulling a partner close, and straddling are all
+explicitly ALLOWED and must never be reported under any label -- that is the ceiling for
+"building tension without acting on it." The moment a passage moves past that ceiling into
+undressing with sexual intent, further physical positioning toward the act (beyond straddling),
+vulgar or descriptive sexual dialogue, talking about sexual activity explicitly (including
+masturbation), or the act itself happening in any form, it is in scope and must be reported.
+Only the three things below qualify at all.
 
 sexual_nudity -- ONLY a specific anatomical word or its direct synonym naming intimate anatomy:
 genitalia (penis, vagina, cock, dick as anatomy, pussy, genitals, sex as anatomy), breasts,
@@ -2565,26 +2591,42 @@ graphic detail immediately beside it unreported -- a listener who skips only the
 still hears content that trivially implies it. When in doubt about whether graphic detail
 accompanies an anatomical word, prefer the fuller clause under sexual_explicit_vulgar_scene.
 
-sexual_explicit_vulgar_scene -- ONLY a passage that crosses into graphic, mechanical, anatomical
-description of a sexual act -- for example an explicit description of penetration, or similarly
-vulgar, graphic description of a sexual act's physical mechanics using explicit, literal (not
-euphemistic) anatomical or sexual-act vocabulary. This is a genuinely high bar, not merely "a
-sex scene happened." Do NOT report: romantic or sexual tension; kissing; grinding; biting;
-desire stated in prose (wanting someone, wanting to be touched, wanting someone's body); an
-embrace or an intimate scene described through emotion and sensation rather than mechanics; a
-euphemism for sex, even an obvious one ("stolen hours together," "tangled in the sheets,"
-"rutting," "lost ourselves in each other"); or intense, forceful physicality read as mutual
-escalation (biting that pins rather than injures, growling, gripping, a push followed by the
-same character pressing back into contact). ALL of that is explicitly ALLOWED and must never be
-flagged under this label -- it is a real, permanent loosening, not an oversight. Only flag a
-passage once it actually, unmistakably crosses into graphic, mechanically descriptive sexual
-content: explicit, literal anatomical vocabulary used in the act itself, an explicit description
-of penetration or other sexual acts' physical mechanics, or graphic physiological detail
-(sensation, taste, wetness) described explicitly during the act, not merely alluded to. Report
-the full span of the explicit material, from where it becomes explicit to where it stops, not
-just one sentence of it. When genuinely unsure whether a passage has crossed this bar or is
-still on the allowed side (tension, non-graphic intimacy), resolve it as allowed and do not
-report it -- this label exists for a narrow, high bar, not a broad one.
+sexual_explicit_vulgar_scene -- covers sexual activity in all its stages: leading into it,
+during it, and explicit talk about it -- not only graphic mechanical description. Report a
+passage once it moves past kissing/pulling close/straddling into any of the following:
+  - Positioning or action that begins or advances toward a sexual act: undressing (self or a
+    partner) with sexual intent, climbing further into position beyond a straddle, moving or
+    spreading legs to begin the act, or any other physical setup clearly aimed at starting
+    intercourse, oral sex, or similar -- this qualifies even described through sensation rather
+    than anatomical mechanics (e.g. "he gripped her hips and positioned himself against her" is
+    in scope even with no explicit anatomical word).
+  - Vulgar or descriptive sexual dialogue: dirty talk, a character describing what they want
+    done, what is being done, or what is about to happen, in explicit or crude terms.
+  - Explicit talk about sexual activity generally, including masturbation ("touching
+    yourself/myself" and similar), even when no act is currently happening in the scene.
+  - The act itself, actually happening, in any form -- graphic and mechanical description
+    still qualifies as it always did, but so does a sexual act depicted through sensation,
+    reaction, or implication once it has clearly started (not merely anticipated).
+  - A character's body described nakedly/sexually during or immediately around the act
+    (what they look like exposed, what was just done to them) -- beyond the narrow single
+    anatomical word sexual_nudity already covers on its own.
+Do NOT report: ordinary romantic or sexual tension; kissing; pulling a partner close;
+straddling with nothing further; desire stated in prose with no positioning or act (wanting
+someone, wanting to be touched, anticipating); or quiet aftermath -- two characters lying
+together, tangled in sheets, breathing hard, calm or affectionate talk -- AS LONG AS the
+aftermath does not describe either character's body, recap or describe what they just did
+sexually, or continue using explicit sexual dialogue. The moment aftermath does any of those
+three things, it is back in scope and must be reported as a continuation of the same event.
+Worked example: "She kissed him deeply, pulling him close, her heart racing" is allowed. "She
+kissed him deeply, then reached for the hem of his shirt" is in scope starting at "reached for
+the hem" (undressing with intent). "He gripped her hips, positioning her beneath him" is in
+scope even with no anatomical word (positioning toward the act). Afterward, "They lay tangled
+together, her head on his chest, breathing hard" is allowed; "They lay tangled together, still
+feeling him inside her" is back in scope (describes the act/body in the aftermath). Report the
+full continuous span, from the moment it crosses this bar to the moment it returns to the
+allowed side (tension-only or clean aftermath), not just one representative sentence. When
+genuinely unsure whether a passage has crossed this bar or is still on the allowed side
+(tension, clean aftermath), resolve it as allowed and do not report it.
 
 sexual_violence -- ONLY an ongoing scene depicting rape or sexual assault as a sexual act, as it
 happens -- it must itself be sexual in nature, not merely violent. This is strictly separate
