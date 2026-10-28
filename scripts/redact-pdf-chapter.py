@@ -41,6 +41,17 @@ to it (e.g. "her sex swollen and gleaming, wet with his seed") was previously on
 for the single anatomical word, leaving the graphic detail beside it fully readable and
 trivially inferable. The sexual_nudity section of the prompt now explicitly tells the model
 to escalate the whole clause to sexual_explicit_vulgar_scene when that happens.
+
+Rule v2: a further user review of the resulting redaction found real pre-act positioning
+(gripping hips, spreading legs to begin the act) and explicit desire reactions to named
+anatomy still fully visible -- both outside the original mechanical-only bar by design.
+At the owner's explicit request, sexual_explicit_vulgar_scene's own definition broadened:
+the ceiling for "still just tension" is now kissing, pulling a partner close, embracing,
+and straddling with nothing further; anything past that (undressing with intent, further
+positioning toward the act, vulgar/explicit dialogue, talk about sexual activity including
+masturbation, or the act itself in any form) is in scope, while quiet non-descriptive
+aftermath stays allowed. This mirrors the same change made to the real production prompt
+in OpenAIContentAnalysisProvider.cs (BaseAnalysisPromptVersion 7.2).
 """
 import json
 import re
@@ -62,10 +73,14 @@ no matter how prominent they are in a passage.
 
 This deployment looks for exactly three things, permanently narrowed down from a much larger
 set of sexual-content rungs at the owner's explicit request. Ordinary romantic or sexual
-tension, kissing, flirtation, innuendo, crude jokes, suggestive dialogue, nudity mentioned only
-in passing with no anatomical word, and non-graphic sexual activity (including a full scene
-described without graphic mechanical detail) are all explicitly ALLOWED now and must never be
-reported under any label. Only the three things below qualify at all.
+tension, flirtation, innuendo, crude jokes, suggestive dialogue, nudity mentioned only in
+passing with no anatomical word, kissing, pulling a partner close, and straddling are all
+explicitly ALLOWED and must never be reported under any label -- that is the ceiling for
+"building tension without acting on it." The moment a passage moves past that ceiling into
+undressing with sexual intent, further physical positioning toward the act (beyond straddling),
+vulgar or descriptive sexual dialogue, talking about sexual activity explicitly (including
+masturbation), or the act itself happening in any form, it is in scope and must be reported.
+Only the three things below qualify at all.
 
 sexual_nudity -- ONLY a specific anatomical word or its direct synonym naming intimate anatomy:
 genitalia (penis, vagina, cock, dick as anatomy, pussy, genitals, sex as anatomy), breasts,
@@ -92,30 +107,36 @@ defeats the purpose, since a reader can trivially infer the redacted word from t
 left standing right beside it. When in doubt about whether graphic detail accompanies an
 anatomical word, prefer reporting the fuller clause under sexual_explicit_vulgar_scene.
 
-sexual_explicit_vulgar_scene -- ONLY a passage that crosses into graphic, mechanical, anatomical
-description of a sexual act -- for example an explicit description of penetration, or similarly
-vulgar, graphic description of a sexual act's physical mechanics using explicit, literal (not
-euphemistic) anatomical or sexual-act vocabulary. This is a genuinely high bar, not merely "a
-sex scene happened." Do NOT report: romantic or sexual tension; kissing; grinding; biting;
-desire stated in prose (wanting someone, wanting to be touched, wanting someone's body); an
-embrace or an intimate scene described through emotion and sensation rather than mechanics; a
-euphemism for sex, even an obvious one ("stolen hours together," "tangled in the sheets,"
-"rutting," "lost ourselves in each other"); or intense, forceful physicality read as mutual
-escalation (biting that pins rather than injures, growling, gripping, a push followed by the
-same character pressing back into contact). ALL of that is explicitly ALLOWED and must never be
-flagged under this label -- it is a real, permanent loosening, not an oversight. Only flag a
-passage once it actually, unmistakably crosses into graphic, mechanically descriptive sexual
-content: explicit, literal anatomical vocabulary used in the act itself, an explicit description
-of penetration or other sexual acts' physical mechanics, or graphic physiological detail
-(sensation, taste, wetness) described explicitly during the act, not merely alluded to. Report
-the FULL CONTINUOUS SPAN of the explicit material, from the moment it becomes explicit to the
-moment it stops being explicit -- not just one representative sentence. If a scene has multiple
-explicit sentences in a row (setup dialogue leading into it, the act itself, and the immediate
-aftermath, all graphic or anatomical), treat the whole run as ONE event covering everything from
-the first explicit sentence to the last, even if it spans many sentences or the whole page. When
-genuinely unsure whether a passage has crossed this bar or is still on the allowed side (tension,
-non-graphic intimacy), resolve it as allowed and do not report it -- this label exists for a
-narrow, high bar, not a broad one.
+sexual_explicit_vulgar_scene -- covers sexual activity in all its stages: leading into it,
+during it, and explicit talk about it -- not only graphic mechanical description. The ceiling
+for "still just tension, not yet acting on it": ordinary romantic or sexual tension, kissing,
+pulling a partner close, embracing, and straddling with nothing further are all ALLOWED and
+must never be flagged. Report a passage once it moves past that ceiling into any of:
+  - Positioning or action that begins or advances toward a sexual act: undressing (self or a
+    partner) with sexual intent, climbing further into position beyond a straddle, moving or
+    spreading legs to begin the act, or any other physical setup clearly aimed at starting
+    intercourse, oral sex, or similar -- this qualifies even described through sensation rather
+    than anatomical mechanics (e.g. "he gripped her hips and positioned himself against her" is
+    in scope even with no explicit anatomical word).
+  - Vulgar or descriptive sexual dialogue: dirty talk, a character describing what they want
+    done, what is being done, or what is about to happen, in explicit or crude terms.
+  - Explicit talk about sexual activity generally, including masturbation ("touching
+    yourself/myself" and similar), even when no act is currently happening in the scene.
+  - The act itself, actually happening, in any form -- graphic and mechanical description
+    still qualifies, and so does the act depicted through sensation, reaction, or implication
+    once it has clearly started (not merely anticipated).
+  - A character's body described nakedly/sexually during or immediately around the act (what
+    they look like exposed, what was just done to them) -- beyond the narrow single anatomical
+    word sexual_nudity already covers on its own.
+Do NOT report: desire stated in prose with no positioning or act (wanting someone, wanting to
+be touched, anticipating); or quiet aftermath -- two characters lying together, tangled in
+sheets, breathing hard, calm or affectionate talk -- AS LONG AS the aftermath does not describe
+either character's body, recap or describe what they just did sexually, or continue using
+explicit sexual dialogue. The moment aftermath does any of those three things, it is back in
+scope. Report the FULL CONTINUOUS SPAN, from the moment it crosses this bar to the moment it
+returns to the allowed side (tension-only or clean aftermath), not just one representative
+sentence. When genuinely unsure whether a passage has crossed this bar or is still on the
+allowed side (tension, clean aftermath), resolve it as allowed and do not report it.
 
 sexual_violence -- ONLY an ongoing scene depicting rape or sexual assault as a sexual act, as it
 happens -- it must itself be sexual in nature, not merely violent. Judge consent from what the
