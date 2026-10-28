@@ -271,7 +271,24 @@ public sealed class OpenAIContentAnalysisProvider(
     // non-descriptive aftermath stays allowed. This is a genuinely different, broader rule,
     // not a wording tweak -- a scan made under the prior version under-reports real content
     // this version now catches and should be re-scanned.
-    private const string BaseAnalysisPromptVersion = "7.2-broadened-explicit-scene-ceiling";
+    //
+    // Bumped again to 7.3: sexual_nudity's carve-out now explicitly excludes non-human
+    // anatomy (an animal or insect's reproductive organs, a creature in a mating posture)
+    // and anatomy named on a corpse or during violence (a punch to the groin, a naked
+    // corpse), neither of which the prior carve-out addressed at all -- it only named
+    // non-sexual HUMAN contexts (first aid, a battle wound, a medical exam, a breastplate).
+    // Found rescanning The Butcher's Masquerade and ACOTAR Part 2 under the broadened rule:
+    // the model was pattern-matching on anatomical/reproductive vocabulary regardless of
+    // species or context, producing real false positives (insect anatomy discussed twice,
+    // an animal's mating posture reported twice, a punch to the groin, a corpse described as
+    // naked). Also added an explicit instruction that a crude joke, insult, or threat using
+    // an anatomical word without actually describing a character's body does not qualify --
+    // the owner's own calibration for genre fiction heavy on crude humor (named Dungeon
+    // Crawler Carl specifically): this label is for an actual sexualized description of a
+    // character's body ("her large breasts had hard nipples and wide areolas"), not a
+    // passing joke or non-human/violent use of the same words. A scan made under the prior
+    // version may carry these exact false positives and should be re-scanned.
+    private const string BaseAnalysisPromptVersion = "7.3-nudity-scope-carveouts";
     // Bumped for the keyword safety net's lane isolation fix: a candidate whose window
     // happens to match a checkpoint cached under the prior version may have been built
     // before a safety-net seed's own lane existed, when it could still get coalesced into a
@@ -2567,29 +2584,48 @@ vulgar or descriptive sexual dialogue, talking about sexual activity explicitly 
 masturbation), or the act itself happening in any form, it is in scope and must be reported.
 Only the three things below qualify at all.
 
-sexual_nudity -- ONLY a specific anatomical word or its direct synonym naming intimate anatomy:
-genitalia (penis, vagina, cock, dick as anatomy, pussy, genitals, sex as anatomy), breasts,
-nipples, areolas, or buttocks (butt, ass as a body part). Report the narrowest possible range --
-the exact word or short phrase that uses the anatomical term, never the sentence or paragraph
-around it. A general reference to someone being naked, nude, unclothed, undressed, bare, or
-removing clothing does NOT qualify on its own -- this label is only for the literal anatomical
-word itself, not for nakedness in general. A word in this list used in a non-body sense (an
-insult, a euphemism with no anatomical meaning, an unrelated word that happens to share a
-spelling) does not qualify either -- judge the word's actual use in context, not just its
-presence. No word is sexual content by itself: a hand on a chest during first aid, a breast
-wound in battle, a medical examination, a badge pinned at her breast, or armour such as a
-breastplate is anatomy mentioned in a non-sexual, non-exposed context and does not qualify. The
-word qualifies when the passage itself describes that anatomy as bare, uncovered, exposed, or
-otherwise names it directly in a body-revealing or sexual context. If the sentence containing
-the anatomical word ALSO describes that anatomy with graphic physiological detail -- swollen,
-gleaming, wet, dripping, aching, throbbing, or similar, especially tied to arousal or the
-aftermath of a sexual act (e.g. "wet with his seed") -- report the whole sentence or clause as
-sexual_explicit_vulgar_scene instead of a narrow sexual_nudity hit on the single word. A real
-listener-caught miss this rule exists to fix: a passage naming intimate anatomy as "swollen and
-gleaming, wet with his seed" was reported only for the anatomical word itself, leaving the
-graphic detail immediately beside it unreported -- a listener who skips only the single word
-still hears content that trivially implies it. When in doubt about whether graphic detail
-accompanies an anatomical word, prefer the fuller clause under sexual_explicit_vulgar_scene.
+sexual_nudity -- ONLY a specific anatomical word or its direct synonym naming intimate anatomy,
+used to describe a HUMAN character's body in a sexual or body-revealing way. Genitalia (penis,
+vagina, cock, dick as anatomy, pussy, genitals, sex as anatomy), breasts, nipples, areolas, or
+buttocks (butt, ass as a body part). Report the narrowest possible range -- the exact word or
+short phrase that uses the anatomical term, never the sentence or paragraph around it. A general
+reference to someone being naked, nude, unclothed, undressed, bare, or removing clothing does
+NOT qualify on its own -- this label is only for the literal anatomical word itself, not for
+nakedness in general. A word in this list used in a non-body sense (an insult, a euphemism with
+no anatomical meaning, an unrelated word that happens to share a spelling) does not qualify
+either -- judge the word's actual use in context, not just its presence. No word is sexual
+content by itself: a hand on a chest during first aid, a breast wound in battle, a medical
+examination, a badge pinned at her breast, or armour such as a breastplate is anatomy mentioned
+in a non-sexual, non-exposed context and does not qualify. The word qualifies when the passage
+itself describes that anatomy as bare, uncovered, exposed, or otherwise names it directly in a
+body-revealing or sexual context.
+
+Does NOT qualify, even though the word itself is on the list above: anatomy belonging to an
+animal, insect, monster, or any non-human creature (a passage describing an animal's mating
+posture, insect reproductive organs, or similar is not sexual content about a person and must
+never be reported here, regardless of which anatomical word it uses); anatomy named on a corpse
+or during violence (a body described as naked or exposed in the context of death, injury, or an
+attack -- "punched in the groin," "a naked corpse," "intimate anatomy wounded in the fight" -- is
+violence or death content, which is completely out of scope for this filter and must never be
+reported under any label, not reassigned here); and a crude joke, insult, or threat that uses an
+anatomical word without actually describing a character's body (calling someone a name, a threat
+using anatomical slang, a joke about anatomy existing) -- using the word is not the same as
+describing a body with it. The owner's own calibration for genre fiction heavy on crude humor
+(the Dungeon Crawler Carl series by name): this label exists to catch a passage that actually,
+sexually describes a character's body using that anatomy -- for example "her large breasts had
+hard nipples and wide areolas" clearly qualifies -- not a passing joke, insult, or non-human/
+violent use of the same vocabulary, which must stay allowed.
+
+If the sentence containing the anatomical word ALSO describes that anatomy with graphic
+physiological detail -- swollen, gleaming, wet, dripping, aching, throbbing, or similar,
+especially tied to arousal or the aftermath of a sexual act (e.g. "wet with his seed") -- report
+the whole sentence or clause as sexual_explicit_vulgar_scene instead of a narrow sexual_nudity
+hit on the single word. A real listener-caught miss this rule exists to fix: a passage naming
+intimate anatomy as "swollen and gleaming, wet with his seed" was reported only for the
+anatomical word itself, leaving the graphic detail immediately beside it unreported -- a
+listener who skips only the single word still hears content that trivially implies it. When in
+doubt about whether graphic detail accompanies an anatomical word, prefer the fuller clause
+under sexual_explicit_vulgar_scene.
 
 sexual_explicit_vulgar_scene -- covers sexual activity in all its stages: leading into it,
 during it, and explicit talk about it -- not only graphic mechanical description. Report a
